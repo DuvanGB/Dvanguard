@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { generateSiteSpecFromPrompt } from "@/lib/ai/generate-site-spec";
-import { buildFallbackSiteSpec } from "@/lib/site-spec";
+import { buildFallbackSiteSpecV2 } from "@/lib/site-spec-any";
+import type { TemplateId } from "@/lib/templates/types";
 
 type ExecuteGenerationInput = {
   supabase: SupabaseClient;
@@ -9,6 +10,7 @@ type ExecuteGenerationInput = {
   prompt: string;
   jobId: string;
   eventType: string;
+  templateId?: TemplateId;
   extraEventPayload?: Record<string, unknown>;
 };
 
@@ -30,12 +32,12 @@ export async function executeSiteGenerationJob(input: ExecuteGenerationInput): P
 
     try {
       generation = await Promise.race([
-        generateSiteSpecFromPrompt(input.prompt),
+        generateSiteSpecFromPrompt(input.prompt, { templateId: input.templateId }),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error("AI timeout")), 18_000))
       ]);
     } catch (generationError) {
       fallbackReason = generationError instanceof Error ? generationError.message : "Unknown AI error";
-      generation = { siteSpec: buildFallbackSiteSpec(input.prompt), source: "fallback" };
+      generation = { siteSpec: buildFallbackSiteSpecV2(input.prompt, { templateId: input.templateId }), source: "fallback" };
     }
 
     const { data: latestVersion } = await input.supabase

@@ -94,9 +94,25 @@ export async function POST(request: NextRequest) {
     // best effort
   }
 
+  try {
+    await recordPlatformEvent(admin, {
+      eventType: "template.recommended",
+      userId: user.id,
+      siteId,
+      payload: {
+        recommendedTemplateId: refined.recommendedTemplateId,
+        recommendedTemplateIds: refined.recommendedTemplateIds
+      }
+    });
+  } catch {
+    // best effort
+  }
+
   return NextResponse.json({
     briefDraft: refined.briefDraft,
     confidence: refined.confidence,
-    warnings: refined.warnings
+    warnings: refined.warnings,
+    recommendedTemplateId: refined.recommendedTemplateId,
+    recommendedTemplateIds: refined.recommendedTemplateIds
   });
 }

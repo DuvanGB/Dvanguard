@@ -1,40 +1,48 @@
 import { env } from "@/lib/env";
-import { buildFallbackSiteSpec, parseSiteSpec, type SiteSpec } from "@/lib/site-spec";
+import { buildFallbackSiteSpecV2, parseAnySiteSpec } from "@/lib/site-spec-any";
+import type { SiteSpecV2 } from "@/lib/site-spec-v2";
+import type { TemplateId } from "@/lib/templates/types";
 
 type GenerationResult = {
-  siteSpec: SiteSpec;
+  siteSpec: SiteSpecV2;
   source: "llm" | "fallback";
   rawText?: string;
 };
 
-export async function generateSiteSpecFromPrompt(prompt: string): Promise<GenerationResult> {
+export async function generateSiteSpecFromPrompt(prompt: string, options?: { templateId?: TemplateId }): Promise<GenerationResult> {
   if (env.aiProvider === "mock" || !env.aiBaseUrl) {
-    return { siteSpec: buildFallbackSiteSpec(prompt), source: "fallback" };
+    return { siteSpec: buildFallbackSiteSpecV2(prompt, { templateId: options?.templateId }), source: "fallback" };
   }
 
-  const llmText = await callLLM(prompt);
+  const llmText = await callLLM(prompt, options);
 
   const parsedJson = safeParseJson(llmText);
-  const validated = parseSiteSpec(parsedJson);
+  const validated = parseAnySiteSpec(parsedJson, { preferredTemplateId: options?.templateId ?? null });
   if (validated.success) {
     return { siteSpec: validated.data, source: "llm", rawText: llmText };
   }
 
   // Repair step with stricter instruction
   const repairedText = await callLLM(
-    `Devuelve EXCLUSIVAMENTE JSON valido acorde al schema SiteSpec v1.0. Entrada de negocio: ${prompt}`
+    `Devuelve EXCLUSIVAMENTE JSON valido acorde al schema SiteSpec v2.0. Entrada de negocio: ${prompt}`,
+    options
   );
   const repairedJson = safeParseJson(repairedText);
-  const repairedValidated = parseSiteSpec(repairedJson);
+  const repairedValidated = parseAnySiteSpec(repairedJson, { preferredTemplateId: options?.templateId ?? null });
 
   if (repairedValidated.success) {
     return { siteSpec: repairedValidated.data, source: "llm", rawText: repairedText };
   }
 
-  return { siteSpec: buildFallbackSiteSpec(prompt), source: "fallback", rawText: repairedText };
+  return {
+    siteSpec: buildFallbackSiteSpecV2(prompt, { templateId: options?.templateId }),
+    source: "fallback",
+    rawText: repairedText
+  };
 }
 
-async function callLLM(prompt: string) {
+async function callLLM(prompt: string, options?: { templateId?: TemplateId }) {
+  const templateHint = options?.templateId ? `Template preferida: ${options.templateId}.` : "";
   const response = await fetch(env.aiBaseUrl, {
     method: "POST",
     headers: {
@@ -48,11 +56,11 @@ async function callLLM(prompt: string) {
         {
           role: "system",
           content:
-            "Eres un generador de configuraciones de sitios web. Responde SOLO JSON válido para SiteSpec v1.0 sin markdown ni texto adicional."
+            "Eres un generador de configuraciones de sitios web. Responde SOLO JSON válido para SiteSpec v2.0 sin markdown ni texto adicional."
         },
         {
           role: "user",
-          content: `Negocio: ${prompt}`
+          content: `Negocio: ${prompt}. ${templateHint}`
         }
       ]
     })

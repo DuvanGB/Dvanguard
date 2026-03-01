@@ -4,15 +4,17 @@ import {
   getAdminMetrics,
   getRecentFailedJobs,
   getRecentlyPublishedSites,
-  getSitesWithMostRegenerations
+  getSitesWithMostRegenerations,
+  getTopTemplatesByPublication
 } from "@/lib/data/admin/metrics";
 
 export default async function AdminHomePage() {
-  const [metrics, failedJobs, recentSites, mostRegeneratedSites] = await Promise.all([
+  const [metrics, failedJobs, recentSites, mostRegeneratedSites, topTemplates] = await Promise.all([
     getAdminMetrics("7d"),
     getRecentFailedJobs(8),
     getRecentlyPublishedSites(8),
-    getSitesWithMostRegenerations(8, "7d")
+    getSitesWithMostRegenerations(8, "7d"),
+    getTopTemplatesByPublication(6, "7d")
   ]);
 
   return (
@@ -80,6 +82,18 @@ export default async function AdminHomePage() {
           <span>
             {metrics.regenerationsP50 ?? "-"} / {metrics.regenerationsP95 ?? "-"}
           </span>
+        </article>
+        <article className="card stack">
+          <strong>% plantilla recomendada elegida</strong>
+          <span>{metrics.templateRecommendedPickRate ?? "-"}%</span>
+        </article>
+        <article className="card stack">
+          <strong>% aceptación primer resultado v2</strong>
+          <span>{metrics.v2FirstResultAcceptanceRate ?? "-"}%</span>
+        </article>
+        <article className="card stack">
+          <strong>Regeneración promedio/template</strong>
+          <span>{metrics.regenerationAvgPerTemplate ?? "-"}</span>
         </article>
       </section>
 
@@ -182,6 +196,30 @@ export default async function AdminHomePage() {
           </table>
         ) : (
           <p>Sin regeneraciones en el rango actual.</p>
+        )}
+      </section>
+
+      <section className="card stack">
+        <h2>Top templates por publicación (7d)</h2>
+        {topTemplates.length ? (
+          <table>
+            <thead>
+              <tr>
+                <th>Template</th>
+                <th>Publicaciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topTemplates.map((item) => (
+                <tr key={item.templateId}>
+                  <td>{item.templateId}</td>
+                  <td>{item.publicationsCount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p>Sin publicaciones v2 en el rango actual.</p>
         )}
       </section>
     </div>

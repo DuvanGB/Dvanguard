@@ -3,6 +3,8 @@ import Link from "next/link";
 import { OnboardingWizard } from "@/components/forms/onboarding-wizard";
 import { requireUser } from "@/lib/auth";
 import { env } from "@/lib/env";
+import { ensureSiteCurrentVersionV2 } from "@/lib/site-spec-migration";
+import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export default async function OnboardingPage({
   searchParams
@@ -36,6 +38,13 @@ export default async function OnboardingPage({
       </main>
     );
   }
+
+  await ensureSiteCurrentVersionV2({
+    supabase,
+    admin: getSupabaseAdminClient(),
+    siteId: site.id,
+    fallbackSiteName: site.name
+  });
 
   return (
     <main className="container stack" style={{ paddingTop: "2rem" }}>

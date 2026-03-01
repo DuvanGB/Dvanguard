@@ -5,7 +5,7 @@ import { requireApiUser } from "@/lib/auth";
 import { getRequestClientKey } from "@/lib/http";
 import { logError, logInfo } from "@/lib/logger";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { buildFallbackSiteSpec } from "@/lib/site-spec";
+import { buildSiteSpecV2FromTemplate } from "@/lib/site-spec-v2";
 
 const bodySchema = z.object({
   name: z.string().min(2).max(80),
@@ -75,7 +75,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: siteError?.message ?? "Failed to create site" }, { status: 400 });
   }
 
-  const initialSpec = buildFallbackSiteSpec(name);
+  const initialSpec = buildSiteSpecV2FromTemplate({
+    siteType,
+    businessName: name
+  });
 
   const { data: version, error: versionError } = await supabase
     .from("site_versions")

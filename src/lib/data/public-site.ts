@@ -1,11 +1,11 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
-import { parseSiteSpec, type SiteSpec } from "@/lib/site-spec";
+import { parseAnySiteSpec, type AnySiteSpec } from "@/lib/site-spec-any";
 
 export type PublicSitePayload = {
   id: string;
   name: string;
   subdomain: string;
-  siteSpec: SiteSpec;
+  siteSpec: AnySiteSpec;
 };
 
 export async function getPublishedSiteBySubdomain(subdomain: string): Promise<PublicSitePayload | null> {
@@ -54,7 +54,7 @@ export async function getPublishedSiteBySubdomain(subdomain: string): Promise<Pu
     return null;
   }
 
-  const parsed = parseSiteSpec(version.site_spec_json);
+  const parsed = parseAnySiteSpec(version.site_spec_json);
   if (!parsed.success) {
     return null;
   }

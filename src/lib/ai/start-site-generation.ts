@@ -4,6 +4,7 @@ import { executeSiteGenerationJob } from "@/lib/ai/process-site-generation";
 import { getUsageSnapshot, incrementAiGenerationUsage } from "@/lib/billing/usage";
 import { logError, logInfo } from "@/lib/logger";
 import { recordPlatformEvent } from "@/lib/platform-events";
+import type { TemplateId } from "@/lib/templates/types";
 
 type StartGenerationInput = {
   supabase: SupabaseClient;
@@ -12,6 +13,7 @@ type StartGenerationInput = {
   siteId: string;
   prompt: string;
   inputMode: "text" | "voice";
+  templateId?: TemplateId;
   refineConfidence?: number;
   warningsCount?: number;
 };
@@ -95,6 +97,7 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
         prompt,
         meta: {
           input_mode: input.inputMode,
+          template_id: input.templateId ?? null,
           refine_confidence: input.refineConfidence ?? null,
           warnings_count: input.warningsCount ?? 0
         }
@@ -116,8 +119,10 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
     prompt,
     jobId: job.id,
     eventType: "site.generated",
+    templateId: input.templateId,
     extraEventPayload: {
       inputMode: input.inputMode,
+      templateId: input.templateId ?? null,
       refineConfidence: input.refineConfidence ?? null,
       warningsCount: input.warningsCount ?? 0
     }
@@ -138,6 +143,7 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
       payload: {
         jobId: job.id,
         inputMode: input.inputMode,
+        templateId: input.templateId ?? null,
         refineConfidence: input.refineConfidence ?? null,
         warningsCount: input.warningsCount ?? 0
       }
@@ -234,6 +240,33 @@ export async function maybeRecordFirstResultAccepted(input: {
       firstGenerationAt: firstGeneration.created_at
     }
   });
+
+  const { data: currentVersion } = await admin
+    .from("sites")
+    .select("current_version_id")
+    .eq("id", siteId)
+    .maybeSingle();
+
+  if (currentVersion?.current_version_id) {
+    const { data: version } = await admin
+      .from("site_versions")
+      .select("site_spec_json")
+      .eq("id", currentVersion.current_version_id)
+      .maybeSingle();
+
+    const schemaVersion = (version?.site_spec_json as { schema_version?: string } | null)?.schema_version;
+    if (schemaVersion === "2.0") {
+      await recordPlatformEvent(admin, {
+        eventType: "site.v2.first_result.accepted",
+        userId,
+        siteId,
+        payload: {
+          action,
+          firstGenerationAt: firstGeneration.created_at
+        }
+      });
+    }
+  }
 
   return true;
 }

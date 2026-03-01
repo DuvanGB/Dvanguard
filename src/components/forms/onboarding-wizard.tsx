@@ -5,11 +5,14 @@ import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import type { BusinessBriefDraft, OnboardingInputMode } from "@/lib/onboarding/types";
+import type { TemplateId } from "@/lib/templates/types";
 
 type RefineResponse = {
   briefDraft: BusinessBriefDraft;
   confidence: number;
   warnings: string[];
+  recommendedTemplateId: TemplateId;
+  recommendedTemplateIds: TemplateId[];
   error?: string;
   issues?: Array<{ message?: string }>;
 };
@@ -25,6 +28,20 @@ type Props = {
   siteId: string;
   maxInputChars: number;
   voiceLocale: string;
+};
+
+type TemplateCard = {
+  id: TemplateId;
+  name: string;
+  description: string;
+  family: string;
+  site_type: "informative" | "commerce_lite";
+  preview_label: string;
+  theme: {
+    primary: string;
+    secondary: string;
+    background: string;
+  };
 };
 
 type RecognitionCtor = new () => {
@@ -58,6 +75,10 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
   const [briefDraft, setBriefDraft] = useState<BusinessBriefDraft | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [recommendedTemplateId, setRecommendedTemplateId] = useState<TemplateId | null>(null);
+  const [recommendedTemplateIds, setRecommendedTemplateIds] = useState<TemplateId[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<TemplateId | null>(null);
+  const [templateOptions, setTemplateOptions] = useState<TemplateCard[]>([]);
   const [loadingRefine, setLoadingRefine] = useState(false);
   const [loadingGenerate, setLoadingGenerate] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -77,6 +98,13 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (step !== 2 || !briefDraft) return;
+
+    void loadTemplates(briefDraft.business_type, selectedTemplateId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, briefDraft?.business_type]);
 
   async function pollJob(currentJobId: string) {
     for (let attempt = 0; attempt < 25; attempt += 1) {
@@ -187,68 +215,118 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
     setLoadingRefine(true);
     setError(null);
 
-    const response = await fetch("/api/onboarding/refine", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        siteId,
-        rawInput,
-        inputMode,
-        voiceEvent: voiceEvent ?? undefined
-      })
-    });
+    try {
+      const response = await fetch("/api/onboarding/refine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          siteId,
+          rawInput,
+          inputMode,
+          voiceEvent: voiceEvent ?? undefined
+        })
+      });
 
-    const data = (await response.json()) as RefineResponse;
-    if (!response.ok || !data.briefDraft) {
-      const issueMessage = data.issues?.[0]?.message;
-      setError(data.error ?? issueMessage ?? "No se pudo refinar la propuesta");
+      const data = (await response.json()) as RefineResponse;
+      if (!response.ok || !data.briefDraft) {
+        const issueMessage = data.issues?.[0]?.message;
+        setError(data.error ?? issueMessage ?? "No se pudo refinar la propuesta");
+        setLoadingRefine(false);
+        return;
+      }
+
+      setBriefDraft(data.briefDraft);
+      setConfidence(data.confidence);
+      setWarnings(data.warnings ?? []);
+      setRecommendedTemplateId(data.recommendedTemplateId);
+      setRecommendedTemplateIds(data.recommendedTemplateIds ?? []);
+      setStep(2);
+
+      await loadTemplates(data.briefDraft.business_type, data.recommendedTemplateId);
       setLoadingRefine(false);
-      return;
+    } catch {
+      setError("No se pudo refinar la propuesta en este momento. Intenta de nuevo.");
+      setLoadingRefine(false);
     }
-
-    setBriefDraft(data.briefDraft);
-    setConfidence(data.confidence);
-    setWarnings(data.warnings ?? []);
-    setStep(2);
-    setLoadingRefine(false);
   }
 
   async function handleGenerate() {
-    if (!briefDraft) return;
+    if (!briefDraft || !selectedTemplateId) return;
 
     setLoadingGenerate(true);
     setError(null);
     setStep(3);
 
-    const response = await fetch("/api/onboarding/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        siteId,
-        inputMode,
-        briefDraft,
-        refineConfidence: confidence ?? undefined,
-        warnings
-      })
-    });
+    try {
+      const response = await fetch("/api/onboarding/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          siteId,
+          inputMode,
+          briefDraft,
+          templateId: selectedTemplateId,
+          recommendedTemplateId: recommendedTemplateId ?? undefined,
+          refineConfidence: confidence ?? undefined,
+          warnings
+        })
+      });
 
-    const data = (await response.json()) as GenerateResponse;
+      const data = (await response.json()) as GenerateResponse;
 
-    if (!response.ok || !data.jobId) {
-      setError(data.error ?? "No se pudo generar el sitio");
+      if (!response.ok || !data.jobId) {
+        setError(data.error ?? "No se pudo generar el sitio");
+        setLoadingGenerate(false);
+        setStep(2);
+        return;
+      }
+
+      setJobId(data.jobId);
+      if (data.status === "done") {
+        router.push(`/sites/${siteId}`);
+        return;
+      }
+
+      await pollJob(data.jobId);
+      setLoadingGenerate(false);
+    } catch {
+      setError("No se pudo iniciar la generación. Intenta nuevamente.");
       setLoadingGenerate(false);
       setStep(2);
-      return;
     }
+  }
 
-    setJobId(data.jobId);
-    if (data.status === "done") {
-      router.push(`/sites/${siteId}`);
-      return;
+  async function loadTemplates(
+    siteType: BusinessBriefDraft["business_type"],
+    preferredTemplateId?: TemplateId | null
+  ) {
+    try {
+      const templatesResponse = await fetch(`/api/templates?siteType=${siteType}`);
+      const templatesData = (await templatesResponse.json()) as { items?: TemplateCard[] };
+      const items = Array.isArray(templatesData.items) ? templatesData.items : [];
+      setTemplateOptions(items);
+
+      if (!items.length) {
+        setSelectedTemplateId(null);
+        return;
+      }
+
+      const preferred =
+        preferredTemplateId && items.some((template) => template.id === preferredTemplateId)
+          ? preferredTemplateId
+          : null;
+
+      const currentSelected =
+        selectedTemplateId && items.some((template) => template.id === selectedTemplateId)
+          ? selectedTemplateId
+          : null;
+
+      setSelectedTemplateId(preferred ?? currentSelected ?? items[0].id);
+    } catch {
+      setTemplateOptions([]);
+      setSelectedTemplateId(null);
+      setError("No se pudieron cargar plantillas. Reintenta.");
     }
-
-    await pollJob(data.jobId);
-    setLoadingGenerate(false);
   }
 
   return (
@@ -426,11 +504,44 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
             ))}
           </div>
 
+          <div className="stack">
+            <strong>Plantilla visual</strong>
+            <small>Selecciona una plantilla base para generar el preview.</small>
+            <div className="catalog-grid">
+              {templateOptions.map((template) => {
+                const selected = selectedTemplateId === template.id;
+                const recommended = recommendedTemplateIds.includes(template.id);
+                return (
+                  <button
+                    key={template.id}
+                    type="button"
+                    className="card"
+                    onClick={() => setSelectedTemplateId(template.id)}
+                    style={{
+                      textAlign: "left",
+                      border: selected ? "2px solid var(--brand)" : "1px solid var(--border)",
+                      cursor: "pointer",
+                      background: template.theme.background,
+                      color: template.theme.primary
+                    }}
+                  >
+                    <strong>{template.name}</strong>
+                    <p style={{ margin: "0.35rem 0" }}>{template.description}</p>
+                    <small>{template.preview_label}</small>
+                    {recommended ? (
+                      <small style={{ display: "block", marginTop: "0.35rem" }}>Recomendada por IA</small>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
             <button type="button" className="btn-secondary" onClick={() => setStep(1)}>
               Volver
             </button>
-            <button type="button" className="btn-primary" onClick={handleGenerate} disabled={loadingGenerate}>
+            <button type="button" className="btn-primary" onClick={handleGenerate} disabled={loadingGenerate || !selectedTemplateId}>
               {loadingGenerate ? "Generando..." : "Generar preview"}
             </button>
           </div>

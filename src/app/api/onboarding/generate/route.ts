@@ -6,13 +6,18 @@ import { requireApiUser } from "@/lib/auth";
 import { getRequestClientKey } from "@/lib/http";
 import { buildPromptFromBrief } from "@/lib/onboarding/prompt-builder";
 import { businessBriefDraftSchema, onboardingInputModeSchema } from "@/lib/onboarding/types";
+import { recordPlatformEvent } from "@/lib/platform-events";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { getTemplateById } from "@/lib/templates/catalog";
+import { templateIds } from "@/lib/templates/types";
 
 const bodySchema = z.object({
   siteId: z.string().uuid(),
   inputMode: onboardingInputModeSchema,
   briefDraft: businessBriefDraftSchema,
+  templateId: z.enum(templateIds),
+  recommendedTemplateId: z.enum(templateIds).optional(),
   refineConfidence: z.number().min(0).max(1).optional(),
   warnings: z.array(z.string()).max(20).optional()
 });
@@ -39,16 +44,38 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
   }
 
-  const { siteId, inputMode, briefDraft, refineConfidence, warnings } = parsed.data;
-  const prompt = buildPromptFromBrief(briefDraft);
+  const { siteId, inputMode, briefDraft, templateId, recommendedTemplateId, refineConfidence, warnings } = parsed.data;
+  const selectedTemplate = getTemplateById(templateId);
+  if (!selectedTemplate || selectedTemplate.site_type !== briefDraft.business_type) {
+    return NextResponse.json({ error: "Template no válida para el tipo de sitio seleccionado." }, { status: 400 });
+  }
+
+  const admin = getSupabaseAdminClient();
+  const prompt = buildPromptFromBrief(briefDraft, { templateId });
+
+  try {
+    await recordPlatformEvent(admin, {
+      eventType: "template.selected",
+      userId: user.id,
+      siteId,
+      payload: {
+        templateId,
+        recommendedTemplateId: recommendedTemplateId ?? null,
+        selectedRecommended: recommendedTemplateId ? recommendedTemplateId === templateId : null
+      }
+    });
+  } catch {
+    // best effort
+  }
 
   const result = await startSiteGeneration({
     supabase,
-    admin: getSupabaseAdminClient(),
+    admin,
     userId: user.id,
     siteId,
     prompt,
     inputMode,
+    templateId,
     refineConfidence,
     warningsCount: warnings?.length ?? 0
   });

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { templateIds } from "@/lib/templates/types";
+
 export const onboardingInputModeSchema = z.enum(["text", "voice"]);
 export type OnboardingInputMode = z.infer<typeof onboardingInputModeSchema>;
 
@@ -24,7 +26,9 @@ export const refineResponseSchema = z.object({
   briefDraft: businessBriefDraftSchema,
   confidence: z.number().min(0).max(1),
   warnings: z.array(z.string()),
-  provider: z.enum(["llm", "heuristic"])
+  provider: z.enum(["llm", "heuristic"]),
+  recommendedTemplateIds: z.array(z.enum(templateIds)).min(1),
+  recommendedTemplateId: z.enum(templateIds)
 });
 
 export type RefineResponse = z.infer<typeof refineResponseSchema>;

@@ -4,6 +4,7 @@ import {
   type OnboardingInputMode,
   type RefineResponse
 } from "@/lib/onboarding/types";
+import { pickTemplateOrFallback, recommendTemplateIds } from "@/lib/templates/selector";
 
 type RefineBriefInput = {
   rawInput: string;
@@ -19,11 +20,25 @@ export async function refineBusinessBrief(input: RefineBriefInput): Promise<Refi
   }
 
   if (env.onboardingRefineProvider === "heuristic") {
+    const briefDraft = buildHeuristicBrief(normalizedInput);
+    const recommendedTemplateIds = recommendTemplateIds({
+      businessType: briefDraft.business_type,
+      stylePreset: briefDraft.style_preset,
+      tone: briefDraft.tone
+    });
+    const recommendedTemplateId =
+      recommendedTemplateIds[0] ??
+      pickTemplateOrFallback({
+        siteType: briefDraft.business_type,
+        brief: briefDraft
+      });
     return {
-      briefDraft: buildHeuristicBrief(normalizedInput),
+      briefDraft,
       confidence: 0.55,
       warnings,
-      provider: "heuristic"
+      provider: "heuristic",
+      recommendedTemplateIds,
+      recommendedTemplateId
     };
   }
 
@@ -33,11 +48,24 @@ export async function refineBusinessBrief(input: RefineBriefInput): Promise<Refi
     const validated = businessBriefDraftSchema.safeParse(parsed);
 
     if (validated.success) {
+      const recommendedTemplateIds = recommendTemplateIds({
+        businessType: validated.data.business_type,
+        stylePreset: validated.data.style_preset,
+        tone: validated.data.tone
+      });
+      const recommendedTemplateId =
+        recommendedTemplateIds[0] ??
+        pickTemplateOrFallback({
+          siteType: validated.data.business_type,
+          brief: validated.data
+        });
       return {
         briefDraft: validated.data,
         confidence: 0.8,
         warnings,
-        provider: "llm"
+        provider: "llm",
+        recommendedTemplateIds,
+        recommendedTemplateId
       };
     }
 
@@ -46,11 +74,26 @@ export async function refineBusinessBrief(input: RefineBriefInput): Promise<Refi
     warnings.push("Se aplicó refinamiento heurístico por timeout/error de IA.");
   }
 
+  const briefDraft = buildHeuristicBrief(normalizedInput);
+  const recommendedTemplateIds = recommendTemplateIds({
+    businessType: briefDraft.business_type,
+    stylePreset: briefDraft.style_preset,
+    tone: briefDraft.tone
+  });
+  const recommendedTemplateId =
+    recommendedTemplateIds[0] ??
+    pickTemplateOrFallback({
+      siteType: briefDraft.business_type,
+      brief: briefDraft
+    });
+
   return {
-    briefDraft: buildHeuristicBrief(normalizedInput),
+    briefDraft,
     confidence: 0.55,
     warnings,
-    provider: "heuristic"
+    provider: "heuristic",
+    recommendedTemplateIds,
+    recommendedTemplateId
   };
 }
 

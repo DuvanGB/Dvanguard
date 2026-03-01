@@ -21,6 +21,9 @@ export type AdminMetrics = {
   onboardingRefineFallbackRate: number | null;
   regenerationsP50: number | null;
   regenerationsP95: number | null;
+  templateRecommendedPickRate: number | null;
+  v2FirstResultAcceptanceRate: number | null;
+  regenerationAvgPerTemplate: number | null;
 };
 
 export async function getAdminMetrics(rangeParam?: string | null): Promise<AdminMetrics> {
@@ -44,7 +47,10 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
           "site.generation.first_attempt_done",
           "site.generation.regenerated",
           "site.first_result.accepted",
-          "onboarding.refine.completed"
+          "site.v2.first_result.accepted",
+          "onboarding.refine.completed",
+          "template.selected",
+          "template.recommended"
         ]),
       admin.from("pro_requests").select("status, created_at").gte("created_at", fromIso)
     ]);
@@ -116,8 +122,10 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
 
   const firstAttemptEvents = (platformEvents ?? []).filter((event) => event.event_type === "site.generation.first_attempt_done");
   const acceptedEvents = (platformEvents ?? []).filter((event) => event.event_type === "site.first_result.accepted");
+  const acceptedV2Events = (platformEvents ?? []).filter((event) => event.event_type === "site.v2.first_result.accepted");
   const refineEvents = (platformEvents ?? []).filter((event) => event.event_type === "onboarding.refine.completed");
   const regenerationEvents = (platformEvents ?? []).filter((event) => event.event_type === "site.generation.regenerated");
+  const templateSelectedEvents = (platformEvents ?? []).filter((event) => event.event_type === "template.selected");
 
   const firstAttemptUsers = new Set(
     firstAttemptEvents.map((event) => event.user_id).filter((value): value is string => typeof value === "string" && value.length > 0)
@@ -128,6 +136,22 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
 
   const firstResultAcceptanceRate = firstAttemptUsers.size
     ? Number(((acceptedUsers.size / firstAttemptUsers.size) * 100).toFixed(2))
+    : null;
+
+  const v2AttemptUsers = new Set(
+    firstAttemptEvents
+      .filter((event) => {
+        const payload = (event.payload_json ?? {}) as Record<string, unknown>;
+        return typeof payload.templateId === "string" && payload.templateId.length > 0;
+      })
+      .map((event) => event.user_id)
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+  );
+  const v2AcceptedUsers = new Set(
+    acceptedV2Events.map((event) => event.user_id).filter((value): value is string => typeof value === "string" && value.length > 0)
+  );
+  const v2FirstResultAcceptanceRate = v2AttemptUsers.size
+    ? Number(((v2AcceptedUsers.size / v2AttemptUsers.size) * 100).toFixed(2))
     : null;
 
   const refineVoiceCount = refineEvents.filter((event) => {
@@ -155,6 +179,30 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
 
   const regenerationSeries = Array.from(regenerationBySite.values());
 
+  const selectedRecommendedCount = templateSelectedEvents.filter((event) => {
+    const payload = (event.payload_json ?? {}) as Record<string, unknown>;
+    return payload.selectedRecommended === true;
+  }).length;
+  const templateRecommendedPickRate = templateSelectedEvents.length
+    ? Number(((selectedRecommendedCount / templateSelectedEvents.length) * 100).toFixed(2))
+    : null;
+
+  const regenerationCountByTemplate = new Map<string, number>();
+  for (const event of regenerationEvents) {
+    const payload = (event.payload_json ?? {}) as Record<string, unknown>;
+    const templateId = typeof payload.templateId === "string" ? payload.templateId : null;
+    if (!templateId) continue;
+    regenerationCountByTemplate.set(templateId, (regenerationCountByTemplate.get(templateId) ?? 0) + 1);
+  }
+  const regenerationAvgPerTemplate = regenerationCountByTemplate.size
+    ? Number(
+        (
+          Array.from(regenerationCountByTemplate.values()).reduce((acc, current) => acc + current, 0) /
+          regenerationCountByTemplate.size
+        ).toFixed(2)
+      )
+    : null;
+
   return {
     range: range.label,
     sitesCreated,
@@ -171,10 +219,13 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
     proRequestsApproved,
     proRequestsRejected,
     firstResultAcceptanceRate,
+    v2FirstResultAcceptanceRate,
     voiceUsageRate,
     onboardingRefineFallbackRate,
     regenerationsP50: percentile(regenerationSeries, 50),
-    regenerationsP95: percentile(regenerationSeries, 95)
+    regenerationsP95: percentile(regenerationSeries, 95),
+    templateRecommendedPickRate,
+    regenerationAvgPerTemplate
   };
 }
 
@@ -285,4 +336,49 @@ export async function getSitesWithMostRegenerations(limit = 10, rangeParam?: str
       };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
+}
+
+export async function getTopTemplatesByPublication(limit = 5, rangeParam?: string | null) {
+  const admin = getSupabaseAdminClient();
+  const range = parseRange(rangeParam);
+  const fromIso = range.from.toISOString();
+
+  const { data: publications } = await admin
+    .from("site_publications")
+    .select("version_id, published_at")
+    .gte("published_at", fromIso);
+
+  if (!publications?.length) {
+    return [];
+  }
+
+  const versionIds = Array.from(new Set(publications.map((row) => row.version_id)));
+  const { data: versions } = await admin.from("site_versions").select("id, site_spec_json").in("id", versionIds);
+
+  const templateByVersionId = new Map<string, string>();
+  for (const version of versions ?? []) {
+    const templateId = ((version.site_spec_json ?? {}) as Record<string, unknown>)?.template;
+    const parsedTemplateId =
+      templateId && typeof templateId === "object" && typeof (templateId as Record<string, unknown>).id === "string"
+        ? ((templateId as Record<string, unknown>).id as string)
+        : null;
+
+    if (!parsedTemplateId) continue;
+    templateByVersionId.set(version.id, parsedTemplateId);
+  }
+
+  const templateCount = new Map<string, number>();
+  for (const publication of publications) {
+    const templateId = templateByVersionId.get(publication.version_id);
+    if (!templateId) continue;
+    templateCount.set(templateId, (templateCount.get(templateId) ?? 0) + 1);
+  }
+
+  return Array.from(templateCount.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([templateId, publicationsCount]) => ({
+      templateId,
+      publicationsCount
+    }));
 }

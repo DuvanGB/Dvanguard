@@ -36,6 +36,12 @@ MVP SaaS multi-tenant para generar sitios web desde una descripción de negocio,
   - captura por texto/voz (Web Speech API) con fallback a texto
   - refinamiento de brief antes de generar
   - métricas de calidad percibida del primer resultado
+- Fase 5 motor visual v2:
+  - `SiteSpec v2.0` tipado + parser unificado con compat v1
+  - catálogo de 6 plantillas + recomendación IA
+  - selección de plantilla en onboarding antes de generar
+  - editor visual v2 (contenido, variantes, tema, reorder/toggle)
+  - migración lazy v1 -> v2 al abrir onboarding/editor
 
 ## Variables de entorno
 
@@ -107,6 +113,7 @@ npm run db:push
 - `supabase/migrations/0003_admin_retry_and_metrics.sql`
 - `supabase/migrations/0004_plans_usage_and_requests.sql`
 - `supabase/migrations/0005_onboarding_quality_metrics.sql`
+- `supabase/migrations/0006_site_versions_source_v2.sql`
 
 Incluye tablas:
 
@@ -160,6 +167,8 @@ Configura estos secrets en GitHub:
 - `POST /api/admin/users/:id/plan`
 - `POST /api/onboarding/refine`
 - `POST /api/onboarding/generate`
+- `GET /api/templates?siteType=informative|commerce_lite`
+- `POST /api/sites/:id/migrate-v2`
 
 ## Desarrollo local
 
@@ -223,6 +232,41 @@ Flujo recomendado:
 - `Refine fallback rate (7d)`
 - `Regeneraciones p50/p95`
 
+## Motor visual v2 (fase 5)
+
+### Flujo visual nuevo
+
+1. Usuario refina brief en onboarding.
+2. Sistema sugiere plantillas y el usuario selecciona una.
+3. Generación crea `SiteSpec v2.0` (con fallback seguro).
+4. Editor permite:
+   - textos por sección
+   - CRUD de items en catálogo/testimonios
+   - variantes por sección
+   - URL de imagen por sección/item
+   - paleta + tipografías + radius
+
+### Compatibilidad y migración
+
+- Sitios v1 se migran de forma lazy a v2 al entrar a `/onboarding` o `/sites/:id`.
+- Runtime público usa parser unificado para tolerar v1/v2 durante transición.
+- Guardado desde editor persiste contrato normalizado v2.
+
+### Eventos y métricas v2
+
+- Eventos:
+  - `template.recommended`
+  - `template.selected`
+  - `site.v2.migrated`
+  - `editor.section.variant_changed`
+  - `editor.content.saved`
+  - `site.v2.first_result.accepted`
+- KPIs admin añadidos:
+  - `% plantilla recomendada elegida`
+  - `% aceptación primer resultado v2`
+  - `regeneración promedio por template`
+  - `top templates por publicación`
+
 ## Operación admin (fase 2)
 
 1. Define admins en `.env.local`:
@@ -250,4 +294,4 @@ ADMIN_ALLOWLIST_EMAILS=tu-correo@dominio.com,otro-admin@dominio.com
 
 - `AI_PROVIDER=mock` genera `SiteSpec` fallback sin depender de LLM externo.
 - Para subdominios en local puedes usar hosts tipo `mi-sitio.localhost:3000`.
-- El editor DnD libre no está implementado en esta etapa (solo editor rápido MVP).
+- El editor DnD libre no está implementado en esta etapa (editor visual v2 sin drag & drop libre).
