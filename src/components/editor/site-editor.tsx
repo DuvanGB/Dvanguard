@@ -180,15 +180,13 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     }));
   }
 
-  async function saveDraft() {
-    setSaving(true);
-    setMessage(null);
-
+  async function persistCurrentSpec() {
     const invalidImage = hasInvalidImageUrl(siteSpec);
     if (invalidImage) {
-      setMessage("Hay una URL de imagen inválida. Usa formato http:// o https://");
-      setSaving(false);
-      return;
+      return {
+        ok: false as const,
+        error: "Hay una URL de imagen inválida. Usa formato http:// o https://"
+      };
     }
 
     const response = await fetch(`/api/sites/${siteId}/versions`, {
@@ -200,12 +198,37 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     const data = (await response.json()) as { error?: string; versionId?: string };
 
     if (!response.ok) {
-      setMessage(data.error ?? "No se pudo guardar borrador");
+      return {
+        ok: false as const,
+        error: data.error ?? "No se pudo guardar borrador"
+      };
+    }
+
+    if (!data.versionId) {
+      return {
+        ok: false as const,
+        error: "No se recibió version_id al guardar."
+      };
+    }
+
+    return {
+      ok: true as const,
+      versionId: data.versionId
+    };
+  }
+
+  async function saveDraft() {
+    setSaving(true);
+    setMessage(null);
+
+    const persisted = await persistCurrentSpec();
+    if (!persisted.ok) {
+      setMessage(persisted.error);
       setSaving(false);
       return;
     }
 
-    setMessage(`Borrador guardado (version_id: ${data.versionId})`);
+    setMessage(`Borrador guardado (version_id: ${persisted.versionId})`);
     setSaving(false);
   }
 
@@ -213,9 +236,17 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     setPublishing(true);
     setMessage(null);
 
+    const persisted = await persistCurrentSpec();
+    if (!persisted.ok) {
+      setMessage(persisted.error);
+      setPublishing(false);
+      return;
+    }
+
     const response = await fetch(`/api/sites/${siteId}/publish`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" }
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ versionId: persisted.versionId })
     });
 
     const data = (await response.json()) as { error?: string };
