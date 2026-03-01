@@ -70,8 +70,8 @@ export async function refineBusinessBrief(input: RefineBriefInput): Promise<Refi
     }
 
     warnings.push("Se aplicó refinamiento heurístico por respuesta IA inválida.");
-  } catch {
-    warnings.push("Se aplicó refinamiento heurístico por timeout/error de IA.");
+  } catch (error) {
+    warnings.push(`Se aplicó refinamiento heurístico por timeout/error de IA (${humanizeLlmError(error)}).`);
   }
 
   const briefDraft = buildHeuristicBrief(normalizedInput);
@@ -126,7 +126,8 @@ async function callRefineLLM(rawInput: string, inputMode: OnboardingInputMode) {
   });
 
   if (!response.ok) {
-    throw new Error(`LLM request failed: ${response.status}`);
+    const responseText = await response.text().catch(() => "");
+    throw new Error(`LLM request failed: ${response.status}${responseText ? ` | ${responseText.slice(0, 220)}` : ""}`);
   }
 
   const data = (await response.json()) as {
@@ -140,6 +141,20 @@ async function callRefineLLM(rawInput: string, inputMode: OnboardingInputMode) {
   }
 
   return content;
+}
+
+function humanizeLlmError(error: unknown) {
+  const rawMessage = error instanceof Error ? error.message : String(error ?? "");
+
+  if (rawMessage.includes("401")) return "401 no autorizado (API key inválida o sin permisos)";
+  if (rawMessage.includes("429")) return "429 límite/cuota excedida";
+  if (rawMessage.includes("404")) return "404 endpoint/modelo no disponible";
+  if (rawMessage.includes("400")) return "400 solicitud inválida (modelo o payload)";
+  if (rawMessage.includes("timeout")) return "timeout";
+  if (rawMessage.includes("mock")) return "provider en modo mock";
+  if (rawMessage.includes("LLM refine unavailable")) return "LLM no disponible por configuración";
+
+  return "error de conexión o proveedor";
 }
 
 function safeParseJson(input: string): unknown {

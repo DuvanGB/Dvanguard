@@ -112,6 +112,7 @@ export async function POST(request: NextRequest) {
     briefDraft: refined.briefDraft,
     confidence: refined.confidence,
     warnings: refined.warnings,
+    provider: refined.provider,
     recommendedTemplateId: refined.recommendedTemplateId,
     recommendedTemplateIds: refined.recommendedTemplateIds
   });
