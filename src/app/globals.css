@@ -80,3 +80,16 @@ select {
   border: 1px solid var(--border);
   font: inherit;
 }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.55rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}

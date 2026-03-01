@@ -7,6 +7,7 @@ const RESERVED_PATHS = [
   "/_next",
   "/signin",
   "/auth",
+  "/admin",
   "/dashboard",
   "/onboarding",
   "/sites",

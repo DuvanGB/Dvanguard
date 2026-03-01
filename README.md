@@ -22,6 +22,10 @@ MVP SaaS multi-tenant para generar sitios web desde una descripción de negocio,
 - Versionado (`site_versions`) y publicación (`site_publications`)
 - Resolución de sitio por subdominio en `middleware.ts`
 - API pública para resolver tenant por host
+- Módulo admin interno (`/admin`) con:
+  - métricas operativas (7d)
+  - listados de usuarios/sitios/jobs IA
+  - reintento de jobs IA fallidos
 
 ## Variables de entorno
 
@@ -34,6 +38,7 @@ Copia `.env.example` a `.env.local` y define:
 - `NEXT_PUBLIC_APP_URL` (ejemplo: `http://localhost:3000`)
 - `AI_PROVIDER` (`mock` para fallback local)
 - `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL` (si usarás proveedor real)
+- `ADMIN_ALLOWLIST_EMAILS` (CSV de emails autorizados para `/admin`)
 
 ## Workflow de DB con migraciones automáticas
 
@@ -80,6 +85,8 @@ npm run db:push
 ### Migraciones actuales
 
 - `supabase/migrations/0001_init.sql`
+- `supabase/migrations/0002_profiles_insert_and_backfill.sql`
+- `supabase/migrations/0003_admin_retry_and_metrics.sql`
 
 Incluye tablas:
 
@@ -121,6 +128,11 @@ Configura estos secrets en GitHub:
 - `POST /api/sites/:id/versions`
 - `POST /api/sites/:id/publish`
 - `GET /api/public/site-by-host`
+- `GET /api/admin/metrics?range=7d`
+- `GET /api/admin/users?search=&page=&pageSize=`
+- `GET /api/admin/sites?status=&type=&owner=&page=&pageSize=`
+- `GET /api/admin/ai-jobs?status=&siteId=&userId=&from=&to=&page=&pageSize=`
+- `POST /api/admin/ai-jobs/:id/retry`
 
 ## Desarrollo local
 
@@ -136,9 +148,25 @@ Flujo recomendado:
 3. Ve a `/onboarding?siteId=<id>` y genera una versión con IA.
 4. Edita y publica en `/sites/<id>`.
 
+## Operación admin (fase 2)
+
+1. Define admins en `.env.local`:
+
+```env
+ADMIN_ALLOWLIST_EMAILS=tu-correo@dominio.com,otro-admin@dominio.com
+```
+
+2. Reinicia `npm run dev`.
+3. Accede a `/admin` con un correo de la allowlist.
+4. Usa:
+   - `/admin/users` para soporte de cuentas
+   - `/admin/sites` para estado de sitios
+   - `/admin/ai-jobs` para diagnóstico y retry de fallos IA
+
 ## Seguridad
 
 - No uses `SUPABASE_SERVICE_ROLE_KEY` en frontend ni en GitHub Actions de migraciones.
+- `SUPABASE_SERVICE_ROLE_KEY` debe ser `service_role`/`sb_secret`, no `sb_publishable`.
 - Si cualquier clave fue expuesta (chat/captura), rótala en Supabase Dashboard.
 - Mantén `.env.local` fuera de git (ya está ignorado).
 
