@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "sh -c 'if [ \"$SKIP_DB_PUSH_ON_DEV\" = \"1\" ]; then echo \"[db] skipping db push on dev\"; else npm run db:push; fi'",
     "dev": "next dev",
+    "dev:no-db": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

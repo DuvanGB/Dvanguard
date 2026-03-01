@@ -11,6 +11,8 @@ export const env = {
   supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
   adminAllowlistEmails: process.env.ADMIN_ALLOWLIST_EMAILS ?? "",
+  defaultFreePlan: process.env.DEFAULT_FREE_PLAN ?? "free",
+  defaultProPlan: process.env.DEFAULT_PRO_PLAN ?? "pro",
   rootDomain: process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "localhost",
   appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
   aiProvider: process.env.AI_PROVIDER ?? "mock",

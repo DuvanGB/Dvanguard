@@ -38,6 +38,25 @@ export default async function AdminHomePage() {
             {metrics.latencyP50Ms ?? "-"} ms / {metrics.latencyP95Ms ?? "-"} ms
           </span>
         </article>
+        <article className="card stack">
+          <strong>% publicación en 24h</strong>
+          <span>{metrics.publishIn24hRate ?? "-"}%</span>
+        </article>
+        <article className="card stack">
+          <strong>Límite IA alcanzado (7d)</strong>
+          <span>{metrics.limitHitAiCount}</span>
+        </article>
+        <article className="card stack">
+          <strong>Límite publish alcanzado (7d)</strong>
+          <span>{metrics.limitHitPublishCount}</span>
+        </article>
+        <article className="card stack">
+          <strong>Solicitudes Pro</strong>
+          <span>
+            pending {metrics.proRequestsPending} | approved {metrics.proRequestsApproved} | rejected{" "}
+            {metrics.proRequestsRejected}
+          </span>
+        </article>
       </section>
 
       <section className="card stack">
@@ -103,6 +122,14 @@ export default async function AdminHomePage() {
         )}
         <Link href="/admin/sites" className="btn-secondary">
           Ver todos los sitios
+        </Link>
+      </section>
+
+      <section className="card stack">
+        <h2>Solicitudes Pro</h2>
+        <p>Gestiona activaciones manuales de plan Pro para validar monetización antes de integrar Stripe.</p>
+        <Link href="/admin/pro-requests" className="btn-secondary">
+          Gestionar solicitudes Pro
         </Link>
       </section>
     </div>

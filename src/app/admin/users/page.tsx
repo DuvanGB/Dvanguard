@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { ChangePlanSelect } from "@/components/admin/change-plan-select";
 import { listAdminUsers } from "@/lib/data/admin/users";
 
 function buildQuery(searchParams: Record<string, string | undefined>, page: number) {
@@ -45,20 +46,26 @@ export default async function AdminUsersPage({
           <thead>
             <tr>
               <th>Email</th>
+              <th>Plan</th>
               <th>Alta</th>
               <th>Total sitios</th>
               <th>Publicados</th>
               <th>Última actividad</th>
+              <th>Acción plan</th>
             </tr>
           </thead>
           <tbody>
             {result.items.map((item) => (
               <tr key={item.id}>
                 <td>{item.email}</td>
+                <td>{item.plan_code}</td>
                 <td>{new Date(item.created_at).toLocaleString()}</td>
                 <td>{item.total_sites}</td>
                 <td>{item.published_sites}</td>
                 <td>{item.last_activity ? new Date(item.last_activity).toLocaleString() : "-"}</td>
+                <td>
+                  <ChangePlanSelect userId={item.id} currentPlan={item.plan_code} />
+                </td>
               </tr>
             ))}
           </tbody>

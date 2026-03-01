@@ -26,6 +26,11 @@ MVP SaaS multi-tenant para generar sitios web desde una descripción de negocio,
   - métricas operativas (7d)
   - listados de usuarios/sitios/jobs IA
   - reintento de jobs IA fallidos
+- Fase 3 de conversión SaaS:
+  - landing comercial + `/pricing`
+  - planes `free/pro` con límites
+  - solicitud manual de upgrade Pro
+  - métricas de activación (`% publicación <24h`)
 
 ## Variables de entorno
 
@@ -39,6 +44,8 @@ Copia `.env.example` a `.env.local` y define:
 - `AI_PROVIDER` (`mock` para fallback local)
 - `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL` (si usarás proveedor real)
 - `ADMIN_ALLOWLIST_EMAILS` (CSV de emails autorizados para `/admin`)
+- `DEFAULT_FREE_PLAN` (default: `free`)
+- `DEFAULT_PRO_PLAN` (default: `pro`)
 
 ## Workflow de DB con migraciones automáticas
 
@@ -73,6 +80,9 @@ npm run db:link
 - `npm run db:list`: lista migraciones local/remoto.
 - `npm run db:dry`: valida migraciones pendientes sin aplicar.
 - `npm run db:push`: aplica migraciones pendientes al proyecto enlazado.
+- `npm run dev`: ejecuta `db:push` automáticamente antes de levantar Next.js.
+- `SKIP_DB_PUSH_ON_DEV=1 npm run dev`: levanta Next.js sin aplicar migraciones (escape hatch).
+- `npm run dev:no-db`: alternativa directa para levantar Next.js sin migraciones.
 
 Ejemplo recomendado:
 
@@ -87,6 +97,7 @@ npm run db:push
 - `supabase/migrations/0001_init.sql`
 - `supabase/migrations/0002_profiles_insert_and_backfill.sql`
 - `supabase/migrations/0003_admin_retry_and_metrics.sql`
+- `supabase/migrations/0004_plans_usage_and_requests.sql`
 
 Incluye tablas:
 
@@ -133,6 +144,11 @@ Configura estos secrets en GitHub:
 - `GET /api/admin/sites?status=&type=&owner=&page=&pageSize=`
 - `GET /api/admin/ai-jobs?status=&siteId=&userId=&from=&to=&page=&pageSize=`
 - `POST /api/admin/ai-jobs/:id/retry`
+- `GET /api/account/usage`
+- `POST /api/account/pro-request`
+- `GET /api/admin/pro-requests?status=&page=&pageSize=`
+- `POST /api/admin/pro-requests/:id/review`
+- `POST /api/admin/users/:id/plan`
 
 ## Desarrollo local
 
@@ -141,12 +157,34 @@ npm install
 npm run dev
 ```
 
+Nota: desde esta fase, `npm run dev` intenta sincronizar migraciones automáticamente con Supabase remoto antes de iniciar la app.
+
 Flujo recomendado:
 
 1. Inicia sesión en `/signin`.
 2. Crea un sitio en `/dashboard`.
 3. Ve a `/onboarding?siteId=<id>` y genera una versión con IA.
 4. Edita y publica en `/sites/<id>`.
+
+## Conversión SaaS (fase 3)
+
+### Planes actuales
+
+- `free`: 1 sitio publicado activo + 10 generaciones IA por mes.
+- `pro`: cupos ampliados (asignación manual por admin).
+
+### Flujo de upgrade Pro
+
+1. Usuario llega al límite en dashboard.
+2. Solicita Pro desde botón `Solicitar Pro`.
+3. Admin revisa en `/admin/pro-requests`.
+4. Admin aprueba/rechaza o cambia plan desde `/admin/users`.
+
+### Métricas de activación (admin)
+
+- `% publicación en 24h`.
+- límites de plan alcanzados (IA/publicación).
+- estado de solicitudes Pro (pending/approved/rejected).
 
 ## Operación admin (fase 2)
 
@@ -169,6 +207,7 @@ ADMIN_ALLOWLIST_EMAILS=tu-correo@dominio.com,otro-admin@dominio.com
 - `SUPABASE_SERVICE_ROLE_KEY` debe ser `service_role`/`sb_secret`, no `sb_publishable`.
 - Si cualquier clave fue expuesta (chat/captura), rótala en Supabase Dashboard.
 - Mantén `.env.local` fuera de git (ya está ignorado).
+- Si alguna vez quedó trackeado, ejecútalo una vez: `git rm --cached .env.local`.
 
 ## Notas importantes
 

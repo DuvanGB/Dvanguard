@@ -10,6 +10,12 @@ export type AdminMetrics = {
   aiJobsFallback: number;
   latencyP50Ms: number | null;
   latencyP95Ms: number | null;
+  publishIn24hRate: number | null;
+  limitHitAiCount: number;
+  limitHitPublishCount: number;
+  proRequestsPending: number;
+  proRequestsApproved: number;
+  proRequestsRejected: number;
 };
 
 export async function getAdminMetrics(rangeParam?: string | null): Promise<AdminMetrics> {
@@ -17,10 +23,18 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
   const range = parseRange(rangeParam);
   const fromIso = range.from.toISOString();
 
-  const [{ data: sites }, { data: publications }, { data: jobs }] = await Promise.all([
+  const [{ data: sites }, { data: publications }, { data: jobs }, { data: signups }, { data: platformEvents }, { data: proRequests }] =
+    await Promise.all([
     admin.from("sites").select("id", { count: "exact" }).gte("created_at", fromIso),
     admin.from("site_publications").select("site_id, published_at").gte("published_at", fromIso),
-    admin.from("ai_jobs").select("status, output_json, created_at").gte("created_at", fromIso)
+    admin.from("ai_jobs").select("status, output_json, created_at").gte("created_at", fromIso),
+    admin.from("profiles").select("id, created_at").gte("created_at", fromIso),
+    admin
+      .from("platform_events")
+      .select("event_type, created_at")
+      .gte("created_at", fromIso)
+      .in("event_type", ["plan.limit_hit.ai", "plan.limit_hit.publish"]),
+    admin.from("pro_requests").select("status, created_at").gte("created_at", fromIso)
   ]);
 
   const sitesCreated = sites?.length ?? 0;
@@ -48,6 +62,46 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
     })
     .filter((value): value is number => value !== null);
 
+  let publishIn24hRate: number | null = null;
+
+  if (signups?.length) {
+    const userIds = signups.map((signup) => signup.id);
+    const { data: ownedSites } = await admin.from("sites").select("id, owner_id").in("owner_id", userIds);
+    const ownerBySite = new Map((ownedSites ?? []).map((site) => [site.id, site.owner_id]));
+    const siteIds = (ownedSites ?? []).map((site) => site.id);
+
+    let firstPublishByUser = new Map<string, string>();
+    if (siteIds.length) {
+      const { data: allPublications } = await admin.from("site_publications").select("site_id, published_at").in("site_id", siteIds);
+
+      for (const publication of allPublications ?? []) {
+        const ownerId = ownerBySite.get(publication.site_id);
+        if (!ownerId) continue;
+
+        const current = firstPublishByUser.get(ownerId);
+        if (!current || new Date(publication.published_at).getTime() < new Date(current).getTime()) {
+          firstPublishByUser.set(ownerId, publication.published_at);
+        }
+      }
+    }
+
+    const publishedWithin24h = signups.filter((signup) => {
+      const firstPublishedAt = firstPublishByUser.get(signup.id);
+      if (!firstPublishedAt) return false;
+
+      const diffMs = new Date(firstPublishedAt).getTime() - new Date(signup.created_at).getTime();
+      return diffMs >= 0 && diffMs <= 24 * 60 * 60 * 1000;
+    }).length;
+
+    publishIn24hRate = Number(((publishedWithin24h / signups.length) * 100).toFixed(2));
+  }
+
+  const limitHitAiCount = (platformEvents ?? []).filter((event) => event.event_type === "plan.limit_hit.ai").length;
+  const limitHitPublishCount = (platformEvents ?? []).filter((event) => event.event_type === "plan.limit_hit.publish").length;
+  const proRequestsPending = (proRequests ?? []).filter((row) => row.status === "pending").length;
+  const proRequestsApproved = (proRequests ?? []).filter((row) => row.status === "approved").length;
+  const proRequestsRejected = (proRequests ?? []).filter((row) => row.status === "rejected").length;
+
   return {
     range: range.label,
     sitesCreated,
@@ -56,7 +110,13 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
     aiJobsFailed: jobsFailed,
     aiJobsFallback: jobsFallback,
     latencyP50Ms: percentile(latencies, 50),
-    latencyP95Ms: percentile(latencies, 95)
+    latencyP95Ms: percentile(latencies, 95),
+    publishIn24hRate,
+    limitHitAiCount,
+    limitHitPublishCount,
+    proRequestsPending,
+    proRequestsApproved,
+    proRequestsRejected
   };
 }
 

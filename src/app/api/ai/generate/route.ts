@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireApiUser } from "@/lib/auth";
+import { getUsageSnapshot, incrementAiGenerationUsage } from "@/lib/billing/usage";
 import { executeSiteGenerationJob } from "@/lib/ai/process-site-generation";
 import { getRequestClientKey } from "@/lib/http";
 import { logError, logInfo } from "@/lib/logger";
+import { recordPlatformEvent } from "@/lib/platform-events";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 const bodySchema = z.object({
   siteId: z.string().uuid(),
@@ -37,6 +40,7 @@ export async function POST(request: NextRequest) {
   }
 
   const { siteId, prompt } = parsed.data;
+  const admin = getSupabaseAdminClient();
 
   const { data: site } = await supabase
     .from("sites")
@@ -47,6 +51,34 @@ export async function POST(request: NextRequest) {
 
   if (!site) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
+  }
+
+  const usage = await getUsageSnapshot(admin, user.id);
+  if (usage.ai_generations_used >= usage.ai_generations_limit) {
+    try {
+      await recordPlatformEvent(admin, {
+        eventType: "plan.limit_hit.ai",
+        userId: user.id,
+        siteId,
+        payload: {
+          plan: usage.plan,
+          used: usage.ai_generations_used,
+          limit: usage.ai_generations_limit
+        }
+      });
+    } catch {
+      // best effort event logging
+    }
+
+    return NextResponse.json(
+      {
+        error: "Has alcanzado el límite mensual de generaciones IA de tu plan.",
+        plan: usage.plan,
+        ai_generations_used: usage.ai_generations_used,
+        ai_generations_limit: usage.ai_generations_limit
+      },
+      { status: 402 }
+    );
   }
 
   const { data: job, error: jobError } = await supabase
@@ -79,6 +111,8 @@ export async function POST(request: NextRequest) {
     logError("ai_generation_failed", { jobId: job.id, siteId, error: result.error });
     return NextResponse.json({ jobId: job.id, status: "failed", error: result.error }, { status: 500 });
   }
+
+  await incrementAiGenerationUsage(admin, user.id);
 
   logInfo("ai_generation_done", {
     jobId: job.id,
