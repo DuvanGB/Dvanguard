@@ -12,9 +12,14 @@ export async function getSupabaseServerClient() {
       getAll() {
         return cookieStore.getAll();
       },
-      setAll(cookiesToSet ?: any) {
-        for (const cookie of cookiesToSet) {
-          cookieStore.set(cookie.name, cookie.value, cookie.options);
+      setAll(cookiesToSet) {
+        try {
+          for (const cookie of cookiesToSet) {
+            cookieStore.set(cookie.name, cookie.value, cookie.options);
+          }
+        } catch {
+          // In Server Components, Next.js does not allow mutating cookies.
+          // Session refresh cookies are handled in route handlers/middleware.
         }
       }
     }
@@ -24,6 +29,9 @@ export async function getSupabaseServerClient() {
 export function getSupabaseAdminClient() {
   if (!env.supabaseServiceRoleKey) {
     throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+  }
+  if (env.supabaseServiceRoleKey.startsWith("sb_publishable_")) {
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY is invalid: received publishable key. Use service_role/sb_secret key.");
   }
 
   return createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {

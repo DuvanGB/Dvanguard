@@ -38,6 +38,26 @@ export async function POST(request: NextRequest) {
 
   const { name, subdomain, siteType } = parsedBody.data;
 
+  // Ensure profile exists for users created before the profile trigger/migrations.
+  const { error: profileError } = await supabase.from("profiles").upsert(
+    {
+      id: user.id,
+      email: user.email ?? ""
+    },
+    { onConflict: "id" }
+  );
+
+  if (profileError) {
+    logError("ensure_profile_failed", { userId: user.id, error: profileError.message });
+    return NextResponse.json(
+      {
+        error: "No se pudo crear/verificar perfil del usuario. Ejecuta migraciones y reintenta.",
+        details: profileError.message
+      },
+      { status: 400 }
+    );
+  }
+
   const { data: site, error: siteError } = await supabase
     .from("sites")
     .insert({

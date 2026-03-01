@@ -2,7 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getSubdomainFromHost } from "@/lib/tenant";
 
-const RESERVED_PATHS = ["/api", "/_next", "/signin", "/auth", "/dashboard", "/onboarding", "/sites", "/favicon.ico"];
+const RESERVED_PATHS = [
+  "/api",
+  "/_next",
+  "/signin",
+  "/auth",
+  "/dashboard",
+  "/onboarding",
+  "/sites",
+  "/public-sites",
+  "/favicon.ico"
+];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -17,7 +27,7 @@ export function middleware(request: NextRequest) {
   }
 
   const rewriteUrl = request.nextUrl.clone();
-  rewriteUrl.pathname = `/_sites/${subdomain}${pathname}`;
+  rewriteUrl.pathname = `/public-sites/${subdomain}${pathname}`;
 
   return NextResponse.rewrite(rewriteUrl);
 }

@@ -18,7 +18,11 @@ export async function getPublishedSiteBySubdomain(subdomain: string): Promise<Pu
     .eq("status", "published")
     .maybeSingle();
 
-  if (siteError || !site) {
+  if (siteError) {
+    throw new Error(`Failed to query published site: ${siteError.message}`);
+  }
+
+  if (!site) {
     return null;
   }
 
@@ -42,7 +46,11 @@ export async function getPublishedSiteBySubdomain(subdomain: string): Promise<Pu
     .eq("id", versionId)
     .maybeSingle();
 
-  if (versionError || !version) {
+  if (versionError) {
+    throw new Error(`Failed to query published version: ${versionError.message}`);
+  }
+
+  if (!version) {
     return null;
   }
 
