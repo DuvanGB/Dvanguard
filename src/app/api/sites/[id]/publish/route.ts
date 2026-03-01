@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { maybeRecordFirstResultAccepted } from "@/lib/ai/start-site-generation";
 import { requireApiUser } from "@/lib/auth";
 import { getUsageSnapshot } from "@/lib/billing/usage";
 import { recordPlatformEvent } from "@/lib/platform-events";
@@ -107,6 +108,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     } catch {
       // best effort
     }
+  }
+
+  try {
+    await maybeRecordFirstResultAccepted({
+      admin,
+      userId: user.id,
+      siteId: id,
+      action: "publish"
+    });
+  } catch {
+    // best effort
   }
 
   return NextResponse.json({ publication });

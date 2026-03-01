@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { maybeRecordFirstResultAccepted } from "@/lib/ai/start-site-generation";
 import { requireApiUser } from "@/lib/auth";
 import { parseSiteSpec } from "@/lib/site-spec";
+import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 const bodySchema = z.object({
   siteSpec: z.unknown()
@@ -64,6 +66,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     event_type: "site.version.saved",
     payload_json: { versionId: version.id }
   });
+
+  try {
+    await maybeRecordFirstResultAccepted({
+      admin: getSupabaseAdminClient(),
+      userId: user.id,
+      siteId: id,
+      action: "manual_save"
+    });
+  } catch {
+    // best effort
+  }
 
   return NextResponse.json({ versionId: version.id }, { status: 201 });
 }

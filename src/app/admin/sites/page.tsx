@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { SiteModerationActions } from "@/components/admin/site-moderation-actions";
 import { listAdminSites } from "@/lib/data/admin/sites";
 
 function buildQuery(searchParams: Record<string, string | undefined>, page: number) {
@@ -71,6 +72,7 @@ export default async function AdminSitesPage({
               <th>Estado</th>
               <th>Tipo</th>
               <th>Creado</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -82,6 +84,9 @@ export default async function AdminSitesPage({
                 <td>{item.status}</td>
                 <td>{item.site_type}</td>
                 <td>{new Date(item.created_at).toLocaleString()}</td>
+                <td>
+                  <SiteModerationActions siteId={item.id} status={item.status} />
+                </td>
               </tr>
             ))}
           </tbody>

@@ -1,7 +1,8 @@
 import Link from "next/link";
 
-import { OnboardingForm } from "@/components/forms/onboarding-form";
+import { OnboardingWizard } from "@/components/forms/onboarding-wizard";
 import { requireUser } from "@/lib/auth";
+import { env } from "@/lib/env";
 
 export default async function OnboardingPage({
   searchParams
@@ -40,7 +41,7 @@ export default async function OnboardingPage({
     <main className="container stack" style={{ paddingTop: "2rem" }}>
       <h1>Onboarding IA</h1>
       <p>Sitio: {site.name}</p>
-      <OnboardingForm siteId={site.id} />
+      <OnboardingWizard siteId={site.id} maxInputChars={env.onboardingMaxInputChars} voiceLocale={env.voiceLocale} />
     </main>
   );
 }

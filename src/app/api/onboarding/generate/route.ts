@@ -8,31 +8,24 @@ import { buildPromptFromBrief } from "@/lib/onboarding/prompt-builder";
 import { businessBriefDraftSchema, onboardingInputModeSchema } from "@/lib/onboarding/types";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
-import { env } from "@/lib/env";
 
 const bodySchema = z.object({
   siteId: z.string().uuid(),
-  prompt: z.string().min(10).max(env.onboardingMaxInputChars).optional(),
-  briefDraft: businessBriefDraftSchema.optional(),
-  inputMode: onboardingInputModeSchema.optional(),
+  inputMode: onboardingInputModeSchema,
+  briefDraft: businessBriefDraftSchema,
   refineConfidence: z.number().min(0).max(1).optional(),
   warnings: z.array(z.string()).max(20).optional()
-}).superRefine((value, ctx) => {
-  if (!value.prompt && !value.briefDraft) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "prompt or briefDraft is required" });
-  }
 });
 
 export async function POST(request: NextRequest) {
   const { user, supabase } = await requireApiUser();
-
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const rate = enforceRateLimit({
-    key: `ai:generate:${getRequestClientKey(request, user.id)}`,
-    limit: 30,
+    key: `onboarding:generate:${getRequestClientKey(request, user.id)}`,
+    limit: 20,
     windowMs: 60_000
   });
 
@@ -40,23 +33,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Too Many Requests" }, { status: 429 });
   }
 
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
   const parsed = bodySchema.safeParse(body);
-
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
   }
 
-  const { siteId, prompt, briefDraft, inputMode = "text", refineConfidence, warnings } = parsed.data;
-  const promptToUse = briefDraft ? buildPromptFromBrief(briefDraft) : prompt!;
-  const admin = getSupabaseAdminClient();
+  const { siteId, inputMode, briefDraft, refineConfidence, warnings } = parsed.data;
+  const prompt = buildPromptFromBrief(briefDraft);
 
   const result = await startSiteGeneration({
     supabase,
-    admin,
+    admin: getSupabaseAdminClient(),
     userId: user.id,
     siteId,
-    prompt: promptToUse,
+    prompt,
     inputMode,
     refineConfidence,
     warningsCount: warnings?.length ?? 0

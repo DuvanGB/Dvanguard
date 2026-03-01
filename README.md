@@ -31,6 +31,11 @@ MVP SaaS multi-tenant para generar sitios web desde una descripción de negocio,
   - planes `free/pro` con límites
   - solicitud manual de upgrade Pro
   - métricas de activación (`% publicación <24h`)
+- Fase 4 de onboarding con voz + refinamiento:
+  - wizard de 3 pasos en `/onboarding`
+  - captura por texto/voz (Web Speech API) con fallback a texto
+  - refinamiento de brief antes de generar
+  - métricas de calidad percibida del primer resultado
 
 ## Variables de entorno
 
@@ -43,6 +48,9 @@ Copia `.env.example` a `.env.local` y define:
 - `NEXT_PUBLIC_APP_URL` (ejemplo: `http://localhost:3000`)
 - `AI_PROVIDER` (`mock` para fallback local)
 - `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL` (si usarás proveedor real)
+- `ONBOARDING_REFINE_PROVIDER` (`llm` o `heuristic`)
+- `VOICE_LOCALE` (default `es-CO`)
+- `ONBOARDING_MAX_INPUT_CHARS` (default `3000`)
 - `ADMIN_ALLOWLIST_EMAILS` (CSV de emails autorizados para `/admin`)
 - `DEFAULT_FREE_PLAN` (default: `free`)
 - `DEFAULT_PRO_PLAN` (default: `pro`)
@@ -98,6 +106,7 @@ npm run db:push
 - `supabase/migrations/0002_profiles_insert_and_backfill.sql`
 - `supabase/migrations/0003_admin_retry_and_metrics.sql`
 - `supabase/migrations/0004_plans_usage_and_requests.sql`
+- `supabase/migrations/0005_onboarding_quality_metrics.sql`
 
 Incluye tablas:
 
@@ -149,6 +158,8 @@ Configura estos secrets en GitHub:
 - `GET /api/admin/pro-requests?status=&page=&pageSize=`
 - `POST /api/admin/pro-requests/:id/review`
 - `POST /api/admin/users/:id/plan`
+- `POST /api/onboarding/refine`
+- `POST /api/onboarding/generate`
 
 ## Desarrollo local
 
@@ -185,6 +196,32 @@ Flujo recomendado:
 - `% publicación en 24h`.
 - límites de plan alcanzados (IA/publicación).
 - estado de solicitudes Pro (pending/approved/rejected).
+
+## Voz y onboarding IA (fase 4)
+
+### Flujo nuevo
+
+1. Usuario describe su negocio por texto o voz.
+2. Backend devuelve `briefDraft` refinado.
+3. Usuario ajusta campos clave (tipo, oferta, tono, secciones, preset).
+4. Se dispara generación IA usando prompt construido desde brief.
+
+### Eventos operativos nuevos
+
+- `onboarding.refine.started`
+- `onboarding.refine.completed`
+- `onboarding.voice.unsupported`
+- `onboarding.voice.permission_denied`
+- `site.generation.first_attempt_done`
+- `site.generation.regenerated`
+- `site.first_result.accepted`
+
+### Métricas admin nuevas
+
+- `First result acceptance (7d)`
+- `Voice usage rate (7d)`
+- `Refine fallback rate (7d)`
+- `Regeneraciones p50/p95`
 
 ## Operación admin (fase 2)
 

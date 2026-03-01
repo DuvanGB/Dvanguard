@@ -1,12 +1,18 @@
 import Link from "next/link";
 
-import { getAdminMetrics, getRecentFailedJobs, getRecentlyPublishedSites } from "@/lib/data/admin/metrics";
+import {
+  getAdminMetrics,
+  getRecentFailedJobs,
+  getRecentlyPublishedSites,
+  getSitesWithMostRegenerations
+} from "@/lib/data/admin/metrics";
 
 export default async function AdminHomePage() {
-  const [metrics, failedJobs, recentSites] = await Promise.all([
+  const [metrics, failedJobs, recentSites, mostRegeneratedSites] = await Promise.all([
     getAdminMetrics("7d"),
     getRecentFailedJobs(8),
-    getRecentlyPublishedSites(8)
+    getRecentlyPublishedSites(8),
+    getSitesWithMostRegenerations(8, "7d")
   ]);
 
   return (
@@ -55,6 +61,24 @@ export default async function AdminHomePage() {
           <span>
             pending {metrics.proRequestsPending} | approved {metrics.proRequestsApproved} | rejected{" "}
             {metrics.proRequestsRejected}
+          </span>
+        </article>
+        <article className="card stack">
+          <strong>First result acceptance (7d)</strong>
+          <span>{metrics.firstResultAcceptanceRate ?? "-"}%</span>
+        </article>
+        <article className="card stack">
+          <strong>Voice usage rate (7d)</strong>
+          <span>{metrics.voiceUsageRate ?? "-"}%</span>
+        </article>
+        <article className="card stack">
+          <strong>Refine fallback rate (7d)</strong>
+          <span>{metrics.onboardingRefineFallbackRate ?? "-"}%</span>
+        </article>
+        <article className="card stack">
+          <strong>Regeneraciones p50/p95</strong>
+          <span>
+            {metrics.regenerationsP50 ?? "-"} / {metrics.regenerationsP95 ?? "-"}
           </span>
         </article>
       </section>
@@ -131,6 +155,34 @@ export default async function AdminHomePage() {
         <Link href="/admin/pro-requests" className="btn-secondary">
           Gestionar solicitudes Pro
         </Link>
+      </section>
+
+      <section className="card stack">
+        <h2>Sitios con más regeneraciones (7d)</h2>
+        {mostRegeneratedSites.length ? (
+          <table>
+            <thead>
+              <tr>
+                <th>Sitio</th>
+                <th>Subdominio</th>
+                <th>Owner</th>
+                <th>Regeneraciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mostRegeneratedSites.map((site) => (
+                <tr key={site.site_id}>
+                  <td>{site.name}</td>
+                  <td>{site.subdomain}</td>
+                  <td>{site.owner_email ?? "-"}</td>
+                  <td>{site.regenerations}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p>Sin regeneraciones en el rango actual.</p>
+        )}
       </section>
     </div>
   );

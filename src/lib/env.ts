@@ -6,6 +6,12 @@ for (const key of requiredPublic) {
   }
 }
 
+function parsePositiveInt(value: string | undefined, fallback: number) {
+  const parsed = Number(value ?? "");
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.floor(parsed);
+}
+
 export const env = {
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
   supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
@@ -18,5 +24,8 @@ export const env = {
   aiProvider: process.env.AI_PROVIDER ?? "mock",
   aiBaseUrl: process.env.AI_BASE_URL ?? "",
   aiApiKey: process.env.AI_API_KEY ?? "",
-  aiModel: process.env.AI_MODEL ?? ""
+  aiModel: process.env.AI_MODEL ?? "",
+  onboardingRefineProvider: process.env.ONBOARDING_REFINE_PROVIDER ?? "llm",
+  voiceLocale: process.env.VOICE_LOCALE ?? "es-CO",
+  onboardingMaxInputChars: parsePositiveInt(process.env.ONBOARDING_MAX_INPUT_CHARS, 3000)
 };

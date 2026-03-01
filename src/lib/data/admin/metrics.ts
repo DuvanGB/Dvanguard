@@ -16,6 +16,11 @@ export type AdminMetrics = {
   proRequestsPending: number;
   proRequestsApproved: number;
   proRequestsRejected: number;
+  firstResultAcceptanceRate: number | null;
+  voiceUsageRate: number | null;
+  onboardingRefineFallbackRate: number | null;
+  regenerationsP50: number | null;
+  regenerationsP95: number | null;
 };
 
 export async function getAdminMetrics(rangeParam?: string | null): Promise<AdminMetrics> {
@@ -25,17 +30,24 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
 
   const [{ data: sites }, { data: publications }, { data: jobs }, { data: signups }, { data: platformEvents }, { data: proRequests }] =
     await Promise.all([
-    admin.from("sites").select("id", { count: "exact" }).gte("created_at", fromIso),
-    admin.from("site_publications").select("site_id, published_at").gte("published_at", fromIso),
-    admin.from("ai_jobs").select("status, output_json, created_at").gte("created_at", fromIso),
-    admin.from("profiles").select("id, created_at").gte("created_at", fromIso),
-    admin
-      .from("platform_events")
-      .select("event_type, created_at")
-      .gte("created_at", fromIso)
-      .in("event_type", ["plan.limit_hit.ai", "plan.limit_hit.publish"]),
-    admin.from("pro_requests").select("status, created_at").gte("created_at", fromIso)
-  ]);
+      admin.from("sites").select("id", { count: "exact" }).gte("created_at", fromIso),
+      admin.from("site_publications").select("site_id, published_at").gte("published_at", fromIso),
+      admin.from("ai_jobs").select("status, output_json, created_at").gte("created_at", fromIso),
+      admin.from("profiles").select("id, created_at").gte("created_at", fromIso),
+      admin
+        .from("platform_events")
+        .select("event_type, user_id, site_id, payload_json, created_at")
+        .gte("created_at", fromIso)
+        .in("event_type", [
+          "plan.limit_hit.ai",
+          "plan.limit_hit.publish",
+          "site.generation.first_attempt_done",
+          "site.generation.regenerated",
+          "site.first_result.accepted",
+          "onboarding.refine.completed"
+        ]),
+      admin.from("pro_requests").select("status, created_at").gte("created_at", fromIso)
+    ]);
 
   const sitesCreated = sites?.length ?? 0;
   const sitesPublished = new Set((publications ?? []).map((row) => row.site_id)).size;
@@ -102,6 +114,47 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
   const proRequestsApproved = (proRequests ?? []).filter((row) => row.status === "approved").length;
   const proRequestsRejected = (proRequests ?? []).filter((row) => row.status === "rejected").length;
 
+  const firstAttemptEvents = (platformEvents ?? []).filter((event) => event.event_type === "site.generation.first_attempt_done");
+  const acceptedEvents = (platformEvents ?? []).filter((event) => event.event_type === "site.first_result.accepted");
+  const refineEvents = (platformEvents ?? []).filter((event) => event.event_type === "onboarding.refine.completed");
+  const regenerationEvents = (platformEvents ?? []).filter((event) => event.event_type === "site.generation.regenerated");
+
+  const firstAttemptUsers = new Set(
+    firstAttemptEvents.map((event) => event.user_id).filter((value): value is string => typeof value === "string" && value.length > 0)
+  );
+  const acceptedUsers = new Set(
+    acceptedEvents.map((event) => event.user_id).filter((value): value is string => typeof value === "string" && value.length > 0)
+  );
+
+  const firstResultAcceptanceRate = firstAttemptUsers.size
+    ? Number(((acceptedUsers.size / firstAttemptUsers.size) * 100).toFixed(2))
+    : null;
+
+  const refineVoiceCount = refineEvents.filter((event) => {
+    const payload = (event.payload_json ?? {}) as Record<string, unknown>;
+    return payload.inputMode === "voice";
+  }).length;
+  const voiceUsageRate = refineEvents.length ? Number(((refineVoiceCount / refineEvents.length) * 100).toFixed(2)) : null;
+
+  const refineFallbackCount = refineEvents.filter((event) => {
+    const payload = (event.payload_json ?? {}) as Record<string, unknown>;
+    return payload.provider !== "llm";
+  }).length;
+  const onboardingRefineFallbackRate = refineEvents.length
+    ? Number(((refineFallbackCount / refineEvents.length) * 100).toFixed(2))
+    : null;
+
+  const regenerationBySite = new Map<string, number>();
+  for (const event of firstAttemptEvents) {
+    if (event.site_id) regenerationBySite.set(event.site_id, 0);
+  }
+  for (const event of regenerationEvents) {
+    if (!event.site_id) continue;
+    regenerationBySite.set(event.site_id, (regenerationBySite.get(event.site_id) ?? 0) + 1);
+  }
+
+  const regenerationSeries = Array.from(regenerationBySite.values());
+
   return {
     range: range.label,
     sitesCreated,
@@ -116,7 +169,12 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
     limitHitPublishCount,
     proRequestsPending,
     proRequestsApproved,
-    proRequestsRejected
+    proRequestsRejected,
+    firstResultAcceptanceRate,
+    voiceUsageRate,
+    onboardingRefineFallbackRate,
+    regenerationsP50: percentile(regenerationSeries, 50),
+    regenerationsP95: percentile(regenerationSeries, 95)
   };
 }
 
@@ -176,6 +234,54 @@ export async function getRecentlyPublishedSites(limit = 10) {
         site_type: site.site_type,
         owner_email: emailByOwner.get(site.owner_id) ?? null,
         published_at: row.published_at
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+}
+
+export async function getSitesWithMostRegenerations(limit = 10, rangeParam?: string | null) {
+  const admin = getSupabaseAdminClient();
+  const range = parseRange(rangeParam);
+  const fromIso = range.from.toISOString();
+
+  const { data: events } = await admin
+    .from("platform_events")
+    .select("site_id")
+    .eq("event_type", "site.generation.regenerated")
+    .gte("created_at", fromIso);
+
+  const siteCounter = new Map<string, number>();
+  for (const event of events ?? []) {
+    if (!event.site_id) continue;
+    siteCounter.set(event.site_id, (siteCounter.get(event.site_id) ?? 0) + 1);
+  }
+
+  const ranked = Array.from(siteCounter.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
+
+  if (!ranked.length) {
+    return [];
+  }
+
+  const siteIds = ranked.map(([siteId]) => siteId);
+  const { data: sites } = await admin.from("sites").select("id, name, subdomain, owner_id").in("id", siteIds);
+  const ownerIds = Array.from(new Set((sites ?? []).map((site) => site.owner_id)));
+  const { data: profiles } = await admin.from("profiles").select("id, email").in("id", ownerIds);
+
+  const siteById = new Map((sites ?? []).map((site) => [site.id, site]));
+  const ownerEmailById = new Map((profiles ?? []).map((profile) => [profile.id, profile.email]));
+
+  return ranked
+    .map(([siteId, regenerations]) => {
+      const site = siteById.get(siteId);
+      if (!site) return null;
+      return {
+        site_id: site.id,
+        name: site.name,
+        subdomain: site.subdomain,
+        owner_email: ownerEmailById.get(site.owner_id) ?? null,
+        regenerations
       };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
