@@ -33,8 +33,7 @@ export function CreateSiteForm() {
   }
 
   return (
-    <form className="stack card" onSubmit={handleSubmit}>
-      <h3>Crear nuevo sitio</h3>
+    <form className="create-site-form stack" onSubmit={handleSubmit}>
       <label>
         Nombre
         <input value={name} onChange={(event) => setName(event.target.value)} required />
@@ -51,7 +50,7 @@ export function CreateSiteForm() {
       <button className="btn-primary" type="submit" disabled={loading}>
         {loading ? "Creando..." : "Crear sitio"}
       </button>
-      {error ? <p>{error}</p> : null}
+      {error ? <p className="create-site-error">{error}</p> : null}
     </form>
   );
 }

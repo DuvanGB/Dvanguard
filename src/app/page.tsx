@@ -34,44 +34,93 @@ export default async function HomePage() {
   }
 
   return (
-    <main className="container stack" style={{ paddingTop: "2.5rem" }}>
-      <section className="card stack" style={{ padding: "2rem", background: "linear-gradient(135deg, #f8fafc, #e2e8f0)" }}>
-        <h1>Describe tu negocio. Publica una web que convierta en minutos.</h1>
-        <p>
-          Crea una web optimizada para WhatsApp y redes sin lidiar con herramientas complejas. Empieza gratis y valida
-          rápido.
-        </p>
-        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-          <Link href="/signin" className="btn-primary">
-            Comenzar gratis
-          </Link>
-          <Link href="/pricing" className="btn-secondary">
-            Ver precios
-          </Link>
+    <main className="marketing-shell">
+      <section className="marketing-hero">
+        <div className="marketing-hero-copy stack">
+          <small className="marketing-chip">SaaS para emprendedores LATAM</small>
+          <h1>Describe tu negocio. Nosotros lo publicamos en segundos.</h1>
+          <p>
+            Convierte una idea en una landing lista para clientes, sin tocar código y sin un editor complejo de arrastrar
+            bloques.
+          </p>
+          <div className="marketing-hero-actions">
+            <Link href="/signin" className="btn-primary">
+              Comenzar gratis
+            </Link>
+            <Link href="/pricing" className="btn-secondary">
+              Ver planes
+            </Link>
+          </div>
+          <div className="marketing-proof-row">
+            <span>Entrada por texto y voz</span>
+            <span>Editor visual en tiempo real</span>
+            <span>Publicación con subdominio</span>
+          </div>
         </div>
+
+        <aside className="marketing-hero-panel stack">
+          <h2>Cómo se ve el resultado operativo</h2>
+          <div className="marketing-mini-kpis">
+            <article>
+              <strong>&lt; 20s</strong>
+              <small>preview inicial</small>
+            </article>
+            <article>
+              <strong>1 clic</strong>
+              <small>publicar sitio</small>
+            </article>
+            <article>
+              <strong>100%</strong>
+              <small>enfocado en conversión</small>
+            </article>
+          </div>
+          <p>
+            Diseñado para negocios que venden por redes: catálogo, testimonios, contacto y CTA directo a WhatsApp.
+          </p>
+        </aside>
       </section>
 
-      <section className="catalog-grid">
-        <article className="card stack">
-          <h2>1. Describe tu negocio</h2>
-          <p>Cuenta qué vendes y a quién le vendes en lenguaje natural.</p>
+      <section className="marketing-steps">
+        <article className="marketing-step-card">
+          <span>01</span>
+          <h3>Describe tu negocio</h3>
+          <p>Cuéntanos qué vendes, a quién y con qué estilo. Puedes escribir o dictar por voz.</p>
         </article>
-        <article className="card stack">
-          <h2>2. IA genera tu estructura</h2>
-          <p>Obtén una web lista para personalizar sin comenzar desde cero.</p>
+        <article className="marketing-step-card">
+          <span>02</span>
+          <h3>IA propone y refina</h3>
+          <p>Generamos estructura, plantilla y contenido base para que empieces con ventaja.</p>
         </article>
-        <article className="card stack">
-          <h2>3. Publica con subdominio</h2>
-          <p>Lanza tu sitio y comparte el link en redes y WhatsApp.</p>
+        <article className="marketing-step-card">
+          <span>03</span>
+          <h3>Edita y publica</h3>
+          <p>Ajusta secciones, textos e imágenes en preview realtime y publica en subdominio propio.</p>
         </article>
       </section>
 
-      <section className="card stack">
-        <h2>Para quién está hecha</h2>
-        <p>
-          Emprendedores y pequeños negocios LATAM que necesitan presencia digital rápida para vender, sin contratar
-          desarrollo tradicional.
-        </p>
+      <section className="marketing-value-grid">
+        <article className="marketing-value-card">
+          <h3>Hecho para WhatsApp commerce</h3>
+          <p>CTA priorizado, mensajes claros y experiencia móvil para convertir tráfico social en conversaciones.</p>
+        </article>
+        <article className="marketing-value-card">
+          <h3>Flujo simple sin curva técnica</h3>
+          <p>Sin constructor tradicional abrumador. Decisiones guiadas, edición rápida y versionado estable.</p>
+        </article>
+        <article className="marketing-value-card">
+          <h3>Control del negocio desde dashboard</h3>
+          <p>Ves uso, analítica básica y estado de publicación de cada sitio desde un solo lugar.</p>
+        </article>
+      </section>
+
+      <section className="marketing-cta-banner">
+        <div className="stack">
+          <h2>Lanza tu web hoy y valida tu oferta esta semana.</h2>
+          <p>Ideal para pequeños negocios que necesitan presencia digital profesional con velocidad de ejecución.</p>
+        </div>
+        <Link href="/signin" className="btn-primary">
+          Crear mi primer sitio
+        </Link>
       </section>
     </main>
   );

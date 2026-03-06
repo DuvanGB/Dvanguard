@@ -32,105 +32,154 @@ export default async function DashboardPage() {
   const pendingRequest = pendingProRequest?.[0] ?? null;
   const sites = analytics.sites;
 
+  const blockedByLimit = usage.plan === "free" && (usage.ai_generations_remaining <= 0 || usage.published_sites_remaining <= 0);
+
   return (
-    <main className="container stack" style={{ paddingTop: "2rem" }}>
-      <header className="stack">
-        <h1>Dashboard</h1>
-        <p>{user.email}</p>
-        <Link href="/pricing" className="btn-secondary">
-          Ver planes
-        </Link>
-      </header>
+    <main className="dashboard-shell">
+      <div className="dashboard-container stack">
+        <section className="dashboard-hero">
+          <div className="stack" style={{ gap: "0.35rem" }}>
+            <small className="dashboard-chip">Workspace cliente</small>
+            <h1>Tu centro de sitios y activación</h1>
+            <p>Gestiona contenido, publicación y rendimiento de tus sitios desde un panel profesional.</p>
+            <div className="dashboard-hero-actions">
+              <Link href="/pricing" className="btn-secondary">
+                Ver planes
+              </Link>
+              <Link href="/onboarding" className="btn-primary">
+                Regenerar con IA
+              </Link>
+            </div>
+          </div>
+          <div className="dashboard-email">{user.email}</div>
+        </section>
 
-      <section className="catalog-grid">
-        <article className="card stack">
-          <strong>Plan actual</strong>
-          <span>{usage.plan.toUpperCase()}</span>
-        </article>
-        <article className="card stack">
-          <strong>Generaciones IA (mes)</strong>
-          <span>
-            {usage.ai_generations_used} / {usage.ai_generations_limit}
-          </span>
-        </article>
-        <article className="card stack">
-          <strong>Sitios publicados</strong>
-          <span>
-            {usage.published_sites_used} / {usage.published_sites_limit}
-          </span>
-        </article>
-        <article className="card stack">
-          <strong>Visitas (7d)</strong>
-          <span>{analytics.summary.visits}</span>
-        </article>
-        <article className="card stack">
-          <strong>Clic WhatsApp (7d)</strong>
-          <span>{analytics.summary.whatsapp_clicks}</span>
-        </article>
-        <article className="card stack">
-          <strong>CTR WhatsApp (7d)</strong>
-          <span>{analytics.summary.ctr_whatsapp}%</span>
-        </article>
-      </section>
+        <section className="dashboard-kpi-grid">
+          <article className="dashboard-kpi-card">
+            <small>Plan actual</small>
+            <strong>{usage.plan.toUpperCase()}</strong>
+            <p>{usage.plan === "free" ? "Ideal para validar rápido" : "Mayor capacidad de crecimiento"}</p>
+          </article>
+          <article className="dashboard-kpi-card">
+            <small>Generaciones IA (mes)</small>
+            <strong>
+              {usage.ai_generations_used} / {usage.ai_generations_limit}
+            </strong>
+            <p>Restantes: {usage.ai_generations_remaining}</p>
+          </article>
+          <article className="dashboard-kpi-card">
+            <small>Sitios publicados</small>
+            <strong>
+              {usage.published_sites_used} / {usage.published_sites_limit}
+            </strong>
+            <p>Disponibles: {usage.published_sites_remaining}</p>
+          </article>
+          <article className="dashboard-kpi-card">
+            <small>Visitas (7d)</small>
+            <strong>{analytics.summary.visits}</strong>
+            <p>Interacciones recientes</p>
+          </article>
+          <article className="dashboard-kpi-card">
+            <small>Clic WhatsApp (7d)</small>
+            <strong>{analytics.summary.whatsapp_clicks}</strong>
+            <p>Conversaciones iniciadas</p>
+          </article>
+          <article className="dashboard-kpi-card">
+            <small>CTR WhatsApp (7d)</small>
+            <strong>{analytics.summary.ctr_whatsapp}%</strong>
+            <p>Conversión sobre visitas</p>
+          </article>
+        </section>
 
-      {usage.plan === "free" && (usage.ai_generations_remaining <= 0 || usage.published_sites_remaining <= 0) ? (
-        <section className="card stack">
-          <h2>Has alcanzado un límite del plan Gratis</h2>
-          <p>
-            Puedes solicitar plan Pro para ampliar cupos de generaciones IA y cantidad de sitios publicados activos.
-          </p>
-          {pendingRequest ? (
-            <small>Ya tienes una solicitud Pro pendiente desde {new Date(pendingRequest.created_at).toLocaleString()}.</small>
+        {blockedByLimit ? (
+          <section className="dashboard-upgrade-banner">
+            <div className="stack">
+              <h2>Has alcanzado el límite de tu plan Gratis</h2>
+              <p>Solicita Pro para ampliar cupos de IA y cantidad de sitios publicados activos.</p>
+            </div>
+            <div>
+              {pendingRequest ? (
+                <small>Ya tienes una solicitud Pro pendiente desde {new Date(pendingRequest.created_at).toLocaleString()}.</small>
+              ) : (
+                <ProRequestButton />
+              )}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="dashboard-create-panel">
+          <div className="stack">
+            <h2>Crear nuevo sitio</h2>
+            <p>Inicia un proyecto nuevo y pasa directo al onboarding para generar tu primera versión con IA.</p>
+          </div>
+          <CreateSiteForm />
+        </section>
+
+        <section className="stack">
+          <div className="dashboard-sites-head">
+            <h2>Tus sitios</h2>
+            <small>{sites.length} activos en tu workspace</small>
+          </div>
+          {sites.length ? (
+            <div className="dashboard-sites-grid">
+              {sites.map((site) => (
+                <article key={site.site_id} className="dashboard-site-card">
+                  <header className="dashboard-site-card-head">
+                    <div className="stack" style={{ gap: "0.2rem" }}>
+                      <strong>{site.name}</strong>
+                      <small>{site.subdomain}</small>
+                    </div>
+                    <div className="dashboard-site-badges">
+                      <span className="dashboard-badge">{site.site_type}</span>
+                      <span className={`dashboard-badge ${site.status === "published" ? "dashboard-badge-ok" : ""}`}>
+                        {site.status}
+                      </span>
+                    </div>
+                  </header>
+
+                  <div className="dashboard-site-metrics">
+                    <span>Visitas: {site.visits}</span>
+                    <span>WhatsApp: {site.whatsapp_clicks}</span>
+                    <span>CTA: {site.cta_clicks}</span>
+                    <span>CTR: {site.ctr_whatsapp}%</span>
+                    <span>
+                      Activación: {site.checklist_done}/{site.checklist_total}
+                    </span>
+                  </div>
+
+                  <ul className="dashboard-checklist">
+                    {site.checklist.map((item) => (
+                      <li key={item.key} className={item.done ? "dashboard-check-ok" : "dashboard-check-pending"}>
+                        {item.done ? "✓" : "•"} {item.label}
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="dashboard-site-actions">
+                    <Link className="btn-secondary" href={`/sites/${site.site_id}`}>
+                      Editar
+                    </Link>
+                    <Link className="btn-secondary" href={`/onboarding?siteId=${site.site_id}`}>
+                      Regenerar IA
+                    </Link>
+                    <PublishSiteButton siteId={site.site_id} />
+                    {site.status === "published" ? (
+                      <a className="btn-secondary" href={buildPublicSiteUrl(site.subdomain)} target="_blank" rel="noreferrer">
+                        Abrir sitio
+                      </a>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
           ) : (
-            <ProRequestButton />
+            <article className="dashboard-empty-state">
+              <h3>Aún no tienes sitios creados</h3>
+              <p>Crea tu primer sitio y publícalo hoy para empezar a recibir tráfico desde redes.</p>
+            </article>
           )}
         </section>
-      ) : null}
-
-      <CreateSiteForm />
-
-      <section className="stack">
-        <h2>Tus sitios</h2>
-        {sites.length ? (
-          sites.map((site) => (
-            <article key={site.site_id} className="card stack">
-              <strong>{site.name}</strong>
-              <span>
-                `{site.subdomain}` | {site.site_type} | {site.status}
-              </span>
-              <small>
-                Activación: {site.checklist_done}/{site.checklist_total}
-              </small>
-              <small>
-                Visitas {site.visits} | WhatsApp {site.whatsapp_clicks} | CTA {site.cta_clicks} | CTR {site.ctr_whatsapp}%
-              </small>
-              <ul>
-                {site.checklist.map((item) => (
-                  <li key={item.key}>
-                    [{item.done ? "OK" : "PEND"}] {item.label}
-                  </li>
-                ))}
-              </ul>
-              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                <Link className="btn-secondary" href={`/sites/${site.site_id}`}>
-                  Editar
-                </Link>
-                <Link className="btn-secondary" href={`/onboarding?siteId=${site.site_id}`}>
-                  Regenerar con IA
-                </Link>
-                <PublishSiteButton siteId={site.site_id} />
-                {site.status === "published" ? (
-                  <a className="btn-secondary" href={buildPublicSiteUrl(site.subdomain)} target="_blank" rel="noreferrer">
-                    Abrir sitio
-                  </a>
-                ) : null}
-              </div>
-            </article>
-          ))
-        ) : (
-          <p>No tienes sitios creados todavía.</p>
-        )}
-      </section>
+      </div>
     </main>
   );
 }
