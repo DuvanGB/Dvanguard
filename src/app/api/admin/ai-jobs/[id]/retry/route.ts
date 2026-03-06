@@ -4,6 +4,7 @@ import { requireAdminApiUser } from "@/lib/admin-auth";
 import { executeSiteGenerationJob } from "@/lib/ai/process-site-generation";
 import { getRequestClientKey } from "@/lib/http";
 import { logError, logInfo } from "@/lib/logger";
+import { businessBriefDraftSchema } from "@/lib/onboarding/types";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
@@ -41,7 +42,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "Only failed jobs can be retried" }, { status: 400 });
   }
 
-  const prompt = ((sourceJob.input_json ?? {}) as Record<string, unknown>).prompt;
+  const inputJson = (sourceJob.input_json ?? {}) as Record<string, unknown>;
+  const prompt = inputJson.prompt;
+  const briefDraft = inputJson.briefDraft;
+  const parsedBriefDraft = businessBriefDraftSchema.safeParse(briefDraft);
   if (typeof prompt !== "string" || prompt.trim().length < 10) {
     return NextResponse.json({ error: "Source job prompt is invalid" }, { status: 400 });
   }
@@ -52,7 +56,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       site_id: sourceJob.site_id,
       created_by: sourceJob.created_by,
       job_type: "site_generation",
-      input_json: { prompt },
+      input_json: { prompt, briefDraft: parsedBriefDraft.success ? parsedBriefDraft.data : null },
       status: "queued",
       retry_of_job_id: sourceJob.id,
       attempt: (sourceJob.attempt ?? 1) + 1
@@ -75,6 +79,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     prompt,
     jobId: retryJob.id,
     eventType: "site.generation.retried",
+    briefDraft: parsedBriefDraft.success ? parsedBriefDraft.data : undefined,
     extraEventPayload: {
       retryOfJobId: sourceJob.id,
       requestedByAdminId: auth.user.id

@@ -19,6 +19,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Local backups
+ops/backups/
+
 # Mac
 .DS_Store
 

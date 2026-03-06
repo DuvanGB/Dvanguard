@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { executeSiteGenerationJob } from "@/lib/ai/process-site-generation";
 import { getUsageSnapshot, incrementAiGenerationUsage } from "@/lib/billing/usage";
 import { logError, logInfo } from "@/lib/logger";
+import type { BusinessBriefDraft } from "@/lib/onboarding/types";
 import { recordPlatformEvent } from "@/lib/platform-events";
 import type { TemplateId } from "@/lib/templates/types";
 
@@ -12,6 +13,7 @@ type StartGenerationInput = {
   userId: string;
   siteId: string;
   prompt: string;
+  briefDraft?: BusinessBriefDraft;
   inputMode: "text" | "voice";
   templateId?: TemplateId;
   refineConfidence?: number;
@@ -95,6 +97,7 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
       job_type: "site_generation",
       input_json: {
         prompt,
+        briefDraft: input.briefDraft ?? null,
         meta: {
           input_mode: input.inputMode,
           template_id: input.templateId ?? null,
@@ -120,6 +123,7 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
     jobId: job.id,
     eventType: "site.generated",
     templateId: input.templateId,
+    briefDraft: input.briefDraft,
     extraEventPayload: {
       inputMode: input.inputMode,
       templateId: input.templateId ?? null,
@@ -255,9 +259,9 @@ export async function maybeRecordFirstResultAccepted(input: {
       .maybeSingle();
 
     const schemaVersion = (version?.site_spec_json as { schema_version?: string } | null)?.schema_version;
-    if (schemaVersion === "2.0") {
+    if (schemaVersion === "3.0") {
       await recordPlatformEvent(admin, {
-        eventType: "site.v2.first_result.accepted",
+        eventType: "site.v3.first_result.accepted",
         userId,
         siteId,
         payload: {

@@ -10,11 +10,11 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "db:init": "npx supabase init",
-    "db:link": "npx supabase link --project-ref \"$SUPABASE_PROJECT_REF\" --password \"$SUPABASE_DB_PASSWORD\"",
-    "db:list": "npx supabase migration list --linked",
-    "db:dry": "npx supabase db push --linked --dry-run",
-    "db:push": "npx supabase db push --linked --yes"
+    "db:init": "supabase init",
+    "db:link": "supabase link --project-ref \"$SUPABASE_PROJECT_REF\" --password \"$SUPABASE_DB_PASSWORD\"",
+    "db:list": "supabase migration list --linked",
+    "db:dry": "supabase db push --linked --dry-run",
+    "db:push": "supabase db push --linked --yes"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

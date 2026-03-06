@@ -58,7 +58,7 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
           "site.generation.first_attempt_done",
           "site.generation.regenerated",
           "site.first_result.accepted",
-          "site.v2.first_result.accepted",
+          "site.v3.first_result.accepted",
           "onboarding.refine.completed",
           "template.selected",
           "template.recommended"
@@ -78,7 +78,7 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
   const jobsFallback = (jobs ?? []).filter((job) => {
     const output = (job.output_json ?? {}) as Record<string, unknown>;
     const source = output.source;
-    return source === "fallback";
+    return source !== "llm";
   }).length;
 
   const latencies = (jobs ?? [])
@@ -136,7 +136,7 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
 
   const firstAttemptEvents = (platformEvents ?? []).filter((event) => event.event_type === "site.generation.first_attempt_done");
   const acceptedEvents = (platformEvents ?? []).filter((event) => event.event_type === "site.first_result.accepted");
-  const acceptedV2Events = (platformEvents ?? []).filter((event) => event.event_type === "site.v2.first_result.accepted");
+  const acceptedV2Events = (platformEvents ?? []).filter((event) => event.event_type === "site.v3.first_result.accepted");
   const refineEvents = (platformEvents ?? []).filter((event) => event.event_type === "onboarding.refine.completed");
   const regenerationEvents = (platformEvents ?? []).filter((event) => event.event_type === "site.generation.regenerated");
   const templateSelectedEvents = (platformEvents ?? []).filter((event) => event.event_type === "template.selected");

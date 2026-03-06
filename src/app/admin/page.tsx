@@ -103,7 +103,7 @@ export default async function AdminHomePage() {
           value={formatPercent(metrics.templateRecommendedPickRate)}
           hint="adopción de recomendación"
         />
-        <MetricCard label="% aceptación v2" value={formatPercent(metrics.v2FirstResultAcceptanceRate)} hint="resultado visual v2" />
+        <MetricCard label="% aceptación v3" value={formatPercent(metrics.v2FirstResultAcceptanceRate)} hint="resultado visual v3" />
         <MetricCard label="Regeneraciones p50/p95" value={`${metrics.regenerationsP50 ?? "-"} / ${metrics.regenerationsP95 ?? "-"}`} />
         <MetricCard label="Regeneración promedio/template" value={metrics.regenerationAvgPerTemplate ?? "-"} />
         <MetricCard label="Límite IA alcanzado" value={metrics.limitHitAiCount} tone="warning" />
@@ -226,7 +226,7 @@ export default async function AdminHomePage() {
               </table>
             </div>
           ) : (
-            <p>Sin publicaciones v2 en el rango actual.</p>
+            <p>Sin publicaciones v3 en el rango actual.</p>
           )}
         </article>
 

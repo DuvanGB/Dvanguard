@@ -3,10 +3,8 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import type { AnySiteSpec } from "@/lib/site-spec-any";
-import { parseAnySiteSpec } from "@/lib/site-spec-any";
-import { buildSiteSpecV2FromTemplate } from "@/lib/site-spec-v2";
-import type { SiteSectionV2 } from "@/lib/site-spec-v2";
-import { CatalogSection, ContactSection, HeroSection, TestimonialsSection } from "@/components/runtime/sections";
+import { buildFallbackSiteSpecV3, parseSiteSpecV3 } from "@/lib/site-spec-v3";
+import { CanvasSection } from "@/components/runtime/sections";
 
 export type EditorViewport = "desktop" | "mobile";
 
@@ -20,22 +18,16 @@ type Props = {
 
 export function SiteRenderer({ spec, viewport = "desktop", trackEvents = false, siteId, subdomain }: Props) {
   const trackedVisitRef = useRef(false);
-  const parsed = parseAnySiteSpec(spec);
+  const parsed = parseSiteSpecV3(spec);
   const normalized = parsed.success
     ? parsed.data
-    : buildSiteSpecV2FromTemplate({
-        siteType: "informative",
-        businessName: "Tu negocio"
+    : buildFallbackSiteSpecV3("Negocio local", {
+        siteType: "informative"
       });
 
   const homepage = normalized.pages.find((page) => page.slug === "/") ?? normalized.pages[0] ?? null;
   const whatsapp = normalized.integrations.whatsapp;
-  const contactSection = (homepage?.sections ?? []).find(
-    (section): section is Extract<SiteSectionV2, { type: "contact" }> => section.type === "contact"
-  );
-  const phone = contactSection?.props.whatsapp_phone;
-  const whatsappPhone = whatsapp?.phone ?? phone;
-  const whatsappLink = whatsapp?.enabled && whatsappPhone ? `https://wa.me/${whatsappPhone}` : undefined;
+  const whatsappLink = whatsapp?.enabled && whatsapp.phone ? `https://wa.me/${whatsapp.phone}` : undefined;
 
   const pageSlug = useMemo(() => {
     if (typeof window === "undefined") return "/";
@@ -54,7 +46,7 @@ export function SiteRenderer({ spec, viewport = "desktop", trackEvents = false, 
     });
   }, [pageSlug, siteId, subdomain, trackEvents]);
 
-  const rendererWidth = viewport === "mobile" ? 430 : undefined;
+  const rendererWidth = viewport === "mobile" ? 390 : 1120;
 
   function trackCta(sectionId: string) {
     if (!trackEvents || !siteId || !subdomain) return;
@@ -86,47 +78,25 @@ export function SiteRenderer({ spec, viewport = "desktop", trackEvents = false, 
         minHeight: "100vh",
         fontFamily: normalized.theme.font_body,
         maxWidth: rendererWidth,
-        margin: rendererWidth ? "0 auto" : undefined,
-        border: rendererWidth ? "1px solid var(--border)" : undefined,
-        borderRadius: rendererWidth ? "0.75rem" : undefined,
-        overflow: rendererWidth ? "hidden" : undefined
+        margin: "0 auto",
+        border: "1px solid var(--border)",
+        borderRadius: "0.75rem",
+        overflow: "hidden"
       }}
     >
       {(homepage?.sections ?? [])
         .filter((section) => section.enabled)
-        .map((section) => {
-          if (section.type === "hero") {
-            return (
-              <HeroSection
-                key={section.id}
-                section={section}
-                whatsappLink={whatsappLink}
-                theme={normalized.theme}
-                onTrackCtaClick={trackCta}
-              />
-            );
-          }
-
-          if (section.type === "catalog") {
-            return <CatalogSection key={section.id} section={section} whatsappLink={whatsappLink} theme={normalized.theme} />;
-          }
-
-          if (section.type === "testimonials") {
-            return (
-              <TestimonialsSection key={section.id} section={section} whatsappLink={whatsappLink} theme={normalized.theme} />
-            );
-          }
-
-          return (
-            <ContactSection
-              key={section.id}
-              section={section}
-              whatsappLink={whatsappLink}
-              theme={normalized.theme}
-              onTrackWhatsappClick={trackWhatsapp}
-            />
-          );
-        })}
+        .map((section) => (
+          <CanvasSection
+            key={section.id}
+            section={section}
+            viewport={viewport}
+            theme={normalized.theme}
+            whatsappLink={whatsappLink}
+            onTrackCtaClick={trackCta}
+            onTrackWhatsappClick={trackWhatsapp}
+          />
+        ))}
     </main>
   );
 }

@@ -264,7 +264,7 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
     setStep(3);
 
     try {
-      const response = await fetch("/api/onboarding/generate", {
+      const response = await fetch("/api/onboarding/generate-v3", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

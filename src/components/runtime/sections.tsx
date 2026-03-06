@@ -1,142 +1,186 @@
-import type { SiteSectionV2 } from "@/lib/site-spec-v2";
+import type { CanvasBlock, SiteSectionV3 } from "@/lib/site-spec-v3";
 
-type SectionProps = {
-  section: SiteSectionV2;
-  whatsappLink?: string;
-  theme: {
-    primary: string;
-    secondary: string;
-    background: string;
-  };
-  onTrackCtaClick?: (sectionId: string) => void;
-  onTrackWhatsappClick?: (sectionId: string) => void;
+type Theme = {
+  primary: string;
+  secondary: string;
+  background: string;
+  font_heading: string;
+  font_body: string;
+  radius: "sm" | "md" | "lg";
 };
 
-export function HeroSection({ section, whatsappLink, theme, onTrackCtaClick }: SectionProps) {
-  if (section.type !== "hero") return null;
+export type SectionRenderProps = {
+  section: SiteSectionV3;
+  viewport: "desktop" | "mobile";
+  theme: Theme;
+  whatsappLink?: string;
+  onTrackCtaClick?: (sectionId: string) => void;
+  onTrackWhatsappClick?: (sectionId: string) => void;
+  onSelectBlock?: (sectionId: string, blockId: string) => void;
+  selectedBlockId?: string | null;
+  editable?: boolean;
+};
 
-  const imageUrl = section.props.image_url || "https://placehold.co/1200x720?text=Hero";
-  const layoutStyle =
-    section.variant === "centered"
-      ? { gridTemplateColumns: "1fr", textAlign: "center" as const }
-      : { gridTemplateColumns: "1.1fr 1fr", textAlign: "left" as const };
-
-  return (
-    <section style={{ padding: "3rem 1rem" }}>
-      <div
-        style={{
-          display: "grid",
-          gap: "1.25rem",
-          alignItems: "center",
-          ...layoutStyle
-        }}
-      >
-        <div>
-          <h1>{section.props.headline}</h1>
-          <p>{section.props.subheadline}</p>
-          {whatsappLink ? (
-            <a
-              href={whatsappLink}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-primary"
-              onClick={() => onTrackCtaClick?.(section.id)}
-            >
-              {section.props.cta_label}
-            </a>
-          ) : null}
-        </div>
-
-        {section.variant === "centered" ? null : (
-          <img
-            src={imageUrl}
-            alt={section.props.headline}
-            style={{ width: "100%", borderRadius: "1rem", border: `1px solid ${theme.secondary}` }}
-          />
-        )}
-      </div>
-    </section>
-  );
-}
-
-export function CatalogSection({ section, theme }: SectionProps) {
-  if (section.type !== "catalog") return null;
-
-  const gridColumns = section.variant === "list" ? "1fr" : "repeat(auto-fit, minmax(180px, 1fr))";
-
-  return (
-    <section style={{ padding: "2rem 1rem" }}>
-      <h2>{section.props.title}</h2>
-      <div style={{ display: "grid", gap: "0.9rem", gridTemplateColumns: gridColumns }}>
-        {section.props.items.map((item) => (
-          <article
-            key={item.id}
-            className="card"
-            style={{
-              background: section.variant === "grid" ? "#ffffff" : theme.background,
-              border: `1px solid ${theme.secondary}33`
-            }}
-          >
-            <img
-              src={item.image_url || `https://placehold.co/600x400?text=${encodeURIComponent(item.name)}`}
-              alt={item.name}
-              style={{ width: "100%", borderRadius: "0.6rem", marginBottom: "0.5rem" }}
-            />
-            <h3>{item.name}</h3>
-            <p>{item.description}</p>
-            {item.price ? <strong>{item.price}</strong> : null}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-export function TestimonialsSection({ section, theme }: SectionProps) {
-  if (section.type !== "testimonials") return null;
-
-  const columns = section.variant === "spotlight" ? "1fr" : "repeat(auto-fit, minmax(220px, 1fr))";
-
-  return (
-    <section style={{ padding: "2rem 1rem" }}>
-      <h2>{section.props.title}</h2>
-      <div style={{ display: "grid", gap: "0.9rem", gridTemplateColumns: columns }}>
-        {section.props.items.map((item) => (
-          <article key={item.id} className="card" style={{ border: `1px solid ${theme.secondary}33` }}>
-            <p>"{item.quote}"</p>
-            <strong>{item.author}</strong>
-            {item.role ? <small style={{ display: "block" }}>{item.role}</small> : null}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-export function ContactSection({ section, whatsappLink, theme, onTrackWhatsappClick }: SectionProps) {
-  if (section.type !== "contact") return null;
+export function CanvasSection({
+  section,
+  viewport,
+  theme,
+  whatsappLink,
+  onTrackCtaClick,
+  onTrackWhatsappClick,
+  onSelectBlock,
+  selectedBlockId,
+  editable
+}: SectionRenderProps) {
+  const sectionHeight = viewport === "mobile" ? section.height.mobile : section.height.desktop;
 
   return (
     <section
+      data-section-id={section.id}
       style={{
-        padding: "2rem 1rem",
-        borderTop: `1px solid ${theme.secondary}40`
+        position: "relative",
+        minHeight: sectionHeight,
+        borderBottom: `1px solid ${theme.secondary}25`,
+        overflow: "hidden"
       }}
     >
-      <h2>{section.props.title}</h2>
-      <p>{section.props.description}</p>
-      {section.props.address ? <p>{section.props.address}</p> : null}
-      {whatsappLink ? (
-        <a
-          href={whatsappLink}
-          target="_blank"
-          rel="noreferrer"
-          className="btn-primary"
-          onClick={() => onTrackWhatsappClick?.(section.id)}
-        >
-          {section.props.whatsapp_label || "Escribir por WhatsApp"}
-        </a>
-      ) : null}
+      {section.blocks
+        .filter((block) => block.visible)
+        .sort((a, b) => blockRect(a, viewport).z - blockRect(b, viewport).z)
+        .map((block) => (
+          <CanvasBlockRenderer
+            key={block.id}
+            block={block}
+            sectionId={section.id}
+            viewport={viewport}
+            whatsappLink={whatsappLink}
+            onTrackCtaClick={onTrackCtaClick}
+            onTrackWhatsappClick={onTrackWhatsappClick}
+            onSelectBlock={onSelectBlock}
+            isSelected={selectedBlockId === block.id}
+            editable={editable}
+          />
+        ))}
     </section>
   );
+}
+
+function CanvasBlockRenderer({
+  block,
+  sectionId,
+  viewport,
+  whatsappLink,
+  onTrackCtaClick,
+  onTrackWhatsappClick,
+  onSelectBlock,
+  isSelected,
+  editable
+}: {
+  block: CanvasBlock;
+  sectionId: string;
+  viewport: "desktop" | "mobile";
+  whatsappLink?: string;
+  onTrackCtaClick?: (sectionId: string) => void;
+  onTrackWhatsappClick?: (sectionId: string) => void;
+  onSelectBlock?: (sectionId: string, blockId: string) => void;
+  isSelected: boolean;
+  editable?: boolean;
+}) {
+  const rect = blockRect(block, viewport);
+  const style = {
+    position: "absolute" as const,
+    left: rect.x,
+    top: rect.y,
+    width: rect.w,
+    height: rect.h,
+    zIndex: rect.z,
+    borderRadius: block.style.radius ?? 0,
+    color: block.style.color,
+    background: block.style.bgColor,
+    borderStyle: block.style.borderWidth ? "solid" : undefined,
+    borderWidth: block.style.borderWidth,
+    borderColor: block.style.borderColor,
+    opacity: block.style.opacity,
+    fontSize: block.style.fontSize,
+    fontWeight: block.style.fontWeight,
+    textAlign: block.style.textAlign as "left" | "center" | "right" | undefined,
+    boxSizing: "border-box" as const,
+    outline: editable && isSelected ? "2px solid #0ea5e9" : "none",
+    cursor: editable ? "pointer" : "default"
+  };
+
+  if (block.type === "text") {
+    return (
+      <div style={{ ...style, padding: 8 }} onClick={() => onSelectBlock?.(sectionId, block.id)}>
+        {block.content.text}
+      </div>
+    );
+  }
+
+  if (block.type === "image") {
+    const src = block.content.url || "https://placehold.co/800x520?text=Imagen";
+    return (
+      <img
+        src={src}
+        alt={block.content.alt ?? "Imagen"}
+        style={{ ...style, objectFit: "cover" as const }}
+        onClick={() => onSelectBlock?.(sectionId, block.id)}
+      />
+    );
+  }
+
+  if (block.type === "button") {
+    const href =
+      block.content.action === "whatsapp"
+        ? whatsappLink
+        : block.content.href && /^https?:\/\//i.test(block.content.href)
+          ? block.content.href
+          : undefined;
+
+    const handleClick = () => {
+      if (editable) {
+        onSelectBlock?.(sectionId, block.id);
+        return;
+      }
+      if (block.content.action === "whatsapp") {
+        onTrackWhatsappClick?.(sectionId);
+      } else {
+        onTrackCtaClick?.(sectionId);
+      }
+    };
+
+    if (!href) {
+      return (
+        <button type="button" style={{ ...style, border: "none" }} onClick={handleClick}>
+          {block.content.label}
+        </button>
+      );
+    }
+
+    return (
+      <a href={href} target="_blank" rel="noreferrer" style={{ ...style, textDecoration: "none", display: "grid", placeItems: "center" }} onClick={handleClick}>
+        {block.content.label}
+      </a>
+    );
+  }
+
+  if (block.type === "shape") {
+    const shapeStyle =
+      block.content.shape === "circle"
+        ? { borderRadius: "999px" }
+        : block.content.shape === "pill"
+          ? { borderRadius: "999px" }
+          : { borderRadius: block.style.radius ?? 8 };
+
+    return <div style={{ ...style, ...shapeStyle }} onClick={() => onSelectBlock?.(sectionId, block.id)} />;
+  }
+
+  return <div style={{ ...style }} onClick={() => onSelectBlock?.(sectionId, block.id)} />;
+}
+
+export function blockRect(block: CanvasBlock, viewport: "desktop" | "mobile") {
+  if (viewport === "mobile" && block.layout.mobile) {
+    return block.layout.mobile;
+  }
+  return block.layout.desktop;
 }

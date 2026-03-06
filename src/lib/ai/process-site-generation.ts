@@ -2,8 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
 
 import { generateSiteSpecFromPrompt } from "@/lib/ai/generate-site-spec";
-import { buildFallbackSiteSpecV2 } from "@/lib/site-spec-any";
+import { buildFallbackSiteSpecV3 } from "@/lib/site-spec-v3";
 import type { TemplateId } from "@/lib/templates/types";
+import type { BusinessBriefDraft } from "@/lib/onboarding/types";
 
 type ExecuteGenerationInput = {
   supabase: SupabaseClient;
@@ -12,6 +13,7 @@ type ExecuteGenerationInput = {
   jobId: string;
   eventType: string;
   templateId?: TemplateId;
+  briefDraft?: BusinessBriefDraft;
   extraEventPayload?: Record<string, unknown>;
 };
 
@@ -33,12 +35,20 @@ export async function executeSiteGenerationJob(input: ExecuteGenerationInput): P
 
     try {
       generation = await Promise.race([
-        generateSiteSpecFromPrompt(input.prompt, { templateId: input.templateId }),
+        generateSiteSpecFromPrompt({
+          prompt: input.prompt,
+          templateId: input.templateId,
+          briefDraft: input.briefDraft
+        }),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error("AI timeout")), 18_000))
       ]);
     } catch (generationError) {
       fallbackReason = generationError instanceof Error ? generationError.message : "Unknown AI error";
-      generation = { siteSpec: buildFallbackSiteSpecV2(input.prompt, { templateId: input.templateId }), source: "fallback" };
+      generation = {
+        siteSpec: buildFallbackSiteSpecV3(input.prompt, { templateId: input.templateId }),
+        source: "seed",
+        enhancementApplied: false
+      };
     }
 
     const { data: latestVersion } = await input.supabase
@@ -57,7 +67,7 @@ export async function executeSiteGenerationJob(input: ExecuteGenerationInput): P
         site_id: input.siteId,
         version: nextVersion,
         site_spec_json: generation.siteSpec,
-        source: generation.source,
+        source: "hybrid_generate",
         content_hash: createHash("sha256").update(JSON.stringify(generation.siteSpec)).digest("hex")
       })
       .select("id")
@@ -84,6 +94,8 @@ export async function executeSiteGenerationJob(input: ExecuteGenerationInput): P
         output_json: {
           versionId: version.id,
           source: generation.source,
+          generationMode: "hybrid_locked",
+          enhancementApplied: generation.enhancementApplied,
           latencyMs,
           fallbackReason
         },
@@ -98,6 +110,8 @@ export async function executeSiteGenerationJob(input: ExecuteGenerationInput): P
         jobId: input.jobId,
         latencyMs,
         source: generation.source,
+        generationMode: "hybrid_locked",
+        enhancementApplied: generation.enhancementApplied,
         fallbackReason,
         ...(input.extraEventPayload ?? {})
       }

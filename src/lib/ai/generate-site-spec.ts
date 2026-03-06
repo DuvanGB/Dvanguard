@@ -1,48 +1,75 @@
 import { env } from "@/lib/env";
-import { buildFallbackSiteSpecV2, parseAnySiteSpec } from "@/lib/site-spec-any";
-import type { SiteSpecV2 } from "@/lib/site-spec-v2";
+import { buildFallbackSiteSpecV3, buildSiteSpecV3FromBrief, parseSiteSpecV3, type SiteSpecV3 } from "@/lib/site-spec-v3";
 import type { TemplateId } from "@/lib/templates/types";
+import type { BusinessBriefDraft } from "@/lib/onboarding/types";
 
 type GenerationResult = {
-  siteSpec: SiteSpecV2;
-  source: "llm" | "fallback";
+  siteSpec: SiteSpecV3;
+  source: "llm" | "seed";
   rawText?: string;
+  enhancementApplied: boolean;
 };
 
-export async function generateSiteSpecFromPrompt(prompt: string, options?: { templateId?: TemplateId }): Promise<GenerationResult> {
-  if (env.aiProvider === "mock" || !env.aiBaseUrl) {
-    return { siteSpec: buildFallbackSiteSpecV2(prompt, { templateId: options?.templateId }), source: "fallback" };
+type EnhancementPayload = {
+  hero_subheadline?: string;
+  catalog_title?: string;
+  catalog_items?: Array<{ name?: string; description?: string; price?: string }>;
+  testimonials?: string[];
+  contact_description?: string;
+};
+
+export async function generateSiteSpecFromPrompt(input: {
+  prompt: string;
+  templateId?: TemplateId;
+  briefDraft?: BusinessBriefDraft;
+}): Promise<GenerationResult> {
+  const seedSpec = buildSeedSpec(input);
+
+  if (env.aiProvider === "mock" || !env.aiBaseUrl || !env.aiModel) {
+    return { siteSpec: seedSpec, source: "seed", enhancementApplied: false };
   }
 
-  const llmText = await callLLM(prompt, options);
+  try {
+    const llmText = await callLLMForEnhancement(input.prompt, seedSpec.template.id);
+    const parsed = safeParseJson(llmText);
+    const enhanced = applyEnhancements(seedSpec, parsed);
+    const validated = parseSiteSpecV3(enhanced);
 
-  const parsedJson = safeParseJson(llmText);
-  const validated = parseAnySiteSpec(parsedJson, { preferredTemplateId: options?.templateId ?? null });
-  if (validated.success) {
-    return { siteSpec: validated.data, source: "llm", rawText: llmText };
+    if (validated.success) {
+      return {
+        siteSpec: validated.data,
+        source: "llm",
+        rawText: llmText,
+        enhancementApplied: true
+      };
+    }
+  } catch {
+    // Fallback to deterministic seed spec.
   }
 
-  // Repair step with stricter instruction
-  const repairedText = await callLLM(
-    `Devuelve EXCLUSIVAMENTE JSON valido acorde al schema SiteSpec v2.0. Entrada de negocio: ${prompt}`,
-    options
-  );
-  const repairedJson = safeParseJson(repairedText);
-  const repairedValidated = parseAnySiteSpec(repairedJson, { preferredTemplateId: options?.templateId ?? null });
-
-  if (repairedValidated.success) {
-    return { siteSpec: repairedValidated.data, source: "llm", rawText: repairedText };
-  }
-
-  return {
-    siteSpec: buildFallbackSiteSpecV2(prompt, { templateId: options?.templateId }),
-    source: "fallback",
-    rawText: repairedText
-  };
+  return { siteSpec: seedSpec, source: "seed", enhancementApplied: false };
 }
 
-async function callLLM(prompt: string, options?: { templateId?: TemplateId }) {
-  const templateHint = options?.templateId ? `Template preferida: ${options.templateId}.` : "";
+function buildSeedSpec(input: { prompt: string; templateId?: TemplateId; briefDraft?: BusinessBriefDraft }) {
+  const { briefDraft } = input;
+
+  if (briefDraft) {
+    return buildSiteSpecV3FromBrief({
+      siteType: briefDraft.business_type,
+      templateId: input.templateId,
+      businessName: briefDraft.business_name,
+      offerSummary: briefDraft.offer_summary,
+      targetAudience: briefDraft.target_audience,
+      tone: briefDraft.tone,
+      ctaLabel: briefDraft.primary_cta,
+      sectionPreferences: briefDraft.section_preferences
+    });
+  }
+
+  return buildFallbackSiteSpecV3(input.prompt, { templateId: input.templateId });
+}
+
+async function callLLMForEnhancement(prompt: string, templateId: TemplateId) {
   const response = await fetch(env.aiBaseUrl, {
     method: "POST",
     headers: {
@@ -56,11 +83,17 @@ async function callLLM(prompt: string, options?: { templateId?: TemplateId }) {
         {
           role: "system",
           content:
-            "Eres un generador de configuraciones de sitios web. Responde SOLO JSON válido para SiteSpec v2.0 sin markdown ni texto adicional."
+            "Eres un asistente de copy para sitios web. Devuelve SOLO JSON válido con mejoras de texto. No envíes markdown."
         },
         {
           role: "user",
-          content: `Negocio: ${prompt}. ${templateHint}`
+          content: [
+            "Devuelve un JSON con campos opcionales:",
+            "hero_subheadline, catalog_title, catalog_items (max 3), testimonials (max 3), contact_description.",
+            "No inventes estructura HTML ni SiteSpec completo.",
+            `Template elegida: ${templateId}.`,
+            `Brief del negocio: ${prompt}`
+          ].join(" ")
         }
       ]
     })
@@ -81,6 +114,68 @@ async function callLLM(prompt: string, options?: { templateId?: TemplateId }) {
   }
 
   return content;
+}
+
+function applyEnhancements(seedSpec: SiteSpecV3, parsed: unknown): SiteSpecV3 {
+  const payload = parsed as EnhancementPayload;
+  const spec = structuredClone(seedSpec);
+  const home = spec.pages[0];
+  if (!home) return seedSpec;
+
+  const hero = home.sections.find((section) => section.type === "hero");
+  const catalog = home.sections.find((section) => section.type === "catalog");
+  const testimonials = home.sections.find((section) => section.type === "testimonials");
+  const contact = home.sections.find((section) => section.type === "contact");
+
+  if (hero && payload.hero_subheadline) {
+    const block = hero.blocks.find((item) => item.type === "text" && item.id.includes("subheadline"));
+    if (block && block.type === "text") {
+      block.content.text = payload.hero_subheadline.slice(0, 400);
+    }
+  }
+
+  if (catalog && payload.catalog_title) {
+    const block = catalog.blocks.find((item) => item.type === "text" && item.id.includes("title"));
+    if (block && block.type === "text") {
+      block.content.text = payload.catalog_title.slice(0, 120);
+    }
+  }
+
+  if (catalog && Array.isArray(payload.catalog_items)) {
+    payload.catalog_items.slice(0, 3).forEach((item, index) => {
+      const name = catalog.blocks.find((block) => block.type === "text" && block.id.endsWith(`name-${index + 1}`));
+      const desc = catalog.blocks.find((block) => block.type === "text" && block.id.endsWith(`desc-${index + 1}`));
+      const price = catalog.blocks.find((block) => block.type === "text" && block.id.endsWith(`price-${index + 1}`));
+
+      if (name && name.type === "text" && item.name) {
+        name.content.text = item.name.slice(0, 120);
+      }
+      if (desc && desc.type === "text" && item.description) {
+        desc.content.text = item.description.slice(0, 220);
+      }
+      if (price && price.type === "text" && item.price) {
+        price.content.text = item.price.slice(0, 40);
+      }
+    });
+  }
+
+  if (testimonials && Array.isArray(payload.testimonials)) {
+    payload.testimonials.slice(0, 3).forEach((quote, index) => {
+      const block = testimonials.blocks.find((item) => item.type === "text" && item.id.endsWith(`quote-${index + 1}`));
+      if (block && block.type === "text" && quote) {
+        block.content.text = quote.slice(0, 280);
+      }
+    });
+  }
+
+  if (contact && payload.contact_description) {
+    const block = contact.blocks.find((item) => item.type === "text" && item.id.includes("description"));
+    if (block && block.type === "text") {
+      block.content.text = payload.contact_description.slice(0, 280);
+    }
+  }
+
+  return spec;
 }
 
 function safeParseJson(input: string): unknown {

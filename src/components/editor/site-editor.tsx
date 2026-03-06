@@ -1,16 +1,31 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { SiteRenderer, type EditorViewport } from "@/components/runtime/site-renderer";
-import type { SiteSectionV2, SiteSpecV2 } from "@/lib/site-spec-v2";
+import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
 
 type Props = {
   siteId: string;
-  initialSpec: SiteSpecV2;
+  initialSpec: SiteSpecV3;
 };
 
 type EditorSaveState = "idle" | "saving" | "saved" | "error";
+type EditorViewport = "desktop" | "mobile";
+type DragMode = "move" | "resize";
+
+type SelectedBlock = {
+  sectionId: string;
+  blockId: string;
+};
+
+type DragState = {
+  mode: DragMode;
+  sectionId: string;
+  blockId: string;
+  startX: number;
+  startY: number;
+  initialRect: CanvasLayoutRect;
+};
 
 type SiteAsset = {
   id: string;
@@ -23,16 +38,24 @@ type SiteAsset = {
   created_at: string;
 };
 
-const SECTION_LIBRARY: Array<SiteSectionV2["type"]> = ["hero", "catalog", "testimonials", "contact"];
+const PREVIEW_WIDTH: Record<EditorViewport, number> = {
+  desktop: 1120,
+  mobile: 390
+};
+
+const SECTION_LIBRARY: Array<SiteSectionV3["type"]> = ["hero", "catalog", "testimonials", "contact"];
+const BLOCK_LIBRARY: Array<CanvasBlock["type"]> = ["text", "image", "button", "shape", "container"];
 
 export function SiteEditor({ siteId, initialSpec }: Props) {
-  const [siteSpec, setSiteSpec] = useState<SiteSpecV2>(initialSpec);
-  const [publishing, setPublishing] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [siteSpec, setSiteSpec] = useState<SiteSpecV3>(initialSpec);
+  const [viewport, setViewport] = useState<EditorViewport>("desktop");
+  const [selected, setSelected] = useState<SelectedBlock | null>(null);
   const [saveState, setSaveState] = useState<EditorSaveState>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [lastPersistedHash, setLastPersistedHash] = useState(() => hashSpec(initialSpec));
-  const [viewport, setViewport] = useState<EditorViewport>("desktop");
+  const [message, setMessage] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const dragStateRef = useRef<DragState | null>(null);
 
   const [assets, setAssets] = useState<SiteAsset[]>([]);
   const [assetsLoading, setAssetsLoading] = useState(false);
@@ -40,13 +63,13 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
   const [uploadingAsset, setUploadingAsset] = useState(false);
   const [externalUrl, setExternalUrl] = useState("");
   const [externalAltText, setExternalAltText] = useState("");
-  const [draggingSectionId, setDraggingSectionId] = useState<string | null>(null);
-  const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
 
-  const homepage = useMemo(() => siteSpec.pages.find((page) => page.slug === "/") ?? siteSpec.pages[0] ?? null, [siteSpec]);
   const currentHash = useMemo(() => hashSpec(siteSpec), [siteSpec]);
   const isDirty = currentHash !== lastPersistedHash;
   const savedAgoLabel = useSavedAgoLabel(lastSavedAt);
+  const home = useMemo(() => siteSpec.pages.find((page) => page.slug === "/") ?? siteSpec.pages[0] ?? null, [siteSpec]);
+  const selectedSection = home?.sections.find((section) => section.id === selected?.sectionId) ?? null;
+  const selectedBlock = selectedSection?.blocks.find((block) => block.id === selected?.blockId) ?? null;
 
   useEffect(() => {
     void loadAssets();
@@ -55,17 +78,13 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
 
   useEffect(() => {
     if (!isDirty || publishing) {
-      if (!isDirty && saveState === "saved") {
-        setSaveState("idle");
-      }
+      if (!isDirty && saveState === "saved") setSaveState("idle");
       return;
     }
 
-    const specToSave = siteSpec;
-    setSaveState("saving");
-
     const timeout = setTimeout(async () => {
-      const result = await persistSpec(specToSave, "auto_save");
+      setSaveState("saving");
+      const result = await persistSpec(siteSpec, "canvas_auto_save");
       if (!result.ok) {
         setSaveState("error");
         setMessage(result.error);
@@ -80,12 +99,64 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     return () => clearTimeout(timeout);
   }, [isDirty, publishing, saveState, siteSpec]);
 
-  function setHomepageSections(updater: (sections: SiteSectionV2[]) => SiteSectionV2[]) {
-    if (!homepage) return;
+  useEffect(() => {
+    const onMouseMove = (event: MouseEvent) => {
+      const drag = dragStateRef.current;
+      if (!drag) return;
+
+      const section = home?.sections.find((item) => item.id === drag.sectionId);
+      if (!section) return;
+
+      const deltaX = event.clientX - drag.startX;
+      const deltaY = event.clientY - drag.startY;
+      const maxW = PREVIEW_WIDTH[viewport];
+      const maxH = viewport === "mobile" ? section.height.mobile : section.height.desktop;
+
+      if (drag.mode === "move") {
+        const nextRect = clampRect(
+          {
+            ...drag.initialRect,
+            x: drag.initialRect.x + deltaX,
+            y: drag.initialRect.y + deltaY
+          },
+          maxW,
+          maxH
+        );
+        updateBlockRect(drag.sectionId, drag.blockId, nextRect);
+        return;
+      }
+
+      const resized = clampRect(
+        {
+          ...drag.initialRect,
+          w: drag.initialRect.w + deltaX,
+          h: drag.initialRect.h + deltaY
+        },
+        maxW,
+        maxH
+      );
+      updateBlockRect(drag.sectionId, drag.blockId, resized);
+    };
+
+    const onMouseUp = () => {
+      dragStateRef.current = null;
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [home?.sections, viewport]);
+
+  function setHomeSections(updater: (sections: SiteSectionV3[]) => SiteSectionV3[]) {
+    if (!home) return;
+
     setSiteSpec((prev) => ({
       ...prev,
       pages: prev.pages.map((page) =>
-        page.id === homepage.id
+        page.id === home.id
           ? {
               ...page,
               sections: updater(page.sections)
@@ -95,193 +166,100 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     }));
   }
 
-  function updateSection(sectionId: string, updater: (section: SiteSectionV2) => SiteSectionV2) {
-    setHomepageSections((sections) => sections.map((section) => (section.id === sectionId ? updater(section) : section)));
+  function updateSection(sectionId: string, updater: (section: SiteSectionV3) => SiteSectionV3) {
+    setHomeSections((sections) => sections.map((section) => (section.id === sectionId ? updater(section) : section)));
   }
 
-  function toggleSection(sectionId: string) {
-    updateSection(sectionId, (section) => ({ ...section, enabled: !section.enabled }));
+  function updateBlock(sectionId: string, blockId: string, updater: (block: CanvasBlock) => CanvasBlock) {
+    updateSection(sectionId, (section) => ({
+      ...section,
+      blocks: section.blocks.map((block) => (block.id === blockId ? updater(block) : block))
+    }));
   }
 
-  function removeSection(sectionId: string) {
-    setHomepageSections((sections) => sections.filter((section) => section.id !== sectionId));
-  }
-
-  function addSection(type: SiteSectionV2["type"]) {
-    const nextIndex = (homepage?.sections.filter((section) => section.type === type).length ?? 0) + 1;
-    const section = createDefaultSection(type, nextIndex);
-    setHomepageSections((sections) => [...sections, section]);
-  }
-
-  function canAddSection(type: SiteSectionV2["type"]) {
-    const sections = homepage?.sections ?? [];
-    if (type === "hero") return !sections.some((section) => section.type === "hero");
-    if (type === "contact") return !sections.some((section) => section.type === "contact");
-    return true;
-  }
-
-  function moveSectionByIds(activeId: string, overId: string) {
-    setHomepageSections((sections) => {
-      const oldIndex = sections.findIndex((section) => section.id === activeId);
-      const newIndex = sections.findIndex((section) => section.id === overId);
-      if (oldIndex < 0 || newIndex < 0) return sections;
-      const moved = [...sections];
-      const [item] = moved.splice(oldIndex, 1);
-      if (!item) return sections;
-      moved.splice(newIndex, 0, item);
-      return moved;
-    });
-  }
-
-  function moveSectionByOffset(sectionId: string, offset: -1 | 1) {
-    setHomepageSections((sections) => {
-      const currentIndex = sections.findIndex((section) => section.id === sectionId);
-      if (currentIndex < 0) return sections;
-
-      const nextIndex = currentIndex + offset;
-      if (nextIndex < 0 || nextIndex >= sections.length) return sections;
-
-      const moved = [...sections];
-      const [item] = moved.splice(currentIndex, 1);
-      if (!item) return sections;
-      moved.splice(nextIndex, 0, item);
-      return moved;
-    });
-  }
-
-  function updateThemeField<K extends keyof SiteSpecV2["theme"]>(field: K, value: SiteSpecV2["theme"][K]) {
-    setSiteSpec((prev) => ({
-      ...prev,
-      theme: {
-        ...prev.theme,
-        [field]: value
+  function updateBlockRect(sectionId: string, blockId: string, nextRect: CanvasLayoutRect) {
+    updateBlock(sectionId, blockId, (block) => ({
+      ...block,
+      layout: {
+        ...block.layout,
+        [viewport]: nextRect
       }
     }));
   }
 
-  function updateCatalogItem(
-    sectionId: string,
-    itemId: string,
-    field: "name" | "description" | "price" | "image_url",
-    value: string
-  ) {
-    updateSection(sectionId, (section) => {
-      if (section.type !== "catalog") return section;
-
-      return {
-        ...section,
-        props: {
-          ...section.props,
-          items: section.props.items.map((item) => (item.id === itemId ? { ...item, [field]: value } : item))
-        }
-      };
-    });
+  function addSection(type: SiteSectionV3["type"]) {
+    const index = (home?.sections.filter((item) => item.type === type).length ?? 0) + 1;
+    const section = createDefaultSection(type, index);
+    setHomeSections((sections) => [...sections, section]);
   }
 
-  function addCatalogItem(sectionId: string) {
-    updateSection(sectionId, (section) => {
-      if (section.type !== "catalog" || section.props.items.length >= 8) return section;
-
-      const nextIndex = section.props.items.length + 1;
-      return {
-        ...section,
-        props: {
-          ...section.props,
-          items: [
-            ...section.props.items,
-            {
-              id: `item-${Date.now()}`,
-              name: `Item ${nextIndex}`,
-              description: "Descripción breve",
-              price: "",
-              image_url: ""
-            }
-          ]
-        }
-      };
-    });
+  function removeSection(sectionId: string) {
+    setHomeSections((sections) => sections.filter((section) => section.id !== sectionId));
+    if (selected?.sectionId === sectionId) setSelected(null);
   }
 
-  function removeCatalogItem(sectionId: string, itemId: string) {
-    updateSection(sectionId, (section) => {
-      if (section.type !== "catalog" || section.props.items.length <= 1) return section;
-      return {
-        ...section,
-        props: {
-          ...section.props,
-          items: section.props.items.filter((item) => item.id !== itemId)
-        }
-      };
-    });
+  function addBlock(sectionId: string, type: CanvasBlock["type"]) {
+    const section = home?.sections.find((item) => item.id === sectionId);
+    if (!section) return;
+
+    const index = section.blocks.length + 1;
+    const block = createDefaultBlock(sectionId, type, index, viewport);
+    updateSection(sectionId, (current) => ({
+      ...current,
+      blocks: [...current.blocks, block]
+    }));
+    setSelected({ sectionId, blockId: block.id });
   }
 
-  function updateTestimonialItem(sectionId: string, itemId: string, field: "quote" | "author" | "role", value: string) {
-    updateSection(sectionId, (section) => {
-      if (section.type !== "testimonials") return section;
-      return {
-        ...section,
-        props: {
-          ...section.props,
-          items: section.props.items.map((item) => (item.id === itemId ? { ...item, [field]: value } : item))
-        }
-      };
-    });
+  function deleteSelectedBlock() {
+    if (!selected) return;
+    updateSection(selected.sectionId, (section) => ({
+      ...section,
+      blocks: section.blocks.filter((block) => block.id !== selected.blockId)
+    }));
+    setSelected(null);
   }
 
-  function addTestimonialItem(sectionId: string) {
-    updateSection(sectionId, (section) => {
-      if (section.type !== "testimonials" || section.props.items.length >= 6) return section;
-
-      const nextIndex = section.props.items.length + 1;
-      return {
-        ...section,
-        props: {
-          ...section.props,
-          items: [
-            ...section.props.items,
-            {
-              id: `test-${Date.now()}`,
-              quote: "Testimonio",
-              author: `Cliente ${nextIndex}`,
-              role: ""
-            }
-          ]
-        }
-      };
-    });
-  }
-
-  function removeTestimonialItem(sectionId: string, itemId: string) {
-    updateSection(sectionId, (section) => {
-      if (section.type !== "testimonials" || section.props.items.length <= 1) return section;
-      return {
-        ...section,
-        props: {
-          ...section.props,
-          items: section.props.items.filter((item) => item.id !== itemId)
-        }
-      };
-    });
-  }
-
-  function updateVariant(sectionId: string, variant: string) {
-    updateSection(sectionId, (section) => {
-      if (section.type === "hero") {
-        return { ...section, variant: variant as (typeof section)["variant"] };
+  function duplicateSelectedBlock() {
+    if (!selected || !selectedBlock) return;
+    const cloned = structuredClone(selectedBlock);
+    cloned.id = `${selectedBlock.id}-copy-${Date.now()}`;
+    const rect = getBlockRect(cloned, viewport);
+    cloned.layout = {
+      ...cloned.layout,
+      [viewport]: {
+        ...rect,
+        x: rect.x + 16,
+        y: rect.y + 16,
+        z: rect.z + 1
       }
-      if (section.type === "catalog") {
-        return { ...section, variant: variant as (typeof section)["variant"] };
-      }
-      if (section.type === "testimonials") {
-        return { ...section, variant: variant as (typeof section)["variant"] };
-      }
-      return { ...section, variant: variant as (typeof section)["variant"] };
-    });
+    };
+
+    updateSection(selected.sectionId, (section) => ({
+      ...section,
+      blocks: [...section.blocks, cloned]
+    }));
+
+    setSelected({ sectionId: selected.sectionId, blockId: cloned.id });
   }
 
-  async function persistSpec(specToPersist: SiteSpecV2, source: "auto_save" | "manual_checkpoint" | "manual") {
-    const invalidImage = hasInvalidImageUrl(specToPersist);
-    if (invalidImage) {
+  function startDragging(event: React.MouseEvent, sectionId: string, block: CanvasBlock, mode: DragMode) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    dragStateRef.current = {
+      mode,
+      sectionId,
+      blockId: block.id,
+      startX: event.clientX,
+      startY: event.clientY,
+      initialRect: getBlockRect(block, viewport)
+    };
+    setSelected({ sectionId, blockId: block.id });
+  }
+
+  async function persistSpec(specToPersist: SiteSpecV3, source: "canvas_auto_save" | "canvas_manual_checkpoint" | "manual") {
+    if (hasInvalidImageUrl(specToPersist)) {
       return {
         ok: false as const,
         error: "Hay una URL de imagen inválida. Usa formato http:// o https://"
@@ -296,7 +274,6 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     });
 
     const data = (await response.json()) as { error?: string; versionId?: string; deduped?: boolean };
-
     if (!response.ok || !data.versionId) {
       return {
         ok: false as const,
@@ -315,7 +292,8 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
   async function saveCheckpoint() {
     setMessage(null);
     setSaveState("saving");
-    const result = await persistSpec(siteSpec, "manual_checkpoint");
+
+    const result = await persistSpec(siteSpec, "canvas_manual_checkpoint");
     if (!result.ok) {
       setSaveState("error");
       setMessage(result.error);
@@ -332,7 +310,7 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     setPublishing(true);
     setMessage(null);
 
-    const persisted = await persistSpec(siteSpec, "manual_checkpoint");
+    const persisted = await persistSpec(siteSpec, "canvas_manual_checkpoint");
     if (!persisted.ok) {
       setMessage(persisted.error);
       setSaveState("error");
@@ -364,11 +342,13 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     setAssetsLoading(true);
     const response = await fetch(`/api/sites/${siteId}/assets`);
     const data = (await response.json()) as { error?: string; items?: SiteAsset[] };
+
     if (!response.ok) {
       setAssetsMessage(data.error ?? "No se pudo cargar la librería de imágenes.");
       setAssetsLoading(false);
       return;
     }
+
     setAssets(data.items ?? []);
     setAssetsLoading(false);
   }
@@ -385,6 +365,7 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
       method: "POST",
       body: form
     });
+
     const data = (await response.json()) as { error?: string };
     if (!response.ok) {
       setAssetsMessage(data.error ?? "No se pudo subir la imagen.");
@@ -437,34 +418,17 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     await loadAssets();
   }
 
-  function renderAssetPicker(onSelect: (url: string) => void) {
-    if (!assets.length) return null;
-
-    return (
-      <select
-        defaultValue=""
-        onChange={(event) => {
-          const selected = assets.find((asset) => asset.id === event.target.value);
-          if (selected) onSelect(selected.public_url);
-          event.currentTarget.value = "";
-        }}
-      >
-        <option value="">Usar imagen de librería...</option>
-        {assets.map((asset) => (
-          <option key={asset.id} value={asset.id}>
-            {asset.kind === "uploaded" ? "Archivo" : "URL"} • {new Date(asset.created_at).toLocaleDateString()}
-          </option>
-        ))}
-      </select>
+  function applyAssetToSelected(url: string) {
+    if (!selected || !selectedBlock || selectedBlock.type !== "image") return;
+    updateBlock(selected.sectionId, selected.blockId, (block) =>
+      block.type === "image" ? { ...block, content: { ...block.content, url } } : block
     );
   }
 
   return (
     <div className="stack" style={{ gap: "1rem" }}>
       <section className="card stack">
-        <h2>Editor Visual v2.1</h2>
-        {!homepage ? <p>No hay una página inicial para editar.</p> : null}
-
+        <h2>Canvas Editor v3</h2>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
           <span className="btn-secondary" style={{ cursor: "default" }}>
             Autosave activo
@@ -474,7 +438,6 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
           {saveState === "error" ? <span>Error al guardar</span> : null}
           {saveState === "idle" && !isDirty ? <span>Sin cambios</span> : null}
         </div>
-
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <button type="button" className={viewport === "desktop" ? "btn-primary" : "btn-secondary"} onClick={() => setViewport("desktop")}>
             Desktop
@@ -487,16 +450,10 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
 
       <section className="editor-layout">
         <aside className="card stack editor-pane">
-          <h3>Biblioteca de secciones</h3>
+          <h3>Secciones</h3>
           <div className="stack">
             {SECTION_LIBRARY.map((type) => (
-              <button
-                key={type}
-                type="button"
-                className="btn-secondary"
-                onClick={() => addSection(type)}
-                disabled={!canAddSection(type)}
-              >
+              <button key={type} type="button" className="btn-secondary" onClick={() => addSection(type)}>
                 Agregar {type}
               </button>
             ))}
@@ -539,357 +496,371 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
         </aside>
 
         <section className="card stack editor-pane">
-          <h3>Contenido y estilo</h3>
+          <h3>Inspector</h3>
 
           <label>
             Color primario
-            <input type="color" value={siteSpec.theme.primary} onChange={(event) => updateThemeField("primary", event.target.value)} />
+            <input
+              type="color"
+              value={siteSpec.theme.primary}
+              onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, primary: event.target.value } }))}
+            />
           </label>
           <label>
             Color secundario
-            <input type="color" value={siteSpec.theme.secondary} onChange={(event) => updateThemeField("secondary", event.target.value)} />
+            <input
+              type="color"
+              value={siteSpec.theme.secondary}
+              onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, secondary: event.target.value } }))}
+            />
           </label>
           <label>
             Fondo
-            <input type="color" value={siteSpec.theme.background} onChange={(event) => updateThemeField("background", event.target.value)} />
-          </label>
-          <label>
-            Tipografía títulos
-            <input value={siteSpec.theme.font_heading} onChange={(event) => updateThemeField("font_heading", event.target.value)} />
-          </label>
-          <label>
-            Tipografía cuerpo
-            <input value={siteSpec.theme.font_body} onChange={(event) => updateThemeField("font_body", event.target.value)} />
-          </label>
-          <label>
-            Radio de bordes
-            <select
-              value={siteSpec.theme.radius}
-              onChange={(event) => updateThemeField("radius", event.target.value as SiteSpecV2["theme"]["radius"])}
-            >
-              <option value="sm">sm</option>
-              <option value="md">md</option>
-              <option value="lg">lg</option>
-            </select>
+            <input
+              type="color"
+              value={siteSpec.theme.background}
+              onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, background: event.target.value } }))}
+            />
           </label>
 
-          {(homepage?.sections ?? []).map((section) => (
-            <article
-              key={section.id}
-              className="card stack"
-              draggable
-              onDragStart={() => {
-                setDraggingSectionId(section.id);
-                setDragOverSectionId(section.id);
-              }}
-              onDragOver={(event) => {
-                event.preventDefault();
-                if (dragOverSectionId !== section.id) {
-                  setDragOverSectionId(section.id);
-                }
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                if (draggingSectionId && draggingSectionId !== section.id) {
-                  moveSectionByIds(draggingSectionId, section.id);
-                }
-                setDraggingSectionId(null);
-                setDragOverSectionId(null);
-              }}
-              onDragEnd={() => {
-                setDraggingSectionId(null);
-                setDragOverSectionId(null);
-              }}
-              style={{
-                opacity: draggingSectionId === section.id ? 0.65 : 1,
-                outline: dragOverSectionId === section.id ? "2px dashed var(--color-primary)" : "none"
-              }}
-            >
-              <button type="button" className="btn-secondary" style={{ width: "fit-content", cursor: "grab" }}>
-                Arrastrar sección
-              </button>
-              <div className="stack">
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", alignItems: "center" }}>
-                    <strong>{section.type}</strong>
-                    <div style={{ display: "flex", gap: "0.5rem" }}>
-                      <button type="button" className="btn-secondary" onClick={() => moveSectionByOffset(section.id, -1)}>
-                        ↑
-                      </button>
-                      <button type="button" className="btn-secondary" onClick={() => moveSectionByOffset(section.id, 1)}>
-                        ↓
-                      </button>
-                      <button type="button" className="btn-secondary" onClick={() => removeSection(section.id)}>
-                        Quitar
-                      </button>
-                    </div>
+          {selectedSection ? (
+            <>
+              <strong>Sección seleccionada: {selectedSection.type}</strong>
+              <label>
+                Variante
+                <select
+                  value={selectedSection.variant}
+                  onChange={(event) =>
+                    updateSection(selectedSection.id, (section) => ({
+                      ...section,
+                      variant: event.target.value as SiteSectionV3["variant"]
+                    }))
+                  }
+                >
+                  <option value="centered">centered</option>
+                  <option value="split">split</option>
+                  <option value="image-left">image-left</option>
+                  <option value="grid">grid</option>
+                  <option value="cards">cards</option>
+                  <option value="list">list</option>
+                  <option value="minimal">minimal</option>
+                  <option value="spotlight">spotlight</option>
+                  <option value="simple">simple</option>
+                  <option value="highlight">highlight</option>
+                  <option value="compact">compact</option>
+                </select>
+              </label>
+              {selectedSection.type === "hero" && selectedSection.variant === "centered" ? (
+                <small>
+                  Esta variante puede ocultar el bloque de imagen principal. Puedes activar su visibilidad desde la lista de
+                  bloques.
+                </small>
+              ) : null}
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                {BLOCK_LIBRARY.map((type) => (
+                  <button key={type} type="button" className="btn-secondary" onClick={() => addBlock(selectedSection.id, type)}>
+                    + {type}
+                  </button>
+                ))}
+                <button type="button" className="btn-secondary" onClick={() => removeSection(selectedSection.id)}>
+                  Eliminar sección
+                </button>
+              </div>
+              <div className="card stack">
+                <small>Bloques de la sección</small>
+                {selectedSection.blocks.map((block) => (
+                  <div key={block.id} style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
+                    <button type="button" className="btn-secondary" onClick={() => setSelected({ sectionId: selectedSection.id, blockId: block.id })}>
+                      {block.type} {block.visible ? "" : "(oculto)"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() =>
+                        updateBlock(selectedSection.id, block.id, (item) => ({
+                          ...item,
+                          visible: !item.visible
+                        }))
+                      }
+                    >
+                      {block.visible ? "Ocultar" : "Mostrar"}
+                    </button>
                   </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <small>Haz click sobre un bloque en el preview para editarlo.</small>
+          )}
 
-                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <input
-                      type="checkbox"
-                      checked={section.enabled}
-                      onChange={() => toggleSection(section.id)}
-                      style={{ width: "auto" }}
-                    />
-                    Activa
-                  </label>
+          {selected && selectedBlock ? (
+            <div className="card stack">
+              <strong>Bloque: {selectedBlock.type}</strong>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                <button type="button" className="btn-secondary" onClick={duplicateSelectedBlock}>
+                  Duplicar
+                </button>
+                <button type="button" className="btn-secondary" onClick={deleteSelectedBlock}>
+                  Eliminar
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() =>
+                    updateBlock(selected.sectionId, selected.blockId, (block) => ({ ...block, visible: !block.visible }))
+                  }
+                >
+                  {selectedBlock.visible ? "Ocultar" : "Mostrar"}
+                </button>
+              </div>
 
+              <label>
+                X
+                <input
+                  type="number"
+                  value={getBlockRect(selectedBlock, viewport).x}
+                  onChange={(event) =>
+                    updateBlockRect(selected.sectionId, selected.blockId, {
+                      ...getBlockRect(selectedBlock, viewport),
+                      x: Number(event.target.value)
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Y
+                <input
+                  type="number"
+                  value={getBlockRect(selectedBlock, viewport).y}
+                  onChange={(event) =>
+                    updateBlockRect(selected.sectionId, selected.blockId, {
+                      ...getBlockRect(selectedBlock, viewport),
+                      y: Number(event.target.value)
+                    })
+                  }
+                />
+              </label>
+              <label>
+                W
+                <input
+                  type="number"
+                  value={getBlockRect(selectedBlock, viewport).w}
+                  onChange={(event) =>
+                    updateBlockRect(selected.sectionId, selected.blockId, {
+                      ...getBlockRect(selectedBlock, viewport),
+                      w: Number(event.target.value)
+                    })
+                  }
+                />
+              </label>
+              <label>
+                H
+                <input
+                  type="number"
+                  value={getBlockRect(selectedBlock, viewport).h}
+                  onChange={(event) =>
+                    updateBlockRect(selected.sectionId, selected.blockId, {
+                      ...getBlockRect(selectedBlock, viewport),
+                      h: Number(event.target.value)
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Tamaño texto
+                <input
+                  type="number"
+                  value={selectedBlock.style.fontSize ?? ""}
+                  onChange={(event) =>
+                    updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                      ...block,
+                      style: {
+                        ...block.style,
+                        fontSize: Number(event.target.value) || undefined
+                      }
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Color texto
+                <input
+                  type="color"
+                  value={selectedBlock.style.color ?? "#0f172a"}
+                  onChange={(event) =>
+                    updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                      ...block,
+                      style: {
+                        ...block.style,
+                        color: event.target.value
+                      }
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Fondo
+                <input
+                  type="color"
+                  value={selectedBlock.style.bgColor ?? "#ffffff"}
+                  onChange={(event) =>
+                    updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                      ...block,
+                      style: {
+                        ...block.style,
+                        bgColor: event.target.value
+                      }
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Opacidad
+                <input
+                  type="number"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={selectedBlock.style.opacity ?? 1}
+                  onChange={(event) =>
+                    updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                      ...block,
+                      style: {
+                        ...block.style,
+                        opacity: Number(event.target.value)
+                      }
+                    }))
+                  }
+                />
+              </label>
+
+              {selectedBlock.type === "text" ? (
+                <label>
+                  Texto
+                  <textarea
+                    rows={4}
+                    value={selectedBlock.content.text}
+                    onChange={(event) =>
+                      updateBlock(selected.sectionId, selected.blockId, (block) =>
+                        block.type === "text"
+                          ? {
+                              ...block,
+                              content: { ...block.content, text: event.target.value }
+                            }
+                          : block
+                      )
+                    }
+                  />
+                </label>
+              ) : null}
+
+              {selectedBlock.type === "image" ? (
+                <>
                   <label>
-                    Variante
-                    <select value={section.variant} onChange={(event) => updateVariant(section.id, event.target.value)}>
-                      {section.type === "hero" ? (
-                        <>
-                          <option value="centered">centered</option>
-                          <option value="split">split</option>
-                          <option value="image-left">image-left</option>
-                        </>
-                      ) : null}
-                      {section.type === "catalog" ? (
-                        <>
-                          <option value="grid">grid</option>
-                          <option value="cards">cards</option>
-                          <option value="list">list</option>
-                        </>
-                      ) : null}
-                      {section.type === "testimonials" ? (
-                        <>
-                          <option value="cards">cards</option>
-                          <option value="minimal">minimal</option>
-                          <option value="spotlight">spotlight</option>
-                        </>
-                      ) : null}
-                      {section.type === "contact" ? (
-                        <>
-                          <option value="simple">simple</option>
-                          <option value="highlight">highlight</option>
-                          <option value="compact">compact</option>
-                        </>
-                      ) : null}
+                    Imagen URL
+                    <input
+                      value={selectedBlock.content.url ?? ""}
+                      onChange={(event) =>
+                        updateBlock(selected.sectionId, selected.blockId, (block) =>
+                          block.type === "image"
+                            ? {
+                                ...block,
+                                content: { ...block.content, url: event.target.value }
+                              }
+                            : block
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    Alt text
+                    <input
+                      value={selectedBlock.content.alt ?? ""}
+                      onChange={(event) =>
+                        updateBlock(selected.sectionId, selected.blockId, (block) =>
+                          block.type === "image"
+                            ? {
+                                ...block,
+                                content: { ...block.content, alt: event.target.value }
+                              }
+                            : block
+                        )
+                      }
+                    />
+                  </label>
+                  {assets.length ? (
+                    <select defaultValue="" onChange={(event) => applyAssetToSelected(assets.find((asset) => asset.id === event.target.value)?.public_url ?? "")}>
+                      <option value="">Usar imagen de librería...</option>
+                      {assets.map((asset) => (
+                        <option key={asset.id} value={asset.id}>
+                          {asset.kind === "uploaded" ? "Archivo" : "URL"} • {new Date(asset.created_at).toLocaleDateString()}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+                </>
+              ) : null}
+
+              {selectedBlock.type === "button" ? (
+                <>
+                  <label>
+                    Label
+                    <input
+                      value={selectedBlock.content.label}
+                      onChange={(event) =>
+                        updateBlock(selected.sectionId, selected.blockId, (block) =>
+                          block.type === "button"
+                            ? {
+                                ...block,
+                                content: { ...block.content, label: event.target.value }
+                              }
+                            : block
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    Acción
+                    <select
+                      value={selectedBlock.content.action}
+                      onChange={(event) =>
+                        updateBlock(selected.sectionId, selected.blockId, (block) =>
+                          block.type === "button"
+                            ? {
+                                ...block,
+                                content: { ...block.content, action: event.target.value as "whatsapp" | "link" }
+                              }
+                            : block
+                        )
+                      }
+                    >
+                      <option value="whatsapp">whatsapp</option>
+                      <option value="link">link</option>
                     </select>
                   </label>
-
-                  {section.type === "hero" ? (
-                    <>
-                      <label>
-                        Headline
-                        <input
-                          value={section.props.headline}
-                          onChange={(event) =>
-                            updateSection(section.id, (s) =>
-                              s.type === "hero" ? { ...s, props: { ...s.props, headline: event.target.value } } : s
-                            )
-                          }
-                        />
-                      </label>
-                      <label>
-                        Subheadline
-                        <input
-                          value={section.props.subheadline}
-                          onChange={(event) =>
-                            updateSection(section.id, (s) =>
-                              s.type === "hero" ? { ...s, props: { ...s.props, subheadline: event.target.value } } : s
-                            )
-                          }
-                        />
-                      </label>
-                      <label>
-                        CTA label
-                        <input
-                          value={section.props.cta_label}
-                          onChange={(event) =>
-                            updateSection(section.id, (s) =>
-                              s.type === "hero" ? { ...s, props: { ...s.props, cta_label: event.target.value } } : s
-                            )
-                          }
-                        />
-                      </label>
-                      <label>
-                        Imagen URL
-                        <input
-                          value={section.props.image_url ?? ""}
-                          onChange={(event) =>
-                            updateSection(section.id, (s) =>
-                              s.type === "hero" ? { ...s, props: { ...s.props, image_url: event.target.value } } : s
-                            )
-                          }
-                        />
-                      </label>
-                      {renderAssetPicker((url) =>
-                        updateSection(section.id, (s) =>
-                          s.type === "hero" ? { ...s, props: { ...s.props, image_url: url } } : s
-                        )
-                      )}
-                    </>
+                  {selectedBlock.content.action === "link" ? (
+                    <label>
+                      URL
+                      <input
+                        value={selectedBlock.content.href ?? ""}
+                        onChange={(event) =>
+                          updateBlock(selected.sectionId, selected.blockId, (block) =>
+                            block.type === "button"
+                              ? {
+                                  ...block,
+                                  content: { ...block.content, href: event.target.value }
+                                }
+                              : block
+                          )
+                        }
+                      />
+                    </label>
                   ) : null}
-
-                  {section.type === "catalog" ? (
-                    <>
-                      <label>
-                        Título
-                        <input
-                          value={section.props.title}
-                          onChange={(event) =>
-                            updateSection(section.id, (s) =>
-                              s.type === "catalog" ? { ...s, props: { ...s.props, title: event.target.value } } : s
-                            )
-                          }
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        onClick={() => addCatalogItem(section.id)}
-                        disabled={section.props.items.length >= 8}
-                      >
-                        Agregar item
-                      </button>
-                      {section.props.items.map((item) => (
-                        <div key={item.id} className="card stack">
-                          <label>
-                            Nombre
-                            <input value={item.name} onChange={(event) => updateCatalogItem(section.id, item.id, "name", event.target.value)} />
-                          </label>
-                          <label>
-                            Descripción
-                            <input
-                              value={item.description}
-                              onChange={(event) => updateCatalogItem(section.id, item.id, "description", event.target.value)}
-                            />
-                          </label>
-                          <label>
-                            Precio
-                            <input value={item.price ?? ""} onChange={(event) => updateCatalogItem(section.id, item.id, "price", event.target.value)} />
-                          </label>
-                          <label>
-                            Imagen URL
-                            <input
-                              value={item.image_url ?? ""}
-                              onChange={(event) => updateCatalogItem(section.id, item.id, "image_url", event.target.value)}
-                            />
-                          </label>
-                          {renderAssetPicker((url) => updateCatalogItem(section.id, item.id, "image_url", url))}
-                          <button type="button" className="btn-secondary" onClick={() => removeCatalogItem(section.id, item.id)}>
-                            Eliminar item
-                          </button>
-                        </div>
-                      ))}
-                    </>
-                  ) : null}
-
-                  {section.type === "testimonials" ? (
-                    <>
-                      <label>
-                        Título
-                        <input
-                          value={section.props.title}
-                          onChange={(event) =>
-                            updateSection(section.id, (s) =>
-                              s.type === "testimonials" ? { ...s, props: { ...s.props, title: event.target.value } } : s
-                            )
-                          }
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        onClick={() => addTestimonialItem(section.id)}
-                        disabled={section.props.items.length >= 6}
-                      >
-                        Agregar testimonio
-                      </button>
-                      {section.props.items.map((item) => (
-                        <div key={item.id} className="card stack">
-                          <label>
-                            Cita
-                            <input
-                              value={item.quote}
-                              onChange={(event) => updateTestimonialItem(section.id, item.id, "quote", event.target.value)}
-                            />
-                          </label>
-                          <label>
-                            Autor
-                            <input
-                              value={item.author}
-                              onChange={(event) => updateTestimonialItem(section.id, item.id, "author", event.target.value)}
-                            />
-                          </label>
-                          <label>
-                            Rol
-                            <input
-                              value={item.role ?? ""}
-                              onChange={(event) => updateTestimonialItem(section.id, item.id, "role", event.target.value)}
-                            />
-                          </label>
-                          <button type="button" className="btn-secondary" onClick={() => removeTestimonialItem(section.id, item.id)}>
-                            Eliminar testimonio
-                          </button>
-                        </div>
-                      ))}
-                    </>
-                  ) : null}
-
-                  {section.type === "contact" ? (
-                    <>
-                      <label>
-                        Título
-                        <input
-                          value={section.props.title}
-                          onChange={(event) =>
-                            updateSection(section.id, (s) =>
-                              s.type === "contact" ? { ...s, props: { ...s.props, title: event.target.value } } : s
-                            )
-                          }
-                        />
-                      </label>
-                      <label>
-                        Descripción
-                        <input
-                          value={section.props.description}
-                          onChange={(event) =>
-                            updateSection(section.id, (s) =>
-                              s.type === "contact" ? { ...s, props: { ...s.props, description: event.target.value } } : s
-                            )
-                          }
-                        />
-                      </label>
-                      <label>
-                        WhatsApp
-                        <input
-                          value={section.props.whatsapp_phone ?? ""}
-                          onChange={(event) =>
-                            updateSection(section.id, (s) =>
-                              s.type === "contact" ? { ...s, props: { ...s.props, whatsapp_phone: event.target.value } } : s
-                            )
-                          }
-                        />
-                      </label>
-                      <label>
-                        Label WhatsApp
-                        <input
-                          value={section.props.whatsapp_label ?? ""}
-                          onChange={(event) =>
-                            updateSection(section.id, (s) =>
-                              s.type === "contact" ? { ...s, props: { ...s.props, whatsapp_label: event.target.value } } : s
-                            )
-                          }
-                        />
-                      </label>
-                      <label>
-                        Dirección
-                        <input
-                          value={section.props.address ?? ""}
-                          onChange={(event) =>
-                            updateSection(section.id, (s) =>
-                              s.type === "contact" ? { ...s, props: { ...s.props, address: event.target.value } } : s
-                            )
-                          }
-                        />
-                      </label>
-                    </>
-                  ) : null}
-              </div>
-            </article>
-          ))}
+                </>
+              ) : null}
+            </div>
+          ) : null}
 
           <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
             <button className="btn-secondary" type="button" onClick={() => void saveCheckpoint()}>
@@ -903,15 +874,111 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
         </section>
 
         <section className="card stack editor-pane">
-          <h3>Preview realtime</h3>
-          <SiteRenderer spec={siteSpec} viewport={viewport} />
+          <h3>Preview canvas</h3>
+          <div
+            style={{
+              width: PREVIEW_WIDTH[viewport],
+              maxWidth: "100%",
+              margin: "0 auto",
+              border: "1px solid var(--border)",
+              borderRadius: "0.75rem",
+              overflow: "hidden",
+              background: siteSpec.theme.background
+            }}
+          >
+            {(home?.sections ?? [])
+              .filter((section) => section.enabled)
+              .map((section) => (
+                <article
+                  key={section.id}
+                  style={{
+                    position: "relative",
+                    minHeight: viewport === "mobile" ? section.height.mobile : section.height.desktop,
+                    borderBottom: `1px solid ${siteSpec.theme.secondary}30`
+                  }}
+                  onClick={() => setSelected((prev) => (prev?.sectionId === section.id ? prev : { sectionId: section.id, blockId: section.blocks[0]?.id ?? "" }))}
+                >
+                  {section.blocks
+                    .filter((block) => block.visible)
+                    .map((block) => {
+                      const rect = getBlockRect(block, viewport);
+                      const isSelected = selected?.sectionId === section.id && selected?.blockId === block.id;
+
+                      return (
+                        <div
+                          key={block.id}
+                          style={{
+                            position: "absolute",
+                            left: rect.x,
+                            top: rect.y,
+                            width: rect.w,
+                            height: rect.h,
+                            zIndex: rect.z,
+                            borderRadius: block.style.radius ?? 0,
+                            color: block.style.color,
+                            background: block.style.bgColor,
+                            borderStyle: block.style.borderWidth ? "solid" : undefined,
+                            borderWidth: block.style.borderWidth,
+                            borderColor: block.style.borderColor,
+                            opacity: block.style.opacity,
+                            fontSize: block.style.fontSize,
+                            fontWeight: block.style.fontWeight,
+                            textAlign: block.style.textAlign as "left" | "center" | "right" | undefined,
+                            overflow: "hidden",
+                            outline: isSelected ? "2px solid #0ea5e9" : "1px dashed transparent",
+                            boxSizing: "border-box",
+                            cursor: "move",
+                            padding: block.type === "text" ? 8 : 0
+                          }}
+                          onMouseDown={(event) => startDragging(event, section.id, block, "move")}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSelected({ sectionId: section.id, blockId: block.id });
+                          }}
+                        >
+                          {block.type === "text" ? block.content.text : null}
+                          {block.type === "image" ? (
+                            <img
+                              src={block.content.url || "https://placehold.co/800x520?text=Imagen"}
+                              alt={block.content.alt ?? "Imagen"}
+                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            />
+                          ) : null}
+                          {block.type === "button" ? (
+                            <button type="button" style={{ width: "100%", height: "100%", border: "none", background: "transparent", color: "inherit" }}>
+                              {block.content.label}
+                            </button>
+                          ) : null}
+                          {block.type === "shape" ? <div style={{ width: "100%", height: "100%" }} /> : null}
+                          {block.type === "container" ? <div style={{ width: "100%", height: "100%" }} /> : null}
+                          {isSelected ? (
+                            <div
+                              onMouseDown={(event) => startDragging(event, section.id, block, "resize")}
+                              style={{
+                                position: "absolute",
+                                right: 2,
+                                bottom: 2,
+                                width: 14,
+                                height: 14,
+                                borderRadius: 4,
+                                background: "#0ea5e9",
+                                cursor: "nwse-resize"
+                              }}
+                            />
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                </article>
+              ))}
+          </div>
         </section>
       </section>
     </div>
   );
 }
 
-function createDefaultSection(type: SiteSectionV2["type"], index: number): SiteSectionV2 {
+function createDefaultSection(type: SiteSectionV3["type"], index: number): SiteSectionV3 {
   const id = `${type}-${Date.now()}-${index}`;
 
   if (type === "hero") {
@@ -920,12 +987,11 @@ function createDefaultSection(type: SiteSectionV2["type"], index: number): SiteS
       type: "hero",
       enabled: true,
       variant: "centered",
-      props: {
-        headline: "Tu propuesta de valor",
-        subheadline: "Describe aquí por qué tu negocio es la mejor opción.",
-        cta_label: "Hablar por WhatsApp",
-        image_url: ""
-      }
+      height: { desktop: 520, mobile: 540 },
+      blocks: [
+        createDefaultBlock(id, "text", 1, "desktop"),
+        createDefaultBlock(id, "button", 2, "desktop")
+      ]
     };
   }
 
@@ -935,18 +1001,8 @@ function createDefaultSection(type: SiteSectionV2["type"], index: number): SiteS
       type: "catalog",
       enabled: true,
       variant: "cards",
-      props: {
-        title: "Catálogo",
-        items: [
-          {
-            id: `item-${Date.now()}`,
-            name: "Producto o servicio",
-            description: "Descripción breve",
-            price: "",
-            image_url: ""
-          }
-        ]
-      }
+      height: { desktop: 620, mobile: 900 },
+      blocks: [createDefaultBlock(id, "container", 1, "desktop")]
     };
   }
 
@@ -956,17 +1012,8 @@ function createDefaultSection(type: SiteSectionV2["type"], index: number): SiteS
       type: "testimonials",
       enabled: true,
       variant: "cards",
-      props: {
-        title: "Testimonios",
-        items: [
-          {
-            id: `test-${Date.now()}`,
-            quote: "Excelente experiencia.",
-            author: "Cliente",
-            role: ""
-          }
-        ]
-      }
+      height: { desktop: 520, mobile: 700 },
+      blocks: [createDefaultBlock(id, "text", 1, "desktop")]
     };
   }
 
@@ -975,38 +1022,110 @@ function createDefaultSection(type: SiteSectionV2["type"], index: number): SiteS
     type: "contact",
     enabled: true,
     variant: "simple",
-    props: {
-      title: "Contáctanos",
-      description: "Escríbenos y te respondemos pronto.",
-      whatsapp_phone: "",
-      whatsapp_label: "Escribir por WhatsApp",
-      address: ""
-    }
+    height: { desktop: 360, mobile: 420 },
+    blocks: [createDefaultBlock(id, "text", 1, "desktop"), createDefaultBlock(id, "button", 2, "desktop")]
   };
 }
 
-function hasInvalidImageUrl(spec: SiteSpecV2) {
-  const sections = spec.pages[0]?.sections ?? [];
-  const isValid = (value: string | undefined) => !value || /^https?:\/\//i.test(value);
+function createDefaultBlock(sectionId: string, type: CanvasBlock["type"], index: number, viewport: EditorViewport): CanvasBlock {
+  const desktop = { x: 40 + index * 12, y: 50 + index * 12, w: 260, h: 90, z: index + 1 };
+  const mobile = { x: 24, y: 40 + index * 14, w: 300, h: 86, z: index + 1 };
+  const layout = viewport === "mobile" ? { desktop, mobile } : { desktop };
 
-  for (const section of sections) {
-    if (section.type === "hero" && !isValid(section.props.image_url)) {
-      return true;
-    }
+  if (type === "text") {
+    return {
+      id: `${sectionId}-text-${Date.now()}`,
+      type: "text",
+      visible: true,
+      layout,
+      style: { fontSize: 22, fontWeight: 700, color: "#0f172a" },
+      content: { text: "Texto editable" }
+    };
+  }
 
-    if (section.type === "catalog") {
-      for (const item of section.props.items) {
-        if (!isValid(item.image_url)) {
-          return true;
-        }
+  if (type === "image") {
+    return {
+      id: `${sectionId}-image-${Date.now()}`,
+      type: "image",
+      visible: true,
+      layout: {
+        ...layout,
+        desktop: { ...desktop, h: 180 },
+        mobile: { ...mobile, h: 150 }
+      },
+      style: { radius: 12 },
+      content: { url: "", alt: "" }
+    };
+  }
+
+  if (type === "button") {
+    return {
+      id: `${sectionId}-button-${Date.now()}`,
+      type: "button",
+      visible: true,
+      layout: {
+        ...layout,
+        desktop: { ...desktop, w: 220, h: 50 },
+        mobile: { ...mobile, w: 220, h: 48 }
+      },
+      style: { bgColor: "#0c4a6e", color: "#ffffff", radius: 12, fontWeight: 700, textAlign: "center" },
+      content: { label: "Botón", action: "whatsapp" }
+    };
+  }
+
+  if (type === "shape") {
+    return {
+      id: `${sectionId}-shape-${Date.now()}`,
+      type: "shape",
+      visible: true,
+      layout,
+      style: { bgColor: "#e2e8f0", radius: 12 },
+      content: { shape: "rect" }
+    };
+  }
+
+  return {
+    id: `${sectionId}-container-${Date.now()}`,
+    type: "container",
+    visible: true,
+    layout: {
+      ...layout,
+      desktop: { ...desktop, w: 300, h: 260 },
+      mobile: { ...mobile, w: 320, h: 220 }
+    },
+    style: { bgColor: "#ffffff", borderColor: "#cbd5e1", borderWidth: 1, radius: 14 },
+    content: {}
+  };
+}
+
+function getBlockRect(block: CanvasBlock, viewport: EditorViewport) {
+  if (viewport === "mobile" && block.layout.mobile) return block.layout.mobile;
+  return block.layout.desktop;
+}
+
+function clampRect(rect: CanvasLayoutRect, maxW: number, maxH: number): CanvasLayoutRect {
+  const w = Math.max(40, Math.min(rect.w, maxW));
+  const h = Math.max(24, Math.min(rect.h, maxH));
+  const x = Math.max(0, Math.min(rect.x, maxW - w));
+  const y = Math.max(0, Math.min(rect.y, maxH - h));
+  return { ...rect, x, y, w, h };
+}
+
+function hasInvalidImageUrl(spec: SiteSpecV3) {
+  for (const page of spec.pages) {
+    for (const section of page.sections) {
+      for (const block of section.blocks) {
+        if (block.type !== "image") continue;
+        const url = block.content.url?.trim();
+        if (!url) continue;
+        if (!/^https?:\/\//i.test(url)) return true;
       }
     }
   }
-
   return false;
 }
 
-function hashSpec(spec: SiteSpecV2) {
+function hashSpec(spec: SiteSpecV3) {
   return JSON.stringify(spec);
 }
 

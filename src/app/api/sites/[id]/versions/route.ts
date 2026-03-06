@@ -10,7 +10,7 @@ import { recordPlatformEvent } from "@/lib/platform-events";
 
 const bodySchema = z.object({
   siteSpec: z.unknown(),
-  source: z.enum(["manual", "auto_save", "manual_checkpoint"]).optional()
+  source: z.enum(["manual", "canvas_auto_save", "canvas_manual_checkpoint"]).optional()
 });
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -52,7 +52,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const nextVersion = (latestVersion?.version ?? 0) + 1;
 
-  let previousSpec: unknown = latestVersion?.site_spec_json ?? null;
   const previousHash =
     latestVersion?.content_hash ??
     (latestVersion?.site_spec_json ? hashSpec(latestVersion.site_spec_json) : null);
@@ -94,7 +93,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       payload: {
         versionId: version.id,
         schemaVersion: normalizedSpec.schema_version,
-        templateId: normalizedSpec.schema_version === "2.0" ? normalizedSpec.template.id : null,
+        templateId: normalizedSpec.template.id,
         source
       }
     });
@@ -102,38 +101,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // best effort
   }
 
-  if (normalizedSpec.schema_version === "2.0" && previousSpec) {
-    const parsedPrev = parseAnySiteSpec(previousSpec);
-    if (parsedPrev.success && parsedPrev.data.schema_version === "2.0") {
-      const currentSections = normalizedSpec.pages[0]?.sections ?? [];
-      const previousSections = parsedPrev.data.pages[0]?.sections ?? [];
-
-      for (const section of currentSections) {
-        const prevSection = previousSections.find((item) => item.id === section.id && item.type === section.type);
-        if (!prevSection) continue;
-
-        if (section.variant !== prevSection.variant) {
-          try {
-            await recordPlatformEvent(admin, {
-              eventType: "editor.section.variant_changed",
-              userId: user.id,
-              siteId: id,
-              payload: {
-                sectionId: section.id,
-                sectionType: section.type,
-                fromVariant: prevSection.variant,
-                toVariant: section.variant
-              }
-            });
-          } catch {
-            // best effort
-          }
-        }
-      }
-    }
-  }
-
-  if (source !== "auto_save") {
+  if (source !== "canvas_auto_save") {
     try {
       await maybeRecordFirstResultAccepted({
         admin,

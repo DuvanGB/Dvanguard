@@ -150,24 +150,16 @@ export async function getOwnerSiteAnalytics(input: {
 function buildActivationChecklist(spec: AnySiteSpec, status: string) {
   const homepage = spec.pages.find((page) => page.slug === "/") ?? spec.pages[0];
   const enabledSections = homepage?.sections.filter((section) => section.enabled) ?? [];
-  const hero = enabledSections.find((section) => section.type === "hero");
-  const contact = enabledSections.find((section) => section.type === "contact");
-  const catalog = enabledSections.find((section) => section.type === "catalog");
+  const allBlocks = enabledSections.flatMap((section) => section.blocks);
 
   const hasContent =
-    hero?.type === "hero" &&
-    hero.props.headline.trim().length >= 6 &&
-    hero.props.subheadline.trim().length >= 12 &&
+    allBlocks.some((block) => block.type === "text" && block.content.text.trim().length >= 12) &&
     enabledSections.length >= 2;
 
-  const hasPrimaryImage =
-    (hero?.type === "hero" && Boolean(hero.props.image_url)) ||
-    (catalog?.type === "catalog" && catalog.props.items.some((item) => Boolean(item.image_url)));
+  const hasPrimaryImage = allBlocks.some((block) => block.type === "image" && Boolean(block.content.url));
 
-  const whatsappPhoneFromContact = contact?.type === "contact" ? contact.props.whatsapp_phone : undefined;
-  const hasWhatsapp = Boolean(
-    spec.integrations.whatsapp?.enabled && (spec.integrations.whatsapp?.phone || whatsappPhoneFromContact)
-  );
+  const hasWhatsappButton = allBlocks.some((block) => block.type === "button" && block.content.action === "whatsapp");
+  const hasWhatsapp = Boolean(spec.integrations.whatsapp?.enabled && (spec.integrations.whatsapp?.phone || hasWhatsappButton));
 
   return [
     { key: "content", label: "Contenido mínimo", done: Boolean(hasContent) },

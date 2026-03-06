@@ -3,8 +3,7 @@ import { notFound } from "next/navigation";
 
 import { SiteEditor } from "@/components/editor/site-editor";
 import { requireUser } from "@/lib/auth";
-import { buildSiteSpecV2FromTemplate } from "@/lib/site-spec-v2";
-import { ensureSiteCurrentVersionV2 } from "@/lib/site-spec-migration";
+import { parseSiteSpecV3, buildSiteSpecV3FromBrief, type SiteSpecV3 } from "@/lib/site-spec-v3";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export default async function SiteEditorPage({ params }: { params: Promise<{ id: string }> }) {
@@ -21,19 +20,24 @@ export default async function SiteEditorPage({ params }: { params: Promise<{ id:
     notFound();
   }
 
-  const migrated = await ensureSiteCurrentVersionV2({
-    supabase,
-    admin: getSupabaseAdminClient(),
-    siteId: site.id,
-    fallbackSiteName: site.name
+  const admin = getSupabaseAdminClient();
+  let initialSpec: SiteSpecV3 = buildSiteSpecV3FromBrief({
+    siteType: site.site_type,
+    businessName: site.name
   });
 
-  const siteSpec = migrated.ok
-    ? migrated.siteSpec
-    : buildSiteSpecV2FromTemplate({
-        siteType: site.site_type,
-        businessName: site.name
-      });
+  if (site.current_version_id) {
+    const { data: version } = await admin
+      .from("site_versions")
+      .select("site_spec_json")
+      .eq("id", site.current_version_id)
+      .maybeSingle();
+
+    const parsed = parseSiteSpecV3(version?.site_spec_json);
+    if (parsed.success) {
+      initialSpec = parsed.data;
+    }
+  }
 
   return (
     <main className="container stack" style={{ paddingTop: "2rem" }}>
@@ -45,7 +49,7 @@ export default async function SiteEditorPage({ params }: { params: Promise<{ id:
         </Link>
       </header>
 
-      <SiteEditor siteId={site.id} initialSpec={siteSpec} />
+      <SiteEditor siteId={site.id} initialSpec={initialSpec} />
     </main>
   );
 }

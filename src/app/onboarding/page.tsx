@@ -6,7 +6,6 @@ import { OnboardingWizard } from "@/components/forms/onboarding-wizard";
 import { requireUser } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { recordPlatformEvent } from "@/lib/platform-events";
-import { ensureSiteCurrentVersionV2 } from "@/lib/site-spec-migration";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export default async function OnboardingPage({
@@ -111,13 +110,6 @@ export default async function OnboardingPage({
       // best effort
     }
   }
-
-  await ensureSiteCurrentVersionV2({
-    supabase,
-    admin,
-    siteId: site.id,
-    fallbackSiteName: site.name
-  });
 
   return (
     <main className="container stack" style={{ paddingTop: "2rem" }}>

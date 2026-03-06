@@ -48,6 +48,12 @@ MVP SaaS multi-tenant para generar sitios web desde una descripción de negocio,
   - media manager (upload Supabase Storage + URL externa)
   - tracking público de visitas y clics de conversión
   - dashboard cliente/admin con métricas de tráfico
+- Fase 7 reset-first:
+  - contrato único `SiteSpec v3.0` (sin compat v1/v2)
+  - onboarding con generación híbrida bloqueada (seed determinista + enriquecimiento IA opcional)
+  - editor canvas interactivo por bloques (selección directa, drag, resize, inspector)
+  - endpoints de canvas para operaciones por bloque
+  - reset global de datos de producto + limpieza de assets
 
 ## Variables de entorno
 
@@ -123,6 +129,10 @@ npm run db:push
 - `supabase/migrations/0007_media_assets_and_storage_support.sql`
 - `supabase/migrations/0008_public_site_analytics.sql`
 - `supabase/migrations/0009_site_versions_autosave_source_and_hash.sql`
+- `supabase/migrations/0010_reset_and_prepare_v3.sql`
+- `supabase/migrations/0011_site_versions_v3_constraints.sql`
+- `supabase/migrations/0012_canvas_block_ops.sql`
+- `supabase/migrations/0013_recreate_site_assets_bucket.sql`
 
 Incluye tablas:
 
@@ -176,12 +186,18 @@ Configura estos secrets en GitHub:
 - `POST /api/admin/users/:id/plan`
 - `POST /api/onboarding/refine`
 - `POST /api/onboarding/generate`
+- `POST /api/onboarding/generate-v3`
 - `GET /api/templates?siteType=informative|commerce_lite`
-- `POST /api/sites/:id/migrate-v2`
 - `GET /api/sites/:id/assets`
 - `POST /api/sites/:id/assets/upload`
 - `POST /api/sites/:id/assets/external`
 - `DELETE /api/sites/:id/assets/:assetId`
+- `GET /api/sites/:id/canvas`
+- `POST /api/sites/:id/canvas/block`
+- `PATCH /api/sites/:id/canvas/block/:blockId`
+- `DELETE /api/sites/:id/canvas/block/:blockId`
+- `POST /api/sites/:id/canvas/reorder`
+- `POST /api/sites/:id/canvas/viewport-override`
 - `POST /api/public/track`
 - `GET /api/dashboard/analytics?siteId=&range=7d|30d`
 - `GET /api/admin/traffic-metrics?range=7d|30d`
@@ -248,35 +264,35 @@ Flujo recomendado:
 - `Refine fallback rate (7d)`
 - `Regeneraciones p50/p95`
 
-## Motor visual v2 (fase 5)
+## Motor visual v3 (fase 7)
 
 ### Flujo visual nuevo
 
 1. Usuario refina brief en onboarding.
 2. Sistema sugiere plantillas y el usuario selecciona una.
-3. Generación crea `SiteSpec v2.0` (con fallback seguro).
-4. Editor permite:
-   - textos por sección
-   - CRUD de items en catálogo/testimonios
-   - variantes por sección
-   - URL de imagen por sección/item
-   - paleta + tipografías + radius
+3. Generación usa seed determinista + enriquecimiento IA opcional (`hybrid_locked`).
+4. Editor canvas permite:
+   - selección directa de bloques sobre preview
+   - drag/resize
+   - edición de contenido/estilo por inspector
+   - overrides mobile/desktop
+   - integración con librería de media
 
-### Compatibilidad y migración
+### Compatibilidad
 
-- Sitios v1 se migran de forma lazy a v2 al entrar a `/onboarding` o `/sites/:id`.
-- Runtime público usa parser unificado para tolerar v1/v2 durante transición.
-- Guardado desde editor persiste contrato normalizado v2.
+- Fase 7 elimina compatibilidad legacy: solo se acepta `SiteSpec v3.0`.
+- El reset de datos deja el proyecto en ciclo nuevo.
 
-### Eventos y métricas v2
+### Eventos y métricas v3
 
 - Eventos:
   - `template.recommended`
   - `template.selected`
-  - `site.v2.migrated`
-  - `editor.section.variant_changed`
+  - `onboarding.brief.locked_compiled`
+  - `generation.patch.applied`
+  - `editor.canvas.element.updated`
   - `editor.content.saved`
-  - `site.v2.first_result.accepted`
+  - `site.v3.first_result.accepted`
 - KPIs admin añadidos:
   - `% plantilla recomendada elegida`
   - `% aceptación primer resultado v2`
@@ -311,6 +327,14 @@ ADMIN_ALLOWLIST_EMAILS=tu-correo@dominio.com,otro-admin@dominio.com
 - `AI_PROVIDER=mock` genera `SiteSpec` fallback sin depender de LLM externo.
 - Para subdominios en local puedes usar hosts tipo `mi-sitio.localhost:3000`.
 - El editor DnD libre no está implementado en esta etapa (editor visual v2 sin drag & drop libre).
+
+## Reset-First (fase 7)
+
+Se ejecutó reset global de datos de producto en Supabase remoto con migraciones `0010-0013`.
+
+- Backup operativo guardado en `ops/backups/<timestamp>/`.
+- Si no hay Docker disponible, se usa snapshot por tablas vía `supabase-js` + snapshot de esquema desde `supabase/migrations`.
+- El bucket `site-assets` se limpia por Storage API (`supabase --experimental storage rm -r`) y luego se recrea por migración.
 
 ## Canvas Realtime + Media + Traffic (fase 6)
 

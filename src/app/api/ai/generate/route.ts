@@ -86,11 +86,23 @@ export async function POST(request: NextRequest) {
     userId: user.id,
     siteId,
     prompt: promptToUse,
+    briefDraft,
     inputMode,
     templateId,
     refineConfidence,
     warningsCount: warnings?.length ?? 0
   });
+
+  if (result.ok) {
+    return NextResponse.json(
+      {
+        ...result.data,
+        generationMode: "hybrid_locked",
+        seedApplied: true
+      },
+      { status: result.status }
+    );
+  }
 
   return NextResponse.json(result.data, { status: result.status });
 }

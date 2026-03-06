@@ -6,7 +6,7 @@ import { requireApiUser } from "@/lib/auth";
 import { getRequestClientKey } from "@/lib/http";
 import { logError, logInfo } from "@/lib/logger";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { buildSiteSpecV2FromTemplate } from "@/lib/site-spec-v2";
+import { buildSiteSpecV3FromBrief } from "@/lib/site-spec-v3";
 
 const bodySchema = z.object({
   name: z.string().min(2).max(80),
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: siteError?.message ?? "Failed to create site" }, { status: 400 });
   }
 
-  const initialSpec = buildSiteSpecV2FromTemplate({
+  const initialSpec = buildSiteSpecV3FromBrief({
     siteType,
     businessName: name
   });

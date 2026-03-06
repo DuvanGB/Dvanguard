@@ -6,7 +6,7 @@ export function buildPromptFromBrief(brief: BusinessBriefDraft, options?: { temp
   const templateHint = options?.templateId ? `Template obligatoria: ${options.templateId}.` : "";
 
   return [
-    "Genera un SiteSpec v2.0 en es-LATAM para un sitio web orientado a conversión.",
+    "Genera contenido para un SiteSpec v3.0 en es-LATAM orientado a conversión.",
     `Nombre del negocio: ${brief.business_name}.`,
     `Tipo de sitio: ${brief.business_type}.`,
     `Oferta principal: ${brief.offer_summary}.`,
