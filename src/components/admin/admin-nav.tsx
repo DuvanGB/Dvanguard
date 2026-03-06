@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 const links = [
   { href: "/admin", label: "Resumen" },
@@ -9,10 +12,16 @@ const links = [
 ];
 
 export function AdminNav() {
+  const pathname = usePathname();
+
   return (
-    <nav style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+    <nav className="admin-nav">
       {links.map((link) => (
-        <Link key={link.href} href={link.href} className="btn-secondary">
+        <Link
+          key={link.href}
+          href={link.href}
+          className={pathname === link.href ? "admin-nav-link admin-nav-link-active" : "admin-nav-link"}
+        >
           {link.label}
         </Link>
       ))}

@@ -7,13 +7,20 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   const { user } = await requireAdminUser();
 
   return (
-    <main className="container stack" style={{ paddingTop: "2rem" }}>
-      <header className="stack">
-        <h1>Panel Admin</h1>
-        <p>{user.email}</p>
+    <main className="admin-shell">
+      <div className="admin-shell-glow" />
+      <div className="admin-container">
+        <header className="admin-header">
+          <div className="stack">
+            <small className="admin-eyebrow">Operación interna</small>
+            <h1>Control Center</h1>
+            <p>Visibilidad operativa de usuarios, sitios, generación IA y conversión.</p>
+          </div>
+          <div className="admin-user-pill">{user.email}</div>
+        </header>
         <AdminNav />
-      </header>
-      {children}
+        <section className="admin-content">{children}</section>
+      </div>
     </main>
   );
 }
