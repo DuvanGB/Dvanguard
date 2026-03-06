@@ -1,6 +1,7 @@
 import { env } from "@/lib/env";
 import {
   businessBriefDraftSchema,
+  type BusinessBriefDraft,
   type OnboardingInputMode,
   type RefineResponse
 } from "@/lib/onboarding/types";
@@ -13,7 +14,7 @@ type RefineBriefInput = {
 
 export async function refineBusinessBrief(input: RefineBriefInput): Promise<RefineResponse> {
   const normalizedInput = input.rawInput.trim();
-  const warnings: string[] = [];
+  const warnings: string[] = buildActionableWarnings(normalizedInput);
 
   if (normalizedInput.length < 30) {
     warnings.push("La descripción es corta; considera agregar oferta, público y estilo para mayor precisión.");
@@ -35,6 +36,7 @@ export async function refineBusinessBrief(input: RefineBriefInput): Promise<Refi
     return {
       briefDraft,
       confidence: 0.55,
+      completenessScore: computeCompletenessScore(briefDraft, normalizedInput),
       warnings,
       provider: "heuristic",
       recommendedTemplateIds,
@@ -62,6 +64,7 @@ export async function refineBusinessBrief(input: RefineBriefInput): Promise<Refi
       return {
         briefDraft: validated.data,
         confidence: 0.8,
+        completenessScore: computeCompletenessScore(validated.data, normalizedInput),
         warnings,
         provider: "llm",
         recommendedTemplateIds,
@@ -90,6 +93,7 @@ export async function refineBusinessBrief(input: RefineBriefInput): Promise<Refi
   return {
     briefDraft,
     confidence: 0.55,
+    completenessScore: computeCompletenessScore(briefDraft, normalizedInput),
     warnings,
     provider: "heuristic",
     recommendedTemplateIds,
@@ -166,15 +170,15 @@ function safeParseJson(input: string): unknown {
   }
 }
 
-function buildHeuristicBrief(rawInput: string) {
+function buildHeuristicBrief(rawInput: string): BusinessBriefDraft {
   const lower = rawInput.toLowerCase();
 
-  const businessType =
+  const businessType: BusinessBriefDraft["business_type"] =
     lower.includes("tienda") || lower.includes("catalog") || lower.includes("catálogo") || lower.includes("vender")
       ? "commerce_lite"
       : "informative";
 
-  const stylePreset = lower.includes("moderno")
+  const stylePreset: BusinessBriefDraft["style_preset"] = lower.includes("moderno")
     ? "ocean"
     : lower.includes("premium") || lower.includes("elegante")
       ? "sunset"
@@ -223,4 +227,67 @@ function inferTone(lower: string) {
   if (lower.includes("formal") || lower.includes("corporativo")) return "Profesional y confiable";
   if (lower.includes("premium") || lower.includes("elegante")) return "Premium y sofisticado";
   return "Cercano y claro";
+}
+
+function buildActionableWarnings(rawInput: string) {
+  const lower = rawInput.toLowerCase();
+  const warnings: string[] = [];
+
+  if (!containsPriceInfo(lower)) {
+    warnings.push("Falta rango de precios. Añádelo para mejorar propuestas de catálogo y CTA.");
+  }
+
+  if (!containsLocationInfo(lower)) {
+    warnings.push("Falta ubicación/ciudad. Añádela para personalizar mensajes de confianza local.");
+  }
+
+  if (!containsAudienceInfo(lower)) {
+    warnings.push("Falta público objetivo explícito. Añade para ajustar tono y secciones.");
+  }
+
+  if (!containsValueProposition(lower)) {
+    warnings.push("Falta beneficio principal diferencial. Explica por qué te deberían elegir.");
+  }
+
+  return warnings;
+}
+
+function computeCompletenessScore(
+  brief: {
+    offer_summary: string;
+    target_audience: string;
+    tone: string;
+    section_preferences: string[];
+  },
+  rawInput: string
+) {
+  let score = 0;
+  const lower = rawInput.toLowerCase();
+
+  if (rawInput.length >= 40) score += 20;
+  if (brief.offer_summary.trim().length >= 40) score += 20;
+  if (brief.target_audience.trim().length >= 8) score += 15;
+  if (brief.tone.trim().length >= 4) score += 10;
+  if (brief.section_preferences.length >= 3) score += 10;
+  if (containsPriceInfo(lower)) score += 10;
+  if (containsLocationInfo(lower)) score += 10;
+  if (containsValueProposition(lower)) score += 5;
+
+  return Math.max(0, Math.min(100, score));
+}
+
+function containsPriceInfo(lower: string) {
+  return /\$\s?\d+/.test(lower) || /\d+\s?(usd|cop|mxn|soles|pesos|euros)/.test(lower) || lower.includes("precio");
+}
+
+function containsLocationInfo(lower: string) {
+  return lower.includes("bogotá") || lower.includes("medellín") || lower.includes("cali") || lower.includes("cdmx") || lower.includes("ciudad") || lower.includes("barrio") || lower.includes("colombia") || lower.includes("méxico") || lower.includes("perú") || lower.includes("chile");
+}
+
+function containsAudienceInfo(lower: string) {
+  return lower.includes("para ") || lower.includes("clientes") || lower.includes("emprendedores") || lower.includes("familias") || lower.includes("jóvenes") || lower.includes("mujeres") || lower.includes("hombres");
+}
+
+function containsValueProposition(lower: string) {
+  return lower.includes("rápido") || lower.includes("garant") || lower.includes("calidad") || lower.includes("a domicilio") || lower.includes("personalizado") || lower.includes("24/7");
 }

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createHash } from "node:crypto";
 
 import { parseAnySiteSpec } from "@/lib/site-spec-any";
 import { buildSiteSpecV2FromTemplate, type SiteSpecV2 } from "@/lib/site-spec-v2";
@@ -120,7 +121,8 @@ async function createMigratedVersion(input: {
       site_id: input.siteId,
       version: nextVersion,
       site_spec_json: input.v2Spec,
-      source: "migration_v1_to_v2"
+      source: "migration_v1_to_v2",
+      content_hash: createHash("sha256").update(JSON.stringify(input.v2Spec)).digest("hex")
     })
     .select("id")
     .maybeSingle();

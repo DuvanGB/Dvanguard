@@ -10,6 +10,7 @@ import type { TemplateId } from "@/lib/templates/types";
 type RefineResponse = {
   briefDraft: BusinessBriefDraft;
   confidence: number;
+  completenessScore?: number;
   warnings: string[];
   provider?: "llm" | "heuristic";
   recommendedTemplateId: TemplateId;
@@ -75,6 +76,7 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
   const [voiceEvent, setVoiceEvent] = useState<"unsupported" | "permission_denied" | null>(null);
   const [briefDraft, setBriefDraft] = useState<BusinessBriefDraft | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
+  const [completenessScore, setCompletenessScore] = useState<number | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [refineProvider, setRefineProvider] = useState<"llm" | "heuristic" | null>(null);
   const [recommendedTemplateId, setRecommendedTemplateId] = useState<TemplateId | null>(null);
@@ -239,6 +241,7 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
 
       setBriefDraft(data.briefDraft);
       setConfidence(data.confidence);
+      setCompletenessScore(typeof data.completenessScore === "number" ? data.completenessScore : null);
       setWarnings(data.warnings ?? []);
       setRefineProvider(data.provider ?? null);
       setRecommendedTemplateId(data.recommendedTemplateId);
@@ -412,6 +415,7 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
         <section className="card stack">
           <h2>Revisar propuesta IA</h2>
           {confidence !== null ? <small>Confianza estimada: {Math.round(confidence * 100)}%</small> : null}
+          {completenessScore !== null ? <small>Completitud del brief: {Math.round(completenessScore)}%</small> : null}
           {refineProvider ? (
             <small>Proveedor refine: {refineProvider === "llm" ? "LLM (OpenAI)" : "Heurístico (fallback)"}</small>
           ) : null}

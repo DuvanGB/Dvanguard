@@ -86,6 +86,7 @@ export async function POST(request: NextRequest) {
       payload: {
         inputMode,
         confidence: refined.confidence,
+        completenessScore: refined.completenessScore,
         warningsCount: refined.warnings.length,
         provider: refined.provider
       }
@@ -111,6 +112,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     briefDraft: refined.briefDraft,
     confidence: refined.confidence,
+    completenessScore: refined.completenessScore,
     warnings: refined.warnings,
     provider: refined.provider,
     recommendedTemplateId: refined.recommendedTemplateId,

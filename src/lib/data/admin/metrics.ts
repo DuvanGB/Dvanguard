@@ -24,6 +24,10 @@ export type AdminMetrics = {
   templateRecommendedPickRate: number | null;
   v2FirstResultAcceptanceRate: number | null;
   regenerationAvgPerTemplate: number | null;
+  trafficVisits: number;
+  trafficWhatsappClicks: number;
+  trafficCtaClicks: number;
+  trafficWhatsappCtr: number;
 };
 
 export async function getAdminMetrics(rangeParam?: string | null): Promise<AdminMetrics> {
@@ -31,8 +35,15 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
   const range = parseRange(rangeParam);
   const fromIso = range.from.toISOString();
 
-  const [{ data: sites }, { data: publications }, { data: jobs }, { data: signups }, { data: platformEvents }, { data: proRequests }] =
-    await Promise.all([
+  const [
+    { data: sites },
+    { data: publications },
+    { data: jobs },
+    { data: signups },
+    { data: platformEvents },
+    { data: proRequests },
+    analyticsQuery
+  ] = await Promise.all([
       admin.from("sites").select("id", { count: "exact" }).gte("created_at", fromIso),
       admin.from("site_publications").select("site_id, published_at").gte("published_at", fromIso),
       admin.from("ai_jobs").select("status, output_json, created_at").gte("created_at", fromIso),
@@ -52,8 +63,11 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
           "template.selected",
           "template.recommended"
         ]),
-      admin.from("pro_requests").select("status, created_at").gte("created_at", fromIso)
+      admin.from("pro_requests").select("status, created_at").gte("created_at", fromIso),
+      admin.from("site_analytics_events").select("event_type").gte("occurred_at", fromIso)
     ]);
+
+  const analyticsEvents = analyticsQuery.data ?? [];
 
   const sitesCreated = sites?.length ?? 0;
   const sitesPublished = new Set((publications ?? []).map((row) => row.site_id)).size;
@@ -203,6 +217,11 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
       )
     : null;
 
+  const trafficVisits = analyticsEvents.filter((event) => event.event_type === "visit").length;
+  const trafficWhatsappClicks = analyticsEvents.filter((event) => event.event_type === "whatsapp_click").length;
+  const trafficCtaClicks = analyticsEvents.filter((event) => event.event_type === "cta_click").length;
+  const trafficWhatsappCtr = trafficVisits ? Number(((trafficWhatsappClicks / trafficVisits) * 100).toFixed(2)) : 0;
+
   return {
     range: range.label,
     sitesCreated,
@@ -225,7 +244,11 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
     regenerationsP50: percentile(regenerationSeries, 50),
     regenerationsP95: percentile(regenerationSeries, 95),
     templateRecommendedPickRate,
-    regenerationAvgPerTemplate
+    regenerationAvgPerTemplate,
+    trafficVisits,
+    trafficWhatsappClicks,
+    trafficCtaClicks,
+    trafficWhatsappCtr
   };
 }
 

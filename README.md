@@ -42,6 +42,12 @@ MVP SaaS multi-tenant para generar sitios web desde una descripción de negocio,
   - selección de plantilla en onboarding antes de generar
   - editor visual v2 (contenido, variantes, tema, reorder/toggle)
   - migración lazy v1 -> v2 al abrir onboarding/editor
+- Fase 6 dashboard pro + canvas realtime:
+  - editor canva-lite con DnD por secciones
+  - autosave debounce + dedupe de versiones
+  - media manager (upload Supabase Storage + URL externa)
+  - tracking público de visitas y clics de conversión
+  - dashboard cliente/admin con métricas de tráfico
 
 ## Variables de entorno
 
@@ -114,6 +120,9 @@ npm run db:push
 - `supabase/migrations/0004_plans_usage_and_requests.sql`
 - `supabase/migrations/0005_onboarding_quality_metrics.sql`
 - `supabase/migrations/0006_site_versions_source_v2.sql`
+- `supabase/migrations/0007_media_assets_and_storage_support.sql`
+- `supabase/migrations/0008_public_site_analytics.sql`
+- `supabase/migrations/0009_site_versions_autosave_source_and_hash.sql`
 
 Incluye tablas:
 
@@ -169,6 +178,13 @@ Configura estos secrets en GitHub:
 - `POST /api/onboarding/generate`
 - `GET /api/templates?siteType=informative|commerce_lite`
 - `POST /api/sites/:id/migrate-v2`
+- `GET /api/sites/:id/assets`
+- `POST /api/sites/:id/assets/upload`
+- `POST /api/sites/:id/assets/external`
+- `DELETE /api/sites/:id/assets/:assetId`
+- `POST /api/public/track`
+- `GET /api/dashboard/analytics?siteId=&range=7d|30d`
+- `GET /api/admin/traffic-metrics?range=7d|30d`
 
 ## Desarrollo local
 
@@ -295,3 +311,25 @@ ADMIN_ALLOWLIST_EMAILS=tu-correo@dominio.com,otro-admin@dominio.com
 - `AI_PROVIDER=mock` genera `SiteSpec` fallback sin depender de LLM externo.
 - Para subdominios en local puedes usar hosts tipo `mi-sitio.localhost:3000`.
 - El editor DnD libre no está implementado en esta etapa (editor visual v2 sin drag & drop libre).
+
+## Canvas Realtime + Media + Traffic (fase 6)
+
+### Editor canva-lite
+
+- DnD por secciones (`hero`, `catalog`, `testimonials`, `contact`).
+- Autosave cada ~2.5s con estado visual de guardado.
+- Checkpoint manual y publicación sobre versión exacta persistida.
+
+### Media manager
+
+- Subida de imágenes a bucket `site-assets`.
+- Registro de URL externa.
+- Librería de assets por sitio para reutilizar imágenes en hero/catálogo.
+
+### Tracking público
+
+- Eventos:
+  - `visit`
+  - `whatsapp_click`
+  - `cta_click`
+- Dashboard cliente/admin con agregados 7d/30d y CTR de WhatsApp.

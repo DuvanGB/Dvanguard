@@ -7,10 +7,12 @@ import {
   getSitesWithMostRegenerations,
   getTopTemplatesByPublication
 } from "@/lib/data/admin/metrics";
+import { getAdminTrafficMetrics } from "@/lib/data/admin/traffic-metrics";
 
 export default async function AdminHomePage() {
-  const [metrics, failedJobs, recentSites, mostRegeneratedSites, topTemplates] = await Promise.all([
+  const [metrics, traffic, failedJobs, recentSites, mostRegeneratedSites, topTemplates] = await Promise.all([
     getAdminMetrics("7d"),
+    getAdminTrafficMetrics("7d"),
     getRecentFailedJobs(8),
     getRecentlyPublishedSites(8),
     getSitesWithMostRegenerations(8, "7d"),
@@ -94,6 +96,22 @@ export default async function AdminHomePage() {
         <article className="card stack">
           <strong>Regeneración promedio/template</strong>
           <span>{metrics.regenerationAvgPerTemplate ?? "-"}</span>
+        </article>
+        <article className="card stack">
+          <strong>Visitas públicas (7d)</strong>
+          <span>{metrics.trafficVisits}</span>
+        </article>
+        <article className="card stack">
+          <strong>Clic WhatsApp (7d)</strong>
+          <span>{metrics.trafficWhatsappClicks}</span>
+        </article>
+        <article className="card stack">
+          <strong>Clic CTA (7d)</strong>
+          <span>{metrics.trafficCtaClicks}</span>
+        </article>
+        <article className="card stack">
+          <strong>CTR WhatsApp global</strong>
+          <span>{metrics.trafficWhatsappCtr}%</span>
         </article>
       </section>
 
@@ -220,6 +238,96 @@ export default async function AdminHomePage() {
           </table>
         ) : (
           <p>Sin publicaciones v2 en el rango actual.</p>
+        )}
+      </section>
+
+      <section className="card stack">
+        <h2>Top sitios por visitas (7d)</h2>
+        {traffic.top_by_visits.length ? (
+          <table>
+            <thead>
+              <tr>
+                <th>Sitio</th>
+                <th>Subdominio</th>
+                <th>Visitas</th>
+                <th>WhatsApp</th>
+                <th>CTR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {traffic.top_by_visits.map((item) => (
+                <tr key={item.site_id}>
+                  <td>{item.name}</td>
+                  <td>{item.subdomain}</td>
+                  <td>{item.visits}</td>
+                  <td>{item.whatsapp_clicks}</td>
+                  <td>{item.ctr_whatsapp}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p>Sin tráfico en el rango actual.</p>
+        )}
+      </section>
+
+      <section className="card stack">
+        <h2>Top sitios por clic WhatsApp (7d)</h2>
+        {traffic.top_by_whatsapp.length ? (
+          <table>
+            <thead>
+              <tr>
+                <th>Sitio</th>
+                <th>Subdominio</th>
+                <th>WhatsApp</th>
+                <th>Visitas</th>
+                <th>CTR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {traffic.top_by_whatsapp.map((item) => (
+                <tr key={item.site_id}>
+                  <td>{item.name}</td>
+                  <td>{item.subdomain}</td>
+                  <td>{item.whatsapp_clicks}</td>
+                  <td>{item.visits}</td>
+                  <td>{item.ctr_whatsapp}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p>Sin clics a WhatsApp en el rango actual.</p>
+        )}
+      </section>
+
+      <section className="card stack">
+        <h2>Alto tráfico y baja conversión (7d)</h2>
+        {traffic.low_conversion.length ? (
+          <table>
+            <thead>
+              <tr>
+                <th>Sitio</th>
+                <th>Subdominio</th>
+                <th>Visitas</th>
+                <th>WhatsApp</th>
+                <th>CTR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {traffic.low_conversion.map((item) => (
+                <tr key={item.site_id}>
+                  <td>{item.name}</td>
+                  <td>{item.subdomain}</td>
+                  <td>{item.visits}</td>
+                  <td>{item.whatsapp_clicks}</td>
+                  <td>{item.ctr_whatsapp}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p>No hay sitios con ese patrón en el rango actual.</p>
         )}
       </section>
     </div>

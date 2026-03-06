@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createHash } from "node:crypto";
 
 import { generateSiteSpecFromPrompt } from "@/lib/ai/generate-site-spec";
 import { buildFallbackSiteSpecV2 } from "@/lib/site-spec-any";
@@ -56,7 +57,8 @@ export async function executeSiteGenerationJob(input: ExecuteGenerationInput): P
         site_id: input.siteId,
         version: nextVersion,
         site_spec_json: generation.siteSpec,
-        source: generation.source
+        source: generation.source,
+        content_hash: createHash("sha256").update(JSON.stringify(generation.siteSpec)).digest("hex")
       })
       .select("id")
       .maybeSingle();

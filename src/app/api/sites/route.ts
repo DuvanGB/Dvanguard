@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { requireApiUser } from "@/lib/auth";
@@ -79,6 +80,7 @@ export async function POST(request: NextRequest) {
     siteType,
     businessName: name
   });
+  const contentHash = createHash("sha256").update(JSON.stringify(initialSpec)).digest("hex");
 
   const { data: version, error: versionError } = await supabase
     .from("site_versions")
@@ -86,7 +88,8 @@ export async function POST(request: NextRequest) {
       site_id: site.id,
       version: 1,
       site_spec_json: initialSpec,
-      source: "manual"
+      source: "manual",
+      content_hash: contentHash
     })
     .select("id")
     .maybeSingle();

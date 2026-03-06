@@ -14,7 +14,7 @@ export default async function HomePage() {
     try {
       const payload = await getPublishedSiteBySubdomain(subdomain);
       if (payload) {
-        return <SiteRenderer spec={payload.siteSpec} />;
+        return <SiteRenderer spec={payload.siteSpec} trackEvents siteId={payload.id} subdomain={payload.subdomain} />;
       }
 
       return (

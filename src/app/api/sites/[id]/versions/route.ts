@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { maybeRecordFirstResultAccepted } from "@/lib/ai/start-site-generation";
@@ -8,7 +9,8 @@ import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { recordPlatformEvent } from "@/lib/platform-events";
 
 const bodySchema = z.object({
-  siteSpec: z.unknown()
+  siteSpec: z.unknown(),
+  source: z.enum(["manual", "auto_save", "manual_checkpoint"]).optional()
 });
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -32,6 +34,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const normalizedSpec = parsedSpec.data;
+  const source = parsedBody.data.source ?? "manual";
+  const contentHash = hashSpec(normalizedSpec);
 
   const { data: site } = await supabase.from("sites").select("id").eq("id", id).eq("owner_id", user.id).maybeSingle();
   if (!site) {
@@ -40,7 +44,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const { data: latestVersion } = await supabase
     .from("site_versions")
-    .select("version")
+    .select("id, version, content_hash, site_spec_json")
     .eq("site_id", id)
     .order("version", { ascending: false })
     .limit(1)
@@ -48,17 +52,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const nextVersion = (latestVersion?.version ?? 0) + 1;
 
-  let previousSpec: unknown = null;
-  if (latestVersion?.version) {
-    const { data: previousVersion } = await supabase
-      .from("site_versions")
-      .select("site_spec_json")
-      .eq("site_id", id)
-      .eq("version", latestVersion.version)
-      .maybeSingle();
-    if (previousVersion?.site_spec_json) {
-      previousSpec = previousVersion.site_spec_json;
-    }
+  let previousSpec: unknown = latestVersion?.site_spec_json ?? null;
+  const previousHash =
+    latestVersion?.content_hash ??
+    (latestVersion?.site_spec_json ? hashSpec(latestVersion.site_spec_json) : null);
+
+  if (previousHash && previousHash === contentHash && latestVersion?.id) {
+    await supabase.from("sites").update({ current_version_id: latestVersion.id }).eq("id", id);
+    return NextResponse.json({ versionId: latestVersion.id, deduped: true }, { status: 200 });
   }
 
   const { data: version, error } = await supabase
@@ -67,7 +68,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       site_id: id,
       version: nextVersion,
       site_spec_json: normalizedSpec,
-      source: "manual"
+      source,
+      content_hash: contentHash
     })
     .select("id")
     .maybeSingle();
@@ -81,7 +83,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   await supabase.from("events").insert({
     site_id: id,
     event_type: "site.version.saved",
-    payload_json: { versionId: version.id }
+    payload_json: { versionId: version.id, source, deduped: false }
   });
 
   try {
@@ -92,7 +94,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       payload: {
         versionId: version.id,
         schemaVersion: normalizedSpec.schema_version,
-        templateId: normalizedSpec.schema_version === "2.0" ? normalizedSpec.template.id : null
+        templateId: normalizedSpec.schema_version === "2.0" ? normalizedSpec.template.id : null,
+        source
       }
     });
   } catch {
@@ -130,16 +133,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
   }
 
-  try {
-    await maybeRecordFirstResultAccepted({
-      admin,
-      userId: user.id,
-      siteId: id,
-      action: "manual_save"
-    });
-  } catch {
-    // best effort
+  if (source !== "auto_save") {
+    try {
+      await maybeRecordFirstResultAccepted({
+        admin,
+        userId: user.id,
+        siteId: id,
+        action: "manual_save"
+      });
+    } catch {
+      // best effort
+    }
   }
 
   return NextResponse.json({ versionId: version.id }, { status: 201 });
+}
+
+function hashSpec(input: unknown) {
+  return createHash("sha256").update(JSON.stringify(input)).digest("hex");
 }

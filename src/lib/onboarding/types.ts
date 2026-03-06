@@ -25,6 +25,7 @@ export type BusinessBriefDraft = z.infer<typeof businessBriefDraftSchema>;
 export const refineResponseSchema = z.object({
   briefDraft: businessBriefDraftSchema,
   confidence: z.number().min(0).max(1),
+  completenessScore: z.number().min(0).max(100),
   warnings: z.array(z.string()),
   provider: z.enum(["llm", "heuristic"]),
   recommendedTemplateIds: z.array(z.enum(templateIds)).min(1),

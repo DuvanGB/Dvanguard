@@ -8,9 +8,11 @@ type SectionProps = {
     secondary: string;
     background: string;
   };
+  onTrackCtaClick?: (sectionId: string) => void;
+  onTrackWhatsappClick?: (sectionId: string) => void;
 };
 
-export function HeroSection({ section, whatsappLink, theme }: SectionProps) {
+export function HeroSection({ section, whatsappLink, theme, onTrackCtaClick }: SectionProps) {
   if (section.type !== "hero") return null;
 
   const imageUrl = section.props.image_url || "https://placehold.co/1200x720?text=Hero";
@@ -33,7 +35,13 @@ export function HeroSection({ section, whatsappLink, theme }: SectionProps) {
           <h1>{section.props.headline}</h1>
           <p>{section.props.subheadline}</p>
           {whatsappLink ? (
-            <a href={whatsappLink} target="_blank" rel="noreferrer" className="btn-primary">
+            <a
+              href={whatsappLink}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-primary"
+              onClick={() => onTrackCtaClick?.(section.id)}
+            >
               {section.props.cta_label}
             </a>
           ) : null}
@@ -105,7 +113,7 @@ export function TestimonialsSection({ section, theme }: SectionProps) {
   );
 }
 
-export function ContactSection({ section, whatsappLink, theme }: SectionProps) {
+export function ContactSection({ section, whatsappLink, theme, onTrackWhatsappClick }: SectionProps) {
   if (section.type !== "contact") return null;
 
   return (
@@ -119,7 +127,13 @@ export function ContactSection({ section, whatsappLink, theme }: SectionProps) {
       <p>{section.props.description}</p>
       {section.props.address ? <p>{section.props.address}</p> : null}
       {whatsappLink ? (
-        <a href={whatsappLink} target="_blank" rel="noreferrer" className="btn-primary">
+        <a
+          href={whatsappLink}
+          target="_blank"
+          rel="noreferrer"
+          className="btn-primary"
+          onClick={() => onTrackWhatsappClick?.(section.id)}
+        >
           {section.props.whatsapp_label || "Escribir por WhatsApp"}
         </a>
       ) : null}
