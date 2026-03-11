@@ -103,6 +103,7 @@ function CanvasBlockRenderer({
     opacity: block.style.opacity,
     fontSize: block.style.fontSize,
     fontWeight: block.style.fontWeight,
+    fontFamily: block.style.fontFamily,
     textAlign: block.style.textAlign as "left" | "center" | "right" | undefined,
     boxSizing: "border-box" as const,
     outline: editable && isSelected ? "2px solid #0ea5e9" : "none",

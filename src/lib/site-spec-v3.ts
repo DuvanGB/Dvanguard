@@ -27,9 +27,24 @@ const blockLayoutSchema = z.object({
   mobile: canvasRectSchema.optional()
 });
 
+export const fontFamilies = [
+  "Manrope",
+  "Space Grotesk",
+  "Inter",
+  "Poppins",
+  "Montserrat",
+  "Lato",
+  "Nunito",
+  "Source Sans Pro",
+  "DM Sans",
+  "Oswald",
+  "Open Sans"
+] as const;
+
 const blockStyleSchema = z.object({
   fontSize: z.number().min(10).max(120).optional(),
   fontWeight: z.number().int().min(100).max(900).optional(),
+  fontFamily: z.enum(fontFamilies).optional(),
   color: colorToken.optional(),
   bgColor: colorToken.optional(),
   radius: z.number().min(0).max(200).optional(),

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
+import { fontFamilies } from "@/lib/site-spec-v3";
 
 type Props = {
   siteId: string;
@@ -520,6 +521,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
             : "Pendiente";
 
   const activeTemplateId = siteSpec.template.id;
+  const fontOptions = fontFamilies;
 
   return (
     <div className="editor-shell">
@@ -768,7 +770,8 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
               className="editor-canvas"
               style={{
                 width: PREVIEW_WIDTH[viewport],
-                background: siteSpec.theme.background
+                background: siteSpec.theme.background,
+                fontFamily: siteSpec.theme.font_body
               }}
             >
               {(home?.sections ?? [])
@@ -807,6 +810,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                               opacity: block.style.opacity,
                               fontSize: block.style.fontSize,
                               fontWeight: block.style.fontWeight,
+                              fontFamily: block.style.fontFamily ?? siteSpec.theme.font_body,
                               textAlign: block.style.textAlign as "left" | "center" | "right" | undefined,
                               padding: block.type === "text" ? 8 : 0,
                               overflow: isSelected ? "visible" : "hidden"
@@ -1111,11 +1115,11 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                             }
                           />
                         </label>
-                        <label>
-                          Radio
-                          <input
-                            type="number"
-                            value={selectedBlock.style.radius ?? 0}
+                      <label>
+                        Radio
+                        <input
+                          type="number"
+                          value={selectedBlock.style.radius ?? 0}
                             onChange={(event) =>
                               updateBlock(selected.sectionId, selected.blockId, (block) => ({
                                 ...block,
@@ -1125,16 +1129,87 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                                 }
                               }))
                             }
-                          />
+                        />
+                      </label>
+                      {selectedBlock.type === "text" ? (
+                        <label>
+                          Tipografía
+                          <select
+                            value={selectedBlock.style.fontFamily ?? "__body"}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                block.type === "text"
+                                  ? {
+                                      ...block,
+                                      style: {
+                                        ...block.style,
+                                        fontFamily:
+                                          value === "__body"
+                                            ? undefined
+                                            : value === "__heading"
+                                              ? siteSpec.theme.font_heading
+                                              : (value as CanvasBlock["style"]["fontFamily"])
+                                      }
+                                    }
+                                  : block
+                              );
+                            }}
+                          >
+                            <option value="__body">Cuerpo (predeterminado)</option>
+                            <option value="__heading">Títulos (tema)</option>
+                            {fontOptions.map((font) => (
+                              <option key={font} value={font}>
+                                {font}
+                              </option>
+                            ))}
+                          </select>
                         </label>
-                      </div>
-                    ) : null}
+                      ) : null}
+                    </div>
+                  ) : null}
 
-                    <div className="stack">
-                      <strong>Tema del sitio</strong>
-                      <small className="muted">Estos cambios afectan el fondo y colores globales del sitio.</small>
-                      <label>
-                        Color primario
+                  <div className="stack">
+                    <strong>Tema del sitio</strong>
+                    <small className="muted">Estos cambios afectan el fondo y colores globales del sitio.</small>
+                    <label>
+                      Tipografía de títulos
+                      <select
+                        value={siteSpec.theme.font_heading}
+                        onChange={(event) =>
+                          setSiteSpec((prev) => ({
+                            ...prev,
+                            theme: { ...prev.theme, font_heading: event.target.value }
+                          }))
+                        }
+                      >
+                        {fontOptions.map((font) => (
+                          <option key={font} value={font}>
+                            {font}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Tipografía del cuerpo
+                      <select
+                        value={siteSpec.theme.font_body}
+                        onChange={(event) =>
+                          setSiteSpec((prev) => ({
+                            ...prev,
+                            theme: { ...prev.theme, font_body: event.target.value }
+                          }))
+                        }
+                      >
+                        {fontOptions.map((font) => (
+                          <option key={font} value={font}>
+                            {font}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Color primario
                         <input
                           type="color"
                           value={siteSpec.theme.primary}
