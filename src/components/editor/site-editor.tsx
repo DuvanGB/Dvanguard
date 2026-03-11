@@ -6,6 +6,8 @@ import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@
 
 type Props = {
   siteId: string;
+  siteName: string;
+  subdomain: string;
   initialSpec: SiteSpecV3;
 };
 
@@ -38,6 +40,17 @@ type SiteAsset = {
   created_at: string;
 };
 
+type TemplateCard = {
+  id: string;
+  name: string;
+  description: string;
+  family: string;
+  site_type: "informative" | "commerce_lite";
+  preview_label: string;
+  theme: SiteSpecV3["theme"];
+  variants: Record<SiteSectionV3["type"], SiteSectionV3["variant"]>;
+};
+
 const PREVIEW_WIDTH: Record<EditorViewport, number> = {
   desktop: 1120,
   mobile: 390
@@ -46,7 +59,7 @@ const PREVIEW_WIDTH: Record<EditorViewport, number> = {
 const SECTION_LIBRARY: Array<SiteSectionV3["type"]> = ["hero", "catalog", "testimonials", "contact"];
 const BLOCK_LIBRARY: Array<CanvasBlock["type"]> = ["text", "image", "button", "shape", "container"];
 
-export function SiteEditor({ siteId, initialSpec }: Props) {
+export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) {
   const [siteSpec, setSiteSpec] = useState<SiteSpecV3>(initialSpec);
   const [viewport, setViewport] = useState<EditorViewport>("desktop");
   const [selected, setSelected] = useState<SelectedBlock | null>(null);
@@ -56,6 +69,9 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
   const [message, setMessage] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const dragStateRef = useRef<DragState | null>(null);
+  const [leftTab, setLeftTab] = useState<"templates" | "sections" | "layers">("templates");
+  const [rightTab, setRightTab] = useState<"content" | "style" | "position">("content");
+  const [inspectorOpen, setInspectorOpen] = useState(true);
 
   const [assets, setAssets] = useState<SiteAsset[]>([]);
   const [assetsLoading, setAssetsLoading] = useState(false);
@@ -63,6 +79,9 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
   const [uploadingAsset, setUploadingAsset] = useState(false);
   const [externalUrl, setExternalUrl] = useState("");
   const [externalAltText, setExternalAltText] = useState("");
+  const [templates, setTemplates] = useState<TemplateCard[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesMessage, setTemplatesMessage] = useState<string | null>(null);
 
   const currentHash = useMemo(() => hashSpec(siteSpec), [siteSpec]);
   const isDirty = currentHash !== lastPersistedHash;
@@ -75,6 +94,11 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     void loadAssets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId]);
+
+  useEffect(() => {
+    void loadTemplates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteSpec.site_type]);
 
   useEffect(() => {
     if (!isDirty || publishing) {
@@ -243,6 +267,24 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     setSelected({ sectionId: selected.sectionId, blockId: cloned.id });
   }
 
+  function bringSelectedToFront() {
+    if (!selected || !selectedBlock || !home) return;
+    const section = home.sections.find((item) => item.id === selected.sectionId);
+    if (!section) return;
+    const maxZ = Math.max(...section.blocks.map((block) => getBlockRect(block, viewport).z));
+    const rect = getBlockRect(selectedBlock, viewport);
+    updateBlockRect(selected.sectionId, selected.blockId, { ...rect, z: maxZ + 1 });
+  }
+
+  function sendSelectedToBack() {
+    if (!selected || !selectedBlock || !home) return;
+    const section = home.sections.find((item) => item.id === selected.sectionId);
+    if (!section) return;
+    const minZ = Math.min(...section.blocks.map((block) => getBlockRect(block, viewport).z));
+    const rect = getBlockRect(selectedBlock, viewport);
+    updateBlockRect(selected.sectionId, selected.blockId, { ...rect, z: Math.max(1, minZ - 1) });
+  }
+
   function startDragging(event: React.MouseEvent, sectionId: string, block: CanvasBlock, mode: DragMode) {
     event.preventDefault();
     event.stopPropagation();
@@ -353,6 +395,20 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     setAssetsLoading(false);
   }
 
+  async function loadTemplates() {
+    setTemplatesLoading(true);
+    setTemplatesMessage(null);
+    const response = await fetch(`/api/templates?siteType=${siteSpec.site_type}`);
+    const data = (await response.json()) as { items?: TemplateCard[]; error?: string };
+    if (!response.ok) {
+      setTemplatesMessage(data.error ?? "No se pudo cargar las plantillas.");
+      setTemplatesLoading(false);
+      return;
+    }
+    setTemplates(Array.isArray(data.items) ? data.items : []);
+    setTemplatesLoading(false);
+  }
+
   async function handleUploadAsset(file: File | null) {
     if (!file) return;
     setUploadingAsset(true);
@@ -425,554 +481,721 @@ export function SiteEditor({ siteId, initialSpec }: Props) {
     );
   }
 
+  function applyTemplateStyleOnly(template: TemplateCard) {
+    setSiteSpec((prev) => ({
+      ...prev,
+      template: { id: template.id, family: template.family },
+      theme: template.theme,
+      pages: prev.pages.map((page) => ({
+        ...page,
+        sections: page.sections.map((section) => {
+          const nextVariant = template.variants?.[section.type];
+          return nextVariant ? { ...section, variant: nextVariant } : section;
+        })
+      }))
+    }));
+  }
+
+  const saveStatus =
+    saveState === "saving"
+      ? "Guardando..."
+      : saveState === "saved" && savedAgoLabel
+        ? `Guardado ${savedAgoLabel}`
+        : saveState === "error"
+          ? "Error al guardar"
+          : !isDirty
+            ? "Sin cambios"
+            : "Pendiente";
+
+  const activeTemplateId = siteSpec.template.id;
+
   return (
-    <div className="stack" style={{ gap: "1rem" }}>
-      <section className="card stack">
-        <h2>Canvas Editor v3</h2>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-          <span className="btn-secondary" style={{ cursor: "default" }}>
-            Autosave activo
-          </span>
-          {saveState === "saving" ? <span>Guardando...</span> : null}
-          {saveState === "saved" && savedAgoLabel ? <span>Guardado {savedAgoLabel}</span> : null}
-          {saveState === "error" ? <span>Error al guardar</span> : null}
-          {saveState === "idle" && !isDirty ? <span>Sin cambios</span> : null}
+    <div className="editor-shell">
+      <header className="editor-topbar">
+        <div className="editor-topbar-left">
+          <div className="editor-brand">DVanguard</div>
+          <div className="editor-meta">
+            <strong>{siteName}</strong>
+            <span>/{subdomain}</span>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <button type="button" className={viewport === "desktop" ? "btn-primary" : "btn-secondary"} onClick={() => setViewport("desktop")}>
-            Desktop
+        <div className="editor-topbar-center">
+          <span className={`editor-status ${saveState}`}>Autosave · {saveStatus}</span>
+          <div className="editor-toggle">
+            <button type="button" className={viewport === "desktop" ? "btn-primary" : "btn-secondary"} onClick={() => setViewport("desktop")}>
+              Desktop
+            </button>
+            <button type="button" className={viewport === "mobile" ? "btn-primary" : "btn-secondary"} onClick={() => setViewport("mobile")}>
+              Mobile
+            </button>
+          </div>
+        </div>
+        <div className="editor-topbar-actions">
+          <button className="btn-secondary" type="button" onClick={() => void saveCheckpoint()}>
+            Guardar
           </button>
-          <button type="button" className={viewport === "mobile" ? "btn-primary" : "btn-secondary"} onClick={() => setViewport("mobile")}>
-            Mobile
+          <button className="btn-primary" type="button" onClick={() => void publish()} disabled={publishing}>
+            {publishing ? "Publicando..." : "Publicar"}
           </button>
         </div>
-      </section>
+      </header>
 
-      <section className="editor-layout">
-        <aside className="card stack editor-pane">
-          <h3>Secciones</h3>
-          <div className="stack">
-            {SECTION_LIBRARY.map((type) => (
-              <button key={type} type="button" className="btn-secondary" onClick={() => addSection(type)}>
-                Agregar {type}
-              </button>
-            ))}
+      {message ? <div className="editor-alert">{message}</div> : null}
+
+      <section className="editor-body">
+        <aside className="editor-rail">
+          <div className="editor-tabs">
+            <button type="button" className={leftTab === "templates" ? "tab active" : "tab"} onClick={() => setLeftTab("templates")}>
+              Templates
+            </button>
+            <button type="button" className={leftTab === "sections" ? "tab active" : "tab"} onClick={() => setLeftTab("sections")}>
+              Secciones
+            </button>
+            <button type="button" className={leftTab === "layers" ? "tab active" : "tab"} onClick={() => setLeftTab("layers")}>
+              Capas
+            </button>
           </div>
 
-          <h3>Media manager</h3>
-          <label>
-            Subir imagen
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(event) => void handleUploadAsset(event.target.files?.[0] ?? null)}
-              disabled={uploadingAsset}
-            />
-          </label>
-          <label>
-            URL externa
-            <input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} placeholder="https://..." />
-          </label>
-          <label>
-            Alt text (opcional)
-            <input value={externalAltText} onChange={(event) => setExternalAltText(event.target.value)} />
-          </label>
-          <button type="button" className="btn-secondary" onClick={addExternalAsset}>
-            Registrar URL externa
-          </button>
-          {assetsLoading ? <small>Cargando assets...</small> : null}
-          {assetsMessage ? <small>{assetsMessage}</small> : null}
-          <div className="asset-grid">
-            {assets.map((asset) => (
-              <article key={asset.id} className="card stack">
-                <img src={asset.public_url} alt={asset.alt_text ?? "asset"} style={{ width: "100%", borderRadius: "0.5rem" }} />
-                <small>{asset.kind === "uploaded" ? "Subida" : "Externa"}</small>
-                <button type="button" className="btn-secondary" onClick={() => void deleteAsset(asset.id)}>
-                  Eliminar
-                </button>
-              </article>
-            ))}
-          </div>
-        </aside>
+          {leftTab === "templates" ? (
+            <div className="stack">
+              <p className="muted">Cambia el look sin alterar tu layout.</p>
+              {templatesLoading ? <small>Cargando plantillas...</small> : null}
+              {templatesMessage ? <small>{templatesMessage}</small> : null}
+              <div className="template-grid">
+                {templates.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    className={`template-card ${activeTemplateId === template.id ? "active" : ""}`}
+                    onClick={() => applyTemplateStyleOnly(template)}
+                  >
+                    <div className="template-chip" style={{ background: template.theme.background, color: template.theme.primary }}>
+                      {template.preview_label}
+                    </div>
+                    <strong>{template.name}</strong>
+                    <p>{template.description}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
-        <section className="card stack editor-pane">
-          <h3>Inspector</h3>
-
-          <label>
-            Color primario
-            <input
-              type="color"
-              value={siteSpec.theme.primary}
-              onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, primary: event.target.value } }))}
-            />
-          </label>
-          <label>
-            Color secundario
-            <input
-              type="color"
-              value={siteSpec.theme.secondary}
-              onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, secondary: event.target.value } }))}
-            />
-          </label>
-          <label>
-            Fondo
-            <input
-              type="color"
-              value={siteSpec.theme.background}
-              onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, background: event.target.value } }))}
-            />
-          </label>
-
-          {selectedSection ? (
-            <>
-              <strong>Sección seleccionada: {selectedSection.type}</strong>
-              <label>
-                Variante
-                <select
-                  value={selectedSection.variant}
-                  onChange={(event) =>
-                    updateSection(selectedSection.id, (section) => ({
-                      ...section,
-                      variant: event.target.value as SiteSectionV3["variant"]
-                    }))
-                  }
-                >
-                  <option value="centered">centered</option>
-                  <option value="split">split</option>
-                  <option value="image-left">image-left</option>
-                  <option value="grid">grid</option>
-                  <option value="cards">cards</option>
-                  <option value="list">list</option>
-                  <option value="minimal">minimal</option>
-                  <option value="spotlight">spotlight</option>
-                  <option value="simple">simple</option>
-                  <option value="highlight">highlight</option>
-                  <option value="compact">compact</option>
-                </select>
-              </label>
-              {selectedSection.type === "hero" && selectedSection.variant === "centered" ? (
-                <small>
-                  Esta variante puede ocultar el bloque de imagen principal. Puedes activar su visibilidad desde la lista de
-                  bloques.
-                </small>
-              ) : null}
-              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                {BLOCK_LIBRARY.map((type) => (
-                  <button key={type} type="button" className="btn-secondary" onClick={() => addBlock(selectedSection.id, type)}>
+          {leftTab === "sections" ? (
+            <div className="stack">
+              <div className="stack">
+                <strong>Agregar sección</strong>
+                {SECTION_LIBRARY.map((type) => (
+                  <button key={type} type="button" className="btn-secondary" onClick={() => addSection(type)}>
                     + {type}
                   </button>
                 ))}
-                <button type="button" className="btn-secondary" onClick={() => removeSection(selectedSection.id)}>
-                  Eliminar sección
-                </button>
               </div>
-              <div className="card stack">
-                <small>Bloques de la sección</small>
-                {selectedSection.blocks.map((block) => (
-                  <div key={block.id} style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
-                    <button type="button" className="btn-secondary" onClick={() => setSelected({ sectionId: selectedSection.id, blockId: block.id })}>
-                      {block.type} {block.visible ? "" : "(oculto)"}
+
+              <div className="stack">
+                <strong>Secciones del sitio</strong>
+                {(home?.sections ?? []).map((section) => (
+                  <div key={section.id} className="editor-row">
+                    <button type="button" className="btn-secondary" onClick={() => setSelected({ sectionId: section.id, blockId: section.blocks[0]?.id ?? "" })}>
+                      {section.type}
                     </button>
+                    <select
+                      value={section.variant}
+                      onChange={(event) =>
+                        updateSection(section.id, (current) => ({
+                          ...current,
+                          variant: event.target.value as SiteSectionV3["variant"]
+                        }))
+                      }
+                    >
+                      <option value="centered">centered</option>
+                      <option value="split">split</option>
+                      <option value="image-left">image-left</option>
+                      <option value="grid">grid</option>
+                      <option value="cards">cards</option>
+                      <option value="list">list</option>
+                      <option value="minimal">minimal</option>
+                      <option value="spotlight">spotlight</option>
+                      <option value="simple">simple</option>
+                      <option value="highlight">highlight</option>
+                      <option value="compact">compact</option>
+                    </select>
                     <button
                       type="button"
                       className="btn-secondary"
                       onClick={() =>
-                        updateBlock(selectedSection.id, block.id, (item) => ({
-                          ...item,
-                          visible: !item.visible
+                        updateSection(section.id, (current) => ({
+                          ...current,
+                          enabled: !current.enabled
                         }))
                       }
                     >
-                      {block.visible ? "Ocultar" : "Mostrar"}
+                      {section.enabled ? "Ocultar" : "Mostrar"}
+                    </button>
+                    <button type="button" className="btn-secondary" onClick={() => removeSection(section.id)}>
+                      Eliminar
                     </button>
                   </div>
                 ))}
               </div>
-            </>
-          ) : (
-            <small>Haz click sobre un bloque en el preview para editarlo.</small>
-          )}
 
-          {selected && selectedBlock ? (
-            <div className="card stack">
-              <strong>Bloque: {selectedBlock.type}</strong>
-              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                <button type="button" className="btn-secondary" onClick={duplicateSelectedBlock}>
-                  Duplicar
-                </button>
-                <button type="button" className="btn-secondary" onClick={deleteSelectedBlock}>
-                  Eliminar
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() =>
-                    updateBlock(selected.sectionId, selected.blockId, (block) => ({ ...block, visible: !block.visible }))
-                  }
-                >
-                  {selectedBlock.visible ? "Ocultar" : "Mostrar"}
-                </button>
-              </div>
+              {selectedSection ? (
+                <div className="stack">
+                  <strong>Bloques de {selectedSection.type}</strong>
+                  <div className="editor-inline">
+                    {BLOCK_LIBRARY.map((type) => (
+                      <button key={type} type="button" className="btn-secondary" onClick={() => addBlock(selectedSection.id, type)}>
+                        + {type}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
-              <label>
-                X
-                <input
-                  type="number"
-                  value={getBlockRect(selectedBlock, viewport).x}
-                  onChange={(event) =>
-                    updateBlockRect(selected.sectionId, selected.blockId, {
-                      ...getBlockRect(selectedBlock, viewport),
-                      x: Number(event.target.value)
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Y
-                <input
-                  type="number"
-                  value={getBlockRect(selectedBlock, viewport).y}
-                  onChange={(event) =>
-                    updateBlockRect(selected.sectionId, selected.blockId, {
-                      ...getBlockRect(selectedBlock, viewport),
-                      y: Number(event.target.value)
-                    })
-                  }
-                />
-              </label>
-              <label>
-                W
-                <input
-                  type="number"
-                  value={getBlockRect(selectedBlock, viewport).w}
-                  onChange={(event) =>
-                    updateBlockRect(selected.sectionId, selected.blockId, {
-                      ...getBlockRect(selectedBlock, viewport),
-                      w: Number(event.target.value)
-                    })
-                  }
-                />
-              </label>
-              <label>
-                H
-                <input
-                  type="number"
-                  value={getBlockRect(selectedBlock, viewport).h}
-                  onChange={(event) =>
-                    updateBlockRect(selected.sectionId, selected.blockId, {
-                      ...getBlockRect(selectedBlock, viewport),
-                      h: Number(event.target.value)
-                    })
-                  }
-                />
-              </label>
-
-              <label>
-                Tamaño texto
-                <input
-                  type="number"
-                  value={selectedBlock.style.fontSize ?? ""}
-                  onChange={(event) =>
-                    updateBlock(selected.sectionId, selected.blockId, (block) => ({
-                      ...block,
-                      style: {
-                        ...block.style,
-                        fontSize: Number(event.target.value) || undefined
-                      }
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Color texto
-                <input
-                  type="color"
-                  value={selectedBlock.style.color ?? "#0f172a"}
-                  onChange={(event) =>
-                    updateBlock(selected.sectionId, selected.blockId, (block) => ({
-                      ...block,
-                      style: {
-                        ...block.style,
-                        color: event.target.value
-                      }
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Fondo
-                <input
-                  type="color"
-                  value={selectedBlock.style.bgColor ?? "#ffffff"}
-                  onChange={(event) =>
-                    updateBlock(selected.sectionId, selected.blockId, (block) => ({
-                      ...block,
-                      style: {
-                        ...block.style,
-                        bgColor: event.target.value
-                      }
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Opacidad
-                <input
-                  type="number"
-                  min={0.1}
-                  max={1}
-                  step={0.05}
-                  value={selectedBlock.style.opacity ?? 1}
-                  onChange={(event) =>
-                    updateBlock(selected.sectionId, selected.blockId, (block) => ({
-                      ...block,
-                      style: {
-                        ...block.style,
-                        opacity: Number(event.target.value)
-                      }
-                    }))
-                  }
-                />
-              </label>
-
-              {selectedBlock.type === "text" ? (
+              <div className="stack">
+                <strong>Media</strong>
                 <label>
-                  Texto
-                  <textarea
-                    rows={4}
-                    value={selectedBlock.content.text}
-                    onChange={(event) =>
-                      updateBlock(selected.sectionId, selected.blockId, (block) =>
-                        block.type === "text"
-                          ? {
-                              ...block,
-                              content: { ...block.content, text: event.target.value }
-                            }
-                          : block
-                      )
-                    }
+                  Subir imagen
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => void handleUploadAsset(event.target.files?.[0] ?? null)}
+                    disabled={uploadingAsset}
                   />
                 </label>
-              ) : null}
-
-              {selectedBlock.type === "image" ? (
-                <>
-                  <label>
-                    Imagen URL
-                    <input
-                      value={selectedBlock.content.url ?? ""}
-                      onChange={(event) =>
-                        updateBlock(selected.sectionId, selected.blockId, (block) =>
-                          block.type === "image"
-                            ? {
-                                ...block,
-                                content: { ...block.content, url: event.target.value }
-                              }
-                            : block
-                        )
-                      }
-                    />
-                  </label>
-                  <label>
-                    Alt text
-                    <input
-                      value={selectedBlock.content.alt ?? ""}
-                      onChange={(event) =>
-                        updateBlock(selected.sectionId, selected.blockId, (block) =>
-                          block.type === "image"
-                            ? {
-                                ...block,
-                                content: { ...block.content, alt: event.target.value }
-                              }
-                            : block
-                        )
-                      }
-                    />
-                  </label>
-                  {assets.length ? (
-                    <select defaultValue="" onChange={(event) => applyAssetToSelected(assets.find((asset) => asset.id === event.target.value)?.public_url ?? "")}>
-                      <option value="">Usar imagen de librería...</option>
-                      {assets.map((asset) => (
-                        <option key={asset.id} value={asset.id}>
-                          {asset.kind === "uploaded" ? "Archivo" : "URL"} • {new Date(asset.created_at).toLocaleDateString()}
-                        </option>
-                      ))}
-                    </select>
-                  ) : null}
-                </>
-              ) : null}
-
-              {selectedBlock.type === "button" ? (
-                <>
-                  <label>
-                    Label
-                    <input
-                      value={selectedBlock.content.label}
-                      onChange={(event) =>
-                        updateBlock(selected.sectionId, selected.blockId, (block) =>
-                          block.type === "button"
-                            ? {
-                                ...block,
-                                content: { ...block.content, label: event.target.value }
-                              }
-                            : block
-                        )
-                      }
-                    />
-                  </label>
-                  <label>
-                    Acción
-                    <select
-                      value={selectedBlock.content.action}
-                      onChange={(event) =>
-                        updateBlock(selected.sectionId, selected.blockId, (block) =>
-                          block.type === "button"
-                            ? {
-                                ...block,
-                                content: { ...block.content, action: event.target.value as "whatsapp" | "link" }
-                              }
-                            : block
-                        )
-                      }
-                    >
-                      <option value="whatsapp">whatsapp</option>
-                      <option value="link">link</option>
-                    </select>
-                  </label>
-                  {selectedBlock.content.action === "link" ? (
-                    <label>
-                      URL
-                      <input
-                        value={selectedBlock.content.href ?? ""}
-                        onChange={(event) =>
-                          updateBlock(selected.sectionId, selected.blockId, (block) =>
-                            block.type === "button"
-                              ? {
-                                  ...block,
-                                  content: { ...block.content, href: event.target.value }
-                                }
-                              : block
-                          )
-                        }
-                      />
-                    </label>
-                  ) : null}
-                </>
-              ) : null}
+                <label>
+                  URL externa
+                  <input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} placeholder="https://..." />
+                </label>
+                <label>
+                  Alt text (opcional)
+                  <input value={externalAltText} onChange={(event) => setExternalAltText(event.target.value)} />
+                </label>
+                <button type="button" className="btn-secondary" onClick={addExternalAsset}>
+                  Registrar URL externa
+                </button>
+                {assetsLoading ? <small>Cargando assets...</small> : null}
+                {assetsMessage ? <small>{assetsMessage}</small> : null}
+                <div className="asset-grid">
+                  {assets.map((asset) => (
+                    <article key={asset.id} className="asset-card">
+                      <img src={asset.public_url} alt={asset.alt_text ?? "asset"} />
+                      <div className="asset-meta">
+                        <small>{asset.kind === "uploaded" ? "Subida" : "Externa"}</small>
+                        <button type="button" onClick={() => void deleteAsset(asset.id)}>
+                          Eliminar
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : null}
 
-          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-            <button className="btn-secondary" type="button" onClick={() => void saveCheckpoint()}>
-              Guardar checkpoint
-            </button>
-            <button className="btn-primary" type="button" onClick={() => void publish()} disabled={publishing}>
-              {publishing ? "Publicando..." : "Publicar"}
-            </button>
-          </div>
-          {message ? <p>{message}</p> : null}
-        </section>
-
-        <section className="card stack editor-pane">
-          <h3>Preview canvas</h3>
-          <div
-            style={{
-              width: PREVIEW_WIDTH[viewport],
-              maxWidth: "100%",
-              margin: "0 auto",
-              border: "1px solid var(--border)",
-              borderRadius: "0.75rem",
-              overflow: "hidden",
-              background: siteSpec.theme.background
-            }}
-          >
-            {(home?.sections ?? [])
-              .filter((section) => section.enabled)
-              .map((section) => (
-                <article
-                  key={section.id}
-                  style={{
-                    position: "relative",
-                    minHeight: viewport === "mobile" ? section.height.mobile : section.height.desktop,
-                    borderBottom: `1px solid ${siteSpec.theme.secondary}30`
-                  }}
-                  onClick={() => setSelected((prev) => (prev?.sectionId === section.id ? prev : { sectionId: section.id, blockId: section.blocks[0]?.id ?? "" }))}
-                >
+          {leftTab === "layers" ? (
+            <div className="stack">
+              {(home?.sections ?? []).map((section) => (
+                <div key={section.id} className="stack">
+                  <strong>{section.type}</strong>
                   {section.blocks
-                    .filter((block) => block.visible)
-                    .map((block) => {
-                      const rect = getBlockRect(block, viewport);
-                      const isSelected = selected?.sectionId === section.id && selected?.blockId === block.id;
-
-                      return (
-                        <div
-                          key={block.id}
-                          style={{
-                            position: "absolute",
-                            left: rect.x,
-                            top: rect.y,
-                            width: rect.w,
-                            height: rect.h,
-                            zIndex: rect.z,
-                            borderRadius: block.style.radius ?? 0,
-                            color: block.style.color,
-                            background: block.style.bgColor,
-                            borderStyle: block.style.borderWidth ? "solid" : undefined,
-                            borderWidth: block.style.borderWidth,
-                            borderColor: block.style.borderColor,
-                            opacity: block.style.opacity,
-                            fontSize: block.style.fontSize,
-                            fontWeight: block.style.fontWeight,
-                            textAlign: block.style.textAlign as "left" | "center" | "right" | undefined,
-                            overflow: "hidden",
-                            outline: isSelected ? "2px solid #0ea5e9" : "1px dashed transparent",
-                            boxSizing: "border-box",
-                            cursor: "move",
-                            padding: block.type === "text" ? 8 : 0
-                          }}
-                          onMouseDown={(event) => startDragging(event, section.id, block, "move")}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setSelected({ sectionId: section.id, blockId: block.id });
-                          }}
+                    .slice()
+                    .sort((a, b) => getBlockRect(b, viewport).z - getBlockRect(a, viewport).z)
+                    .map((block) => (
+                      <div key={block.id} className="editor-row">
+                        <button type="button" className="btn-secondary" onClick={() => setSelected({ sectionId: section.id, blockId: block.id })}>
+                          {block.type} {block.visible ? "" : "(oculto)"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() =>
+                            updateBlock(section.id, block.id, (current) => ({
+                              ...current,
+                              visible: !current.visible
+                            }))
+                          }
                         >
-                          {block.type === "text" ? block.content.text : null}
-                          {block.type === "image" ? (
-                            <img
-                              src={block.content.url || "https://placehold.co/800x520?text=Imagen"}
-                              alt={block.content.alt ?? "Imagen"}
-                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                            />
-                          ) : null}
-                          {block.type === "button" ? (
-                            <button type="button" style={{ width: "100%", height: "100%", border: "none", background: "transparent", color: "inherit" }}>
-                              {block.content.label}
-                            </button>
-                          ) : null}
-                          {block.type === "shape" ? <div style={{ width: "100%", height: "100%" }} /> : null}
-                          {block.type === "container" ? <div style={{ width: "100%", height: "100%" }} /> : null}
-                          {isSelected ? (
-                            <div
-                              onMouseDown={(event) => startDragging(event, section.id, block, "resize")}
-                              style={{
-                                position: "absolute",
-                                right: 2,
-                                bottom: 2,
-                                width: 14,
-                                height: 14,
-                                borderRadius: 4,
-                                background: "#0ea5e9",
-                                cursor: "nwse-resize"
-                              }}
-                            />
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                </article>
+                          {block.visible ? "Ocultar" : "Mostrar"}
+                        </button>
+                      </div>
+                    ))}
+                </div>
               ))}
+            </div>
+          ) : null}
+        </aside>
+
+        <section className="editor-canvas-area">
+          <div className="editor-canvas-shell">
+            <div
+              className="editor-canvas"
+              style={{
+                width: PREVIEW_WIDTH[viewport],
+                background: siteSpec.theme.background
+              }}
+            >
+              {(home?.sections ?? [])
+                .filter((section) => section.enabled)
+                .map((section) => (
+                  <article
+                    key={section.id}
+                    className="canvas-section"
+                    style={{
+                      minHeight: viewport === "mobile" ? section.height.mobile : section.height.desktop
+                    }}
+                    onClick={() => setSelected((prev) => (prev?.sectionId === section.id ? prev : { sectionId: section.id, blockId: section.blocks[0]?.id ?? "" }))}
+                  >
+                    {section.blocks
+                      .filter((block) => block.visible)
+                      .map((block) => {
+                        const rect = getBlockRect(block, viewport);
+                        const isSelected = selected?.sectionId === section.id && selected?.blockId === block.id;
+
+                        return (
+                          <div
+                            key={block.id}
+                            className={`canvas-block ${isSelected ? "selected" : ""}`}
+                            style={{
+                              left: rect.x,
+                              top: rect.y,
+                              width: rect.w,
+                              height: rect.h,
+                              zIndex: rect.z,
+                              borderRadius: block.style.radius ?? 0,
+                              color: block.style.color,
+                              background: block.style.bgColor,
+                              borderStyle: block.style.borderWidth ? "solid" : undefined,
+                              borderWidth: block.style.borderWidth,
+                              borderColor: block.style.borderColor,
+                              opacity: block.style.opacity,
+                              fontSize: block.style.fontSize,
+                              fontWeight: block.style.fontWeight,
+                              textAlign: block.style.textAlign as "left" | "center" | "right" | undefined,
+                              padding: block.type === "text" ? 8 : 0,
+                              overflow: isSelected ? "visible" : "hidden"
+                            }}
+                            onMouseDown={(event) => startDragging(event, section.id, block, "move")}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelected({ sectionId: section.id, blockId: block.id });
+                            }}
+                          >
+                            {block.type === "text" ? block.content.text : null}
+                            {block.type === "image" ? (
+                              <img
+                                src={block.content.url || "https://placehold.co/800x520?text=Imagen"}
+                                alt={block.content.alt ?? "Imagen"}
+                              />
+                            ) : null}
+                            {block.type === "button" ? (
+                              <button type="button">
+                                {block.content.label}
+                              </button>
+                            ) : null}
+                            {block.type === "shape" ? <div className="canvas-shape" /> : null}
+                            {block.type === "container" ? <div className="canvas-container" /> : null}
+                            {isSelected ? (
+                              <>
+                                <div
+                                  className="canvas-resize-handle"
+                                  onMouseDown={(event) => startDragging(event, section.id, block, "resize")}
+                                />
+                                <div
+                                  className="canvas-toolbar"
+                                  onClick={(event) => event.stopPropagation()}
+                                  onMouseDown={(event) => event.stopPropagation()}
+                                >
+                                  <button type="button" onClick={duplicateSelectedBlock}>
+                                    Duplicar
+                                  </button>
+                                  <button type="button" onClick={deleteSelectedBlock}>
+                                    Eliminar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateBlock(selected.sectionId, selected.blockId, (current) => ({
+                                        ...current,
+                                        visible: !current.visible
+                                      }))
+                                    }
+                                  >
+                                    {selectedBlock?.visible ? "Ocultar" : "Mostrar"}
+                                  </button>
+                                  <button type="button" onClick={bringSelectedToFront}>
+                                    Frente
+                                  </button>
+                                  <button type="button" onClick={sendSelectedToBack}>
+                                    Fondo
+                                  </button>
+                                </div>
+                              </>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                  </article>
+                ))}
+            </div>
           </div>
         </section>
+
+        <aside className={`editor-inspector ${inspectorOpen ? "open" : "collapsed"}`}>
+          <div className="editor-inspector-header">
+            <strong>Inspector</strong>
+            <button type="button" className="btn-secondary" onClick={() => setInspectorOpen((prev) => !prev)}>
+              {inspectorOpen ? "Cerrar" : "Abrir"}
+            </button>
+          </div>
+
+          {inspectorOpen ? (
+            <>
+              <div className="editor-tabs">
+                <button type="button" className={rightTab === "content" ? "tab active" : "tab"} onClick={() => setRightTab("content")}>
+                  Contenido
+                </button>
+                <button type="button" className={rightTab === "style" ? "tab active" : "tab"} onClick={() => setRightTab("style")}>
+                  Estilo
+                </button>
+                <button type="button" className={rightTab === "position" ? "tab active" : "tab"} onClick={() => setRightTab("position")}>
+                  Posición
+                </button>
+              </div>
+
+              {rightTab === "content" ? (
+                selected && selectedBlock ? (
+                  <div className="stack">
+                    <strong>Bloque: {selectedBlock.type}</strong>
+                    {selectedBlock.type === "text" ? (
+                      <label>
+                        Texto
+                        <textarea
+                          rows={4}
+                          value={selectedBlock.content.text}
+                          onChange={(event) =>
+                            updateBlock(selected.sectionId, selected.blockId, (block) =>
+                              block.type === "text"
+                                ? {
+                                    ...block,
+                                    content: { ...block.content, text: event.target.value }
+                                  }
+                                : block
+                            )
+                          }
+                        />
+                      </label>
+                    ) : null}
+
+                    {selectedBlock.type === "image" ? (
+                      <>
+                        <label>
+                          Imagen URL
+                          <input
+                            value={selectedBlock.content.url ?? ""}
+                            onChange={(event) =>
+                              updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                block.type === "image"
+                                  ? {
+                                      ...block,
+                                      content: { ...block.content, url: event.target.value }
+                                    }
+                                  : block
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          Alt text
+                          <input
+                            value={selectedBlock.content.alt ?? ""}
+                            onChange={(event) =>
+                              updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                block.type === "image"
+                                  ? {
+                                      ...block,
+                                      content: { ...block.content, alt: event.target.value }
+                                    }
+                                  : block
+                              )
+                            }
+                          />
+                        </label>
+                        {assets.length ? (
+                          <select defaultValue="" onChange={(event) => applyAssetToSelected(assets.find((asset) => asset.id === event.target.value)?.public_url ?? "")}>
+                            <option value="">Usar imagen de librería...</option>
+                            {assets.map((asset) => (
+                              <option key={asset.id} value={asset.id}>
+                                {asset.kind === "uploaded" ? "Archivo" : "URL"} • {new Date(asset.created_at).toLocaleDateString()}
+                              </option>
+                            ))}
+                          </select>
+                        ) : null}
+                      </>
+                    ) : null}
+
+                    {selectedBlock.type === "button" ? (
+                      <>
+                        <label>
+                          Label
+                          <input
+                            value={selectedBlock.content.label}
+                            onChange={(event) =>
+                              updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                block.type === "button"
+                                  ? {
+                                      ...block,
+                                      content: { ...block.content, label: event.target.value }
+                                    }
+                                  : block
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          Acción
+                          <select
+                            value={selectedBlock.content.action}
+                            onChange={(event) =>
+                              updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                block.type === "button"
+                                  ? {
+                                      ...block,
+                                      content: { ...block.content, action: event.target.value as "whatsapp" | "link" }
+                                    }
+                                  : block
+                              )
+                            }
+                          >
+                            <option value="whatsapp">whatsapp</option>
+                            <option value="link">link</option>
+                          </select>
+                        </label>
+                        {selectedBlock.content.action === "link" ? (
+                          <label>
+                            URL
+                            <input
+                              value={selectedBlock.content.href ?? ""}
+                              onChange={(event) =>
+                                updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                  block.type === "button"
+                                    ? {
+                                        ...block,
+                                        content: { ...block.content, href: event.target.value }
+                                      }
+                                    : block
+                                )
+                              }
+                            />
+                          </label>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="muted">Selecciona un bloque en el canvas para editar su contenido.</p>
+                )
+              ) : null}
+
+              {rightTab === "style" ? (
+                <div className="stack">
+                  {selected && selectedBlock ? (
+                    <div className="stack">
+                      <strong>Estilo del bloque</strong>
+                      <small className="muted">Estos cambios afectan solo el bloque seleccionado.</small>
+                      <label>
+                        Tamaño texto
+                        <input
+                          type="number"
+                          value={selectedBlock.style.fontSize ?? ""}
+                          onChange={(event) =>
+                            updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                              ...block,
+                              style: {
+                                ...block.style,
+                                fontSize: Number(event.target.value) || undefined
+                              }
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Color texto
+                        <input
+                          type="color"
+                          value={selectedBlock.style.color ?? "#0f172a"}
+                          onChange={(event) =>
+                            updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                              ...block,
+                              style: {
+                                ...block.style,
+                                color: event.target.value
+                              }
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Fondo del bloque
+                        <input
+                          type="color"
+                          value={selectedBlock.style.bgColor ?? "#ffffff"}
+                          onChange={(event) =>
+                            updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                              ...block,
+                              style: {
+                                ...block.style,
+                                bgColor: event.target.value
+                              }
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Opacidad
+                        <input
+                          type="number"
+                          min={0.1}
+                          max={1}
+                          step={0.05}
+                          value={selectedBlock.style.opacity ?? 1}
+                          onChange={(event) =>
+                            updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                              ...block,
+                              style: {
+                                ...block.style,
+                                opacity: Number(event.target.value)
+                              }
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Radio
+                        <input
+                          type="number"
+                          value={selectedBlock.style.radius ?? 0}
+                          onChange={(event) =>
+                            updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                              ...block,
+                              style: {
+                                ...block.style,
+                                radius: Number(event.target.value)
+                              }
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+
+                  <div className="stack">
+                    <strong>Tema del sitio</strong>
+                    <small className="muted">Estos cambios afectan el fondo y colores globales del sitio.</small>
+                    <label>
+                      Color primario
+                      <input
+                        type="color"
+                        value={siteSpec.theme.primary}
+                        onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, primary: event.target.value } }))}
+                      />
+                    </label>
+                    <label>
+                      Color secundario
+                      <input
+                        type="color"
+                        value={siteSpec.theme.secondary}
+                        onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, secondary: event.target.value } }))}
+                      />
+                    </label>
+                    <label>
+                      Fondo del sitio
+                      <input
+                        type="color"
+                        value={siteSpec.theme.background}
+                        onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, background: event.target.value } }))}
+                      />
+                    </label>
+                  </div>
+                </div>
+              ) : null}
+
+              {rightTab === "position" ? (
+                selected && selectedBlock ? (
+                  <div className="stack">
+                    <strong>Posición</strong>
+                    <label>
+                      X
+                      <input
+                        type="number"
+                        value={getBlockRect(selectedBlock, viewport).x}
+                        onChange={(event) =>
+                          updateBlockRect(selected.sectionId, selected.blockId, {
+                            ...getBlockRect(selectedBlock, viewport),
+                            x: Number(event.target.value)
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Y
+                      <input
+                        type="number"
+                        value={getBlockRect(selectedBlock, viewport).y}
+                        onChange={(event) =>
+                          updateBlockRect(selected.sectionId, selected.blockId, {
+                            ...getBlockRect(selectedBlock, viewport),
+                            y: Number(event.target.value)
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      W
+                      <input
+                        type="number"
+                        value={getBlockRect(selectedBlock, viewport).w}
+                        onChange={(event) =>
+                          updateBlockRect(selected.sectionId, selected.blockId, {
+                            ...getBlockRect(selectedBlock, viewport),
+                            w: Number(event.target.value)
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      H
+                      <input
+                        type="number"
+                        value={getBlockRect(selectedBlock, viewport).h}
+                        onChange={(event) =>
+                          updateBlockRect(selected.sectionId, selected.blockId, {
+                            ...getBlockRect(selectedBlock, viewport),
+                            h: Number(event.target.value)
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Z
+                      <input
+                        type="number"
+                        value={getBlockRect(selectedBlock, viewport).z}
+                        onChange={(event) =>
+                          updateBlockRect(selected.sectionId, selected.blockId, {
+                            ...getBlockRect(selectedBlock, viewport),
+                            z: Number(event.target.value)
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <p className="muted">Selecciona un bloque para editar su posición.</p>
+                )
+              ) : null}
+            </>
+          ) : null}
+        </aside>
       </section>
     </div>
   );

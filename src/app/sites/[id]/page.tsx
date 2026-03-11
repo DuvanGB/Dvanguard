@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { SiteEditor } from "@/components/editor/site-editor";
@@ -40,16 +39,8 @@ export default async function SiteEditorPage({ params }: { params: Promise<{ id:
   }
 
   return (
-    <main className="container stack" style={{ paddingTop: "2rem" }}>
-      <header className="stack">
-        <h1>{site.name}</h1>
-        <p>Subdominio: {site.subdomain}</p>
-        <Link href="/dashboard" className="btn-secondary">
-          Volver al dashboard
-        </Link>
-      </header>
-
-      <SiteEditor siteId={site.id} initialSpec={initialSpec} />
+    <main className="editor-page">
+      <SiteEditor siteId={site.id} siteName={site.name} subdomain={site.subdomain} initialSpec={initialSpec} />
     </main>
   );
 }
