@@ -556,173 +556,175 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
             </button>
           </div>
 
-          {leftTab === "templates" ? (
-            <div className="stack">
-              <p className="muted">Cambia el look sin alterar tu layout.</p>
-              {templatesLoading ? <small>Cargando plantillas...</small> : null}
-              {templatesMessage ? <small>{templatesMessage}</small> : null}
-              <div className="template-grid">
-                {templates.map((template) => (
-                  <button
-                    key={template.id}
-                    type="button"
-                    className={`template-card ${activeTemplateId === template.id ? "active" : ""}`}
-                    onClick={() => applyTemplateStyleOnly(template)}
-                  >
-                    <div className="template-chip" style={{ background: template.theme.background, color: template.theme.primary }}>
-                      {template.preview_label}
-                    </div>
-                    <strong>{template.name}</strong>
-                    <p>{template.description}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {leftTab === "sections" ? (
-            <div className="stack">
+          <div className="editor-rail-content">
+            {leftTab === "templates" ? (
               <div className="stack">
-                <strong>Agregar sección</strong>
-                {SECTION_LIBRARY.map((type) => (
-                  <button key={type} type="button" className="btn-secondary" onClick={() => addSection(type)}>
-                    + {type}
-                  </button>
-                ))}
-              </div>
-
-              <div className="stack">
-                <strong>Secciones del sitio</strong>
-                {(home?.sections ?? []).map((section) => (
-                  <div key={section.id} className="editor-row">
-                    <button type="button" className="btn-secondary" onClick={() => setSelected({ sectionId: section.id, blockId: section.blocks[0]?.id ?? "" })}>
-                      {section.type}
-                    </button>
-                    <select
-                      value={section.variant}
-                      onChange={(event) =>
-                        updateSection(section.id, (current) => ({
-                          ...current,
-                          variant: event.target.value as SiteSectionV3["variant"]
-                        }))
-                      }
-                    >
-                      <option value="centered">centered</option>
-                      <option value="split">split</option>
-                      <option value="image-left">image-left</option>
-                      <option value="grid">grid</option>
-                      <option value="cards">cards</option>
-                      <option value="list">list</option>
-                      <option value="minimal">minimal</option>
-                      <option value="spotlight">spotlight</option>
-                      <option value="simple">simple</option>
-                      <option value="highlight">highlight</option>
-                      <option value="compact">compact</option>
-                    </select>
+                <p className="muted">Cambia el look sin alterar tu layout.</p>
+                {templatesLoading ? <small>Cargando plantillas...</small> : null}
+                {templatesMessage ? <small>{templatesMessage}</small> : null}
+                <div className="template-grid">
+                  {templates.map((template) => (
                     <button
+                      key={template.id}
                       type="button"
-                      className="btn-secondary"
-                      onClick={() =>
-                        updateSection(section.id, (current) => ({
-                          ...current,
-                          enabled: !current.enabled
-                        }))
-                      }
+                      className={`template-card ${activeTemplateId === template.id ? "active" : ""}`}
+                      onClick={() => applyTemplateStyleOnly(template)}
                     >
-                      {section.enabled ? "Ocultar" : "Mostrar"}
-                    </button>
-                    <button type="button" className="btn-secondary" onClick={() => removeSection(section.id)}>
-                      Eliminar
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              {selectedSection ? (
-                <div className="stack">
-                  <strong>Bloques de {selectedSection.type}</strong>
-                  <div className="editor-inline">
-                    {BLOCK_LIBRARY.map((type) => (
-                      <button key={type} type="button" className="btn-secondary" onClick={() => addBlock(selectedSection.id, type)}>
-                        + {type}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="stack">
-                <strong>Media</strong>
-                <label>
-                  Subir imagen
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) => void handleUploadAsset(event.target.files?.[0] ?? null)}
-                    disabled={uploadingAsset}
-                  />
-                </label>
-                <label>
-                  URL externa
-                  <input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} placeholder="https://..." />
-                </label>
-                <label>
-                  Alt text (opcional)
-                  <input value={externalAltText} onChange={(event) => setExternalAltText(event.target.value)} />
-                </label>
-                <button type="button" className="btn-secondary" onClick={addExternalAsset}>
-                  Registrar URL externa
-                </button>
-                {assetsLoading ? <small>Cargando assets...</small> : null}
-                {assetsMessage ? <small>{assetsMessage}</small> : null}
-                <div className="asset-grid">
-                  {assets.map((asset) => (
-                    <article key={asset.id} className="asset-card">
-                      <img src={asset.public_url} alt={asset.alt_text ?? "asset"} />
-                      <div className="asset-meta">
-                        <small>{asset.kind === "uploaded" ? "Subida" : "Externa"}</small>
-                        <button type="button" onClick={() => void deleteAsset(asset.id)}>
-                          Eliminar
-                        </button>
+                      <div className="template-chip" style={{ background: template.theme.background, color: template.theme.primary }}>
+                        {template.preview_label}
                       </div>
-                    </article>
+                      <strong>{template.name}</strong>
+                      <p>{template.description}</p>
+                    </button>
                   ))}
                 </div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
 
-          {leftTab === "layers" ? (
-            <div className="stack">
-              {(home?.sections ?? []).map((section) => (
-                <div key={section.id} className="stack">
-                  <strong>{section.type}</strong>
-                  {section.blocks
-                    .slice()
-                    .sort((a, b) => getBlockRect(b, viewport).z - getBlockRect(a, viewport).z)
-                    .map((block) => (
-                      <div key={block.id} className="editor-row">
-                        <button type="button" className="btn-secondary" onClick={() => setSelected({ sectionId: section.id, blockId: block.id })}>
-                          {block.type} {block.visible ? "" : "(oculto)"}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-secondary"
-                          onClick={() =>
-                            updateBlock(section.id, block.id, (current) => ({
-                              ...current,
-                              visible: !current.visible
-                            }))
-                          }
-                        >
-                          {block.visible ? "Ocultar" : "Mostrar"}
-                        </button>
-                      </div>
-                    ))}
+            {leftTab === "sections" ? (
+              <div className="stack">
+                <div className="stack">
+                  <strong>Agregar sección</strong>
+                  {SECTION_LIBRARY.map((type) => (
+                    <button key={type} type="button" className="btn-secondary" onClick={() => addSection(type)}>
+                      + {type}
+                    </button>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : null}
+
+                <div className="stack">
+                  <strong>Secciones del sitio</strong>
+                  {(home?.sections ?? []).map((section) => (
+                    <div key={section.id} className="editor-row">
+                      <button type="button" className="btn-secondary" onClick={() => setSelected({ sectionId: section.id, blockId: section.blocks[0]?.id ?? "" })}>
+                        {section.type}
+                      </button>
+                      <select
+                        value={section.variant}
+                        onChange={(event) =>
+                          updateSection(section.id, (current) => ({
+                            ...current,
+                            variant: event.target.value as SiteSectionV3["variant"]
+                          }))
+                        }
+                      >
+                        <option value="centered">centered</option>
+                        <option value="split">split</option>
+                        <option value="image-left">image-left</option>
+                        <option value="grid">grid</option>
+                        <option value="cards">cards</option>
+                        <option value="list">list</option>
+                        <option value="minimal">minimal</option>
+                        <option value="spotlight">spotlight</option>
+                        <option value="simple">simple</option>
+                        <option value="highlight">highlight</option>
+                        <option value="compact">compact</option>
+                      </select>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={() =>
+                          updateSection(section.id, (current) => ({
+                            ...current,
+                            enabled: !current.enabled
+                          }))
+                        }
+                      >
+                        {section.enabled ? "Ocultar" : "Mostrar"}
+                      </button>
+                      <button type="button" className="btn-secondary" onClick={() => removeSection(section.id)}>
+                        Eliminar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {selectedSection ? (
+                  <div className="stack">
+                    <strong>Bloques de {selectedSection.type}</strong>
+                    <div className="editor-inline">
+                      {BLOCK_LIBRARY.map((type) => (
+                        <button key={type} type="button" className="btn-secondary" onClick={() => addBlock(selectedSection.id, type)}>
+                          + {type}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="stack">
+                  <strong>Media</strong>
+                  <label>
+                    Subir imagen
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => void handleUploadAsset(event.target.files?.[0] ?? null)}
+                      disabled={uploadingAsset}
+                    />
+                  </label>
+                  <label>
+                    URL externa
+                    <input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} placeholder="https://..." />
+                  </label>
+                  <label>
+                    Alt text (opcional)
+                    <input value={externalAltText} onChange={(event) => setExternalAltText(event.target.value)} />
+                  </label>
+                  <button type="button" className="btn-secondary" onClick={addExternalAsset}>
+                    Registrar URL externa
+                  </button>
+                  {assetsLoading ? <small>Cargando assets...</small> : null}
+                  {assetsMessage ? <small>{assetsMessage}</small> : null}
+                  <div className="asset-grid">
+                    {assets.map((asset) => (
+                      <article key={asset.id} className="asset-card">
+                        <img src={asset.public_url} alt={asset.alt_text ?? "asset"} />
+                        <div className="asset-meta">
+                          <small>{asset.kind === "uploaded" ? "Subida" : "Externa"}</small>
+                          <button type="button" onClick={() => void deleteAsset(asset.id)}>
+                            Eliminar
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {leftTab === "layers" ? (
+              <div className="stack">
+                {(home?.sections ?? []).map((section) => (
+                  <div key={section.id} className="stack">
+                    <strong>{section.type}</strong>
+                    {section.blocks
+                      .slice()
+                      .sort((a, b) => getBlockRect(b, viewport).z - getBlockRect(a, viewport).z)
+                      .map((block) => (
+                        <div key={block.id} className="editor-row">
+                          <button type="button" className="btn-secondary" onClick={() => setSelected({ sectionId: section.id, blockId: block.id })}>
+                            {block.type} {block.visible ? "" : "(oculto)"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            onClick={() =>
+                              updateBlock(section.id, block.id, (current) => ({
+                                ...current,
+                                visible: !current.visible
+                              }))
+                            }
+                          >
+                            {block.visible ? "Ocultar" : "Mostrar"}
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </aside>
 
         <section className="editor-canvas-area">
@@ -862,337 +864,342 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                 </button>
               </div>
 
-              {rightTab === "content" ? (
-                selected && selectedBlock ? (
-                  <div className="stack">
-                    <strong>Bloque: {selectedBlock.type}</strong>
-                    {selectedBlock.type === "text" ? (
-                      <label>
-                        Texto
-                        <textarea
-                          rows={4}
-                          value={selectedBlock.content.text}
-                          onChange={(event) =>
-                            updateBlock(selected.sectionId, selected.blockId, (block) =>
-                              block.type === "text"
-                                ? {
-                                    ...block,
-                                    content: { ...block.content, text: event.target.value }
-                                  }
-                                : block
-                            )
-                          }
-                        />
-                      </label>
-                    ) : null}
+              <div className="editor-inspector-content">
+                {rightTab === "content" ? (
+                  selected && selectedBlock ? (
+                    <div className="stack">
+                      <strong>Bloque: {selectedBlock.type}</strong>
+                      {selectedBlock.type === "text" ? (
+                        <label>
+                          Texto
+                          <textarea
+                            rows={4}
+                            value={selectedBlock.content.text}
+                            onChange={(event) =>
+                              updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                block.type === "text"
+                                  ? {
+                                      ...block,
+                                      content: { ...block.content, text: event.target.value }
+                                    }
+                                  : block
+                              )
+                            }
+                          />
+                        </label>
+                      ) : null}
 
-                    {selectedBlock.type === "image" ? (
-                      <>
-                        <label>
-                          Imagen URL
-                          <input
-                            value={selectedBlock.content.url ?? ""}
-                            onChange={(event) =>
-                              updateBlock(selected.sectionId, selected.blockId, (block) =>
-                                block.type === "image"
-                                  ? {
-                                      ...block,
-                                      content: { ...block.content, url: event.target.value }
-                                    }
-                                  : block
-                              )
-                            }
-                          />
-                        </label>
-                        <label>
-                          Alt text
-                          <input
-                            value={selectedBlock.content.alt ?? ""}
-                            onChange={(event) =>
-                              updateBlock(selected.sectionId, selected.blockId, (block) =>
-                                block.type === "image"
-                                  ? {
-                                      ...block,
-                                      content: { ...block.content, alt: event.target.value }
-                                    }
-                                  : block
-                              )
-                            }
-                          />
-                        </label>
-                        {assets.length ? (
-                          <select defaultValue="" onChange={(event) => applyAssetToSelected(assets.find((asset) => asset.id === event.target.value)?.public_url ?? "")}>
-                            <option value="">Usar imagen de librería...</option>
-                            {assets.map((asset) => (
-                              <option key={asset.id} value={asset.id}>
-                                {asset.kind === "uploaded" ? "Archivo" : "URL"} • {new Date(asset.created_at).toLocaleDateString()}
-                              </option>
-                            ))}
-                          </select>
-                        ) : null}
-                      </>
-                    ) : null}
-
-                    {selectedBlock.type === "button" ? (
-                      <>
-                        <label>
-                          Label
-                          <input
-                            value={selectedBlock.content.label}
-                            onChange={(event) =>
-                              updateBlock(selected.sectionId, selected.blockId, (block) =>
-                                block.type === "button"
-                                  ? {
-                                      ...block,
-                                      content: { ...block.content, label: event.target.value }
-                                    }
-                                  : block
-                              )
-                            }
-                          />
-                        </label>
-                        <label>
-                          Acción
-                          <select
-                            value={selectedBlock.content.action}
-                            onChange={(event) =>
-                              updateBlock(selected.sectionId, selected.blockId, (block) =>
-                                block.type === "button"
-                                  ? {
-                                      ...block,
-                                      content: { ...block.content, action: event.target.value as "whatsapp" | "link" }
-                                    }
-                                  : block
-                              )
-                            }
-                          >
-                            <option value="whatsapp">whatsapp</option>
-                            <option value="link">link</option>
-                          </select>
-                        </label>
-                        {selectedBlock.content.action === "link" ? (
+                      {selectedBlock.type === "image" ? (
+                        <>
                           <label>
-                            URL
+                            Imagen URL
                             <input
-                              value={selectedBlock.content.href ?? ""}
+                              value={selectedBlock.content.url ?? ""}
                               onChange={(event) =>
                                 updateBlock(selected.sectionId, selected.blockId, (block) =>
-                                  block.type === "button"
+                                  block.type === "image"
                                     ? {
                                         ...block,
-                                        content: { ...block.content, href: event.target.value }
+                                        content: { ...block.content, url: event.target.value }
                                       }
                                     : block
                                 )
                               }
                             />
                           </label>
-                        ) : null}
-                      </>
-                    ) : null}
-                  </div>
-                ) : (
-                  <p className="muted">Selecciona un bloque en el canvas para editar su contenido.</p>
-                )
-              ) : null}
+                          <label>
+                            Alt text
+                            <input
+                              value={selectedBlock.content.alt ?? ""}
+                              onChange={(event) =>
+                                updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                  block.type === "image"
+                                    ? {
+                                        ...block,
+                                        content: { ...block.content, alt: event.target.value }
+                                      }
+                                    : block
+                                )
+                              }
+                            />
+                          </label>
+                          {assets.length ? (
+                            <select
+                              defaultValue=""
+                              onChange={(event) => applyAssetToSelected(assets.find((asset) => asset.id === event.target.value)?.public_url ?? "")}
+                            >
+                              <option value="">Usar imagen de librería...</option>
+                              {assets.map((asset) => (
+                                <option key={asset.id} value={asset.id}>
+                                  {asset.kind === "uploaded" ? "Archivo" : "URL"} • {new Date(asset.created_at).toLocaleDateString()}
+                                </option>
+                              ))}
+                            </select>
+                          ) : null}
+                        </>
+                      ) : null}
 
-              {rightTab === "style" ? (
-                <div className="stack">
-                  {selected && selectedBlock ? (
+                      {selectedBlock.type === "button" ? (
+                        <>
+                          <label>
+                            Label
+                            <input
+                              value={selectedBlock.content.label}
+                              onChange={(event) =>
+                                updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                  block.type === "button"
+                                    ? {
+                                        ...block,
+                                        content: { ...block.content, label: event.target.value }
+                                      }
+                                    : block
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            Acción
+                            <select
+                              value={selectedBlock.content.action}
+                              onChange={(event) =>
+                                updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                  block.type === "button"
+                                    ? {
+                                        ...block,
+                                        content: { ...block.content, action: event.target.value as "whatsapp" | "link" }
+                                      }
+                                    : block
+                                )
+                              }
+                            >
+                              <option value="whatsapp">whatsapp</option>
+                              <option value="link">link</option>
+                            </select>
+                          </label>
+                          {selectedBlock.content.action === "link" ? (
+                            <label>
+                              URL
+                              <input
+                                value={selectedBlock.content.href ?? ""}
+                                onChange={(event) =>
+                                  updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                    block.type === "button"
+                                      ? {
+                                          ...block,
+                                          content: { ...block.content, href: event.target.value }
+                                        }
+                                      : block
+                                  )
+                                }
+                              />
+                            </label>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="muted">Selecciona un bloque en el canvas para editar su contenido.</p>
+                  )
+                ) : null}
+
+                {rightTab === "style" ? (
+                  <div className="stack">
+                    {selected && selectedBlock ? (
+                      <div className="stack">
+                        <strong>Estilo del bloque</strong>
+                        <small className="muted">Estos cambios afectan solo el bloque seleccionado.</small>
+                        <label>
+                          Tamaño texto
+                          <input
+                            type="number"
+                            value={selectedBlock.style.fontSize ?? ""}
+                            onChange={(event) =>
+                              updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                                ...block,
+                                style: {
+                                  ...block.style,
+                                  fontSize: Number(event.target.value) || undefined
+                                }
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          Color texto
+                          <input
+                            type="color"
+                            value={selectedBlock.style.color ?? "#0f172a"}
+                            onChange={(event) =>
+                              updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                                ...block,
+                                style: {
+                                  ...block.style,
+                                  color: event.target.value
+                                }
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          Fondo del bloque
+                          <input
+                            type="color"
+                            value={selectedBlock.style.bgColor ?? "#ffffff"}
+                            onChange={(event) =>
+                              updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                                ...block,
+                                style: {
+                                  ...block.style,
+                                  bgColor: event.target.value
+                                }
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          Opacidad
+                          <input
+                            type="number"
+                            min={0.1}
+                            max={1}
+                            step={0.05}
+                            value={selectedBlock.style.opacity ?? 1}
+                            onChange={(event) =>
+                              updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                                ...block,
+                                style: {
+                                  ...block.style,
+                                  opacity: Number(event.target.value)
+                                }
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          Radio
+                          <input
+                            type="number"
+                            value={selectedBlock.style.radius ?? 0}
+                            onChange={(event) =>
+                              updateBlock(selected.sectionId, selected.blockId, (block) => ({
+                                ...block,
+                                style: {
+                                  ...block.style,
+                                  radius: Number(event.target.value)
+                                }
+                              }))
+                            }
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+
                     <div className="stack">
-                      <strong>Estilo del bloque</strong>
-                      <small className="muted">Estos cambios afectan solo el bloque seleccionado.</small>
+                      <strong>Tema del sitio</strong>
+                      <small className="muted">Estos cambios afectan el fondo y colores globales del sitio.</small>
                       <label>
-                        Tamaño texto
-                        <input
-                          type="number"
-                          value={selectedBlock.style.fontSize ?? ""}
-                          onChange={(event) =>
-                            updateBlock(selected.sectionId, selected.blockId, (block) => ({
-                              ...block,
-                              style: {
-                                ...block.style,
-                                fontSize: Number(event.target.value) || undefined
-                              }
-                            }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        Color texto
+                        Color primario
                         <input
                           type="color"
-                          value={selectedBlock.style.color ?? "#0f172a"}
-                          onChange={(event) =>
-                            updateBlock(selected.sectionId, selected.blockId, (block) => ({
-                              ...block,
-                              style: {
-                                ...block.style,
-                                color: event.target.value
-                              }
-                            }))
-                          }
+                          value={siteSpec.theme.primary}
+                          onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, primary: event.target.value } }))}
                         />
                       </label>
                       <label>
-                        Fondo del bloque
+                        Color secundario
                         <input
                           type="color"
-                          value={selectedBlock.style.bgColor ?? "#ffffff"}
+                          value={siteSpec.theme.secondary}
+                          onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, secondary: event.target.value } }))}
+                        />
+                      </label>
+                      <label>
+                        Fondo del sitio
+                        <input
+                          type="color"
+                          value={siteSpec.theme.background}
+                          onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, background: event.target.value } }))}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                {rightTab === "position" ? (
+                  selected && selectedBlock ? (
+                    <div className="stack">
+                      <strong>Posición</strong>
+                      <label>
+                        X
+                        <input
+                          type="number"
+                          value={getBlockRect(selectedBlock, viewport).x}
                           onChange={(event) =>
-                            updateBlock(selected.sectionId, selected.blockId, (block) => ({
-                              ...block,
-                              style: {
-                                ...block.style,
-                                bgColor: event.target.value
-                              }
-                            }))
+                            updateBlockRect(selected.sectionId, selected.blockId, {
+                              ...getBlockRect(selectedBlock, viewport),
+                              x: Number(event.target.value)
+                            })
                           }
                         />
                       </label>
                       <label>
-                        Opacidad
+                        Y
                         <input
                           type="number"
-                          min={0.1}
-                          max={1}
-                          step={0.05}
-                          value={selectedBlock.style.opacity ?? 1}
+                          value={getBlockRect(selectedBlock, viewport).y}
                           onChange={(event) =>
-                            updateBlock(selected.sectionId, selected.blockId, (block) => ({
-                              ...block,
-                              style: {
-                                ...block.style,
-                                opacity: Number(event.target.value)
-                              }
-                            }))
+                            updateBlockRect(selected.sectionId, selected.blockId, {
+                              ...getBlockRect(selectedBlock, viewport),
+                              y: Number(event.target.value)
+                            })
                           }
                         />
                       </label>
                       <label>
-                        Radio
+                        W
                         <input
                           type="number"
-                          value={selectedBlock.style.radius ?? 0}
+                          value={getBlockRect(selectedBlock, viewport).w}
                           onChange={(event) =>
-                            updateBlock(selected.sectionId, selected.blockId, (block) => ({
-                              ...block,
-                              style: {
-                                ...block.style,
-                                radius: Number(event.target.value)
-                              }
-                            }))
+                            updateBlockRect(selected.sectionId, selected.blockId, {
+                              ...getBlockRect(selectedBlock, viewport),
+                              w: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        H
+                        <input
+                          type="number"
+                          value={getBlockRect(selectedBlock, viewport).h}
+                          onChange={(event) =>
+                            updateBlockRect(selected.sectionId, selected.blockId, {
+                              ...getBlockRect(selectedBlock, viewport),
+                              h: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Z
+                        <input
+                          type="number"
+                          value={getBlockRect(selectedBlock, viewport).z}
+                          onChange={(event) =>
+                            updateBlockRect(selected.sectionId, selected.blockId, {
+                              ...getBlockRect(selectedBlock, viewport),
+                              z: Number(event.target.value)
+                            })
                           }
                         />
                       </label>
                     </div>
-                  ) : null}
-
-                  <div className="stack">
-                    <strong>Tema del sitio</strong>
-                    <small className="muted">Estos cambios afectan el fondo y colores globales del sitio.</small>
-                    <label>
-                      Color primario
-                      <input
-                        type="color"
-                        value={siteSpec.theme.primary}
-                        onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, primary: event.target.value } }))}
-                      />
-                    </label>
-                    <label>
-                      Color secundario
-                      <input
-                        type="color"
-                        value={siteSpec.theme.secondary}
-                        onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, secondary: event.target.value } }))}
-                      />
-                    </label>
-                    <label>
-                      Fondo del sitio
-                      <input
-                        type="color"
-                        value={siteSpec.theme.background}
-                        onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, background: event.target.value } }))}
-                      />
-                    </label>
-                  </div>
-                </div>
-              ) : null}
-
-              {rightTab === "position" ? (
-                selected && selectedBlock ? (
-                  <div className="stack">
-                    <strong>Posición</strong>
-                    <label>
-                      X
-                      <input
-                        type="number"
-                        value={getBlockRect(selectedBlock, viewport).x}
-                        onChange={(event) =>
-                          updateBlockRect(selected.sectionId, selected.blockId, {
-                            ...getBlockRect(selectedBlock, viewport),
-                            x: Number(event.target.value)
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      Y
-                      <input
-                        type="number"
-                        value={getBlockRect(selectedBlock, viewport).y}
-                        onChange={(event) =>
-                          updateBlockRect(selected.sectionId, selected.blockId, {
-                            ...getBlockRect(selectedBlock, viewport),
-                            y: Number(event.target.value)
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      W
-                      <input
-                        type="number"
-                        value={getBlockRect(selectedBlock, viewport).w}
-                        onChange={(event) =>
-                          updateBlockRect(selected.sectionId, selected.blockId, {
-                            ...getBlockRect(selectedBlock, viewport),
-                            w: Number(event.target.value)
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      H
-                      <input
-                        type="number"
-                        value={getBlockRect(selectedBlock, viewport).h}
-                        onChange={(event) =>
-                          updateBlockRect(selected.sectionId, selected.blockId, {
-                            ...getBlockRect(selectedBlock, viewport),
-                            h: Number(event.target.value)
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      Z
-                      <input
-                        type="number"
-                        value={getBlockRect(selectedBlock, viewport).z}
-                        onChange={(event) =>
-                          updateBlockRect(selected.sectionId, selected.blockId, {
-                            ...getBlockRect(selectedBlock, viewport),
-                            z: Number(event.target.value)
-                          })
-                        }
-                      />
-                    </label>
-                  </div>
-                ) : (
-                  <p className="muted">Selecciona un bloque para editar su posición.</p>
-                )
-              ) : null}
+                  ) : (
+                    <p className="muted">Selecciona un bloque para editar su posición.</p>
+                  )
+                ) : null}
+              </div>
             </>
           ) : null}
         </aside>
