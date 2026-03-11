@@ -46,7 +46,7 @@ export function SiteRenderer({ spec, viewport = "desktop", trackEvents = false, 
     });
   }, [pageSlug, siteId, subdomain, trackEvents]);
 
-  const rendererWidth = viewport === "mobile" ? 390 : 1120;
+  const rendererWidth = viewport === "mobile" ? 390 : "100%";
 
   function trackCta(sectionId: string) {
     if (!trackEvents || !siteId || !subdomain) return;
@@ -77,10 +77,11 @@ export function SiteRenderer({ spec, viewport = "desktop", trackEvents = false, 
         color: normalized.theme.primary,
         minHeight: "100vh",
         fontFamily: normalized.theme.font_body,
-        maxWidth: rendererWidth,
-        margin: "0 auto",
-        border: "1px solid var(--border)",
-        borderRadius: "0.75rem",
+        width: rendererWidth,
+        maxWidth: "100%",
+        margin: 0,
+        border: "none",
+        borderRadius: 0,
         overflow: "hidden"
       }}
     >
