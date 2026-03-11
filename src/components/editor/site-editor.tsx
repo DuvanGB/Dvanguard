@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
 
@@ -82,6 +83,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
   const [templates, setTemplates] = useState<TemplateCard[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesMessage, setTemplatesMessage] = useState<string | null>(null);
+  const [blockTargetSectionId, setBlockTargetSectionId] = useState<string | null>(null);
 
   const currentHash = useMemo(() => hashSpec(siteSpec), [siteSpec]);
   const isDirty = currentHash !== lastPersistedHash;
@@ -89,6 +91,15 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
   const home = useMemo(() => siteSpec.pages.find((page) => page.slug === "/") ?? siteSpec.pages[0] ?? null, [siteSpec]);
   const selectedSection = home?.sections.find((section) => section.id === selected?.sectionId) ?? null;
   const selectedBlock = selectedSection?.blocks.find((block) => block.id === selected?.blockId) ?? null;
+  const blockTargetSection =
+    (blockTargetSectionId && home?.sections.find((section) => section.id === blockTargetSectionId)) ?? selectedSection ?? home?.sections[0] ?? null;
+
+  useEffect(() => {
+    if (!home?.sections?.length) return;
+    if (!blockTargetSectionId || !home.sections.some((section) => section.id === blockTargetSectionId)) {
+      setBlockTargetSectionId(selectedSection?.id ?? home.sections[0]?.id ?? null);
+    }
+  }, [blockTargetSectionId, home?.sections, selectedSection?.id]);
 
   useEffect(() => {
     void loadAssets();
@@ -481,6 +492,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
     );
   }
 
+
   function applyTemplateStyleOnly(template: TemplateCard) {
     setSiteSpec((prev) => ({
       ...prev,
@@ -531,6 +543,9 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
           </div>
         </div>
         <div className="editor-topbar-actions">
+          <Link href="/dashboard" className="btn-secondary">
+            Dashboard
+          </Link>
           <button className="btn-secondary" type="button" onClick={() => void saveCheckpoint()}>
             Guardar
           </button>
@@ -595,57 +610,61 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                 <div className="stack">
                   <strong>Secciones del sitio</strong>
                   {(home?.sections ?? []).map((section) => (
-                    <div key={section.id} className="editor-row">
-                      <button type="button" className="btn-secondary" onClick={() => setSelected({ sectionId: section.id, blockId: section.blocks[0]?.id ?? "" })}>
-                        {section.type}
-                      </button>
-                      <select
-                        value={section.variant}
-                        onChange={(event) =>
-                          updateSection(section.id, (current) => ({
-                            ...current,
-                            variant: event.target.value as SiteSectionV3["variant"]
-                          }))
-                        }
-                      >
-                        <option value="centered">centered</option>
-                        <option value="split">split</option>
-                        <option value="image-left">image-left</option>
-                        <option value="grid">grid</option>
-                        <option value="cards">cards</option>
-                        <option value="list">list</option>
-                        <option value="minimal">minimal</option>
-                        <option value="spotlight">spotlight</option>
-                        <option value="simple">simple</option>
-                        <option value="highlight">highlight</option>
-                        <option value="compact">compact</option>
-                      </select>
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        onClick={() =>
-                          updateSection(section.id, (current) => ({
-                            ...current,
-                            enabled: !current.enabled
-                          }))
-                        }
-                      >
-                        {section.enabled ? "Ocultar" : "Mostrar"}
-                      </button>
-                      <button type="button" className="btn-secondary" onClick={() => removeSection(section.id)}>
-                        Eliminar
-                      </button>
+                    <div key={section.id} className="editor-section-card">
+                      <div className="editor-section-header">
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => setSelected({ sectionId: section.id, blockId: section.blocks[0]?.id ?? "" })}
+                        >
+                          {section.type}
+                        </button>
+                        <div className="editor-section-actions">
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            aria-label={section.enabled ? "Ocultar sección" : "Mostrar sección"}
+                            onClick={() =>
+                              updateSection(section.id, (current) => ({
+                                ...current,
+                                enabled: !current.enabled
+                              }))
+                            }
+                          >
+                            {section.enabled ? <EyeIcon /> : <EyeOffIcon />}
+                          </button>
+                          <button type="button" className="icon-btn danger" aria-label="Eliminar sección" onClick={() => removeSection(section.id)}>
+                            <TrashIcon />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
 
-                {selectedSection ? (
+                {blockTargetSection ? (
                   <div className="stack">
-                    <strong>Bloques de {selectedSection.type}</strong>
+                    <strong>Agregar bloque</strong>
+                    <label>
+                      Sección destino
+                      <select
+                        value={blockTargetSection.id}
+                        onChange={(event) => setBlockTargetSectionId(event.target.value)}
+                      >
+                        {(home?.sections ?? []).map((section) => (
+                          <option key={section.id} value={section.id}>
+                            {section.type}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <div className="editor-inline">
                       {BLOCK_LIBRARY.map((type) => (
-                        <button key={type} type="button" className="btn-secondary" onClick={() => addBlock(selectedSection.id, type)}>
-                          + {type}
+                        <button key={type} type="button" className="block-add-btn" onClick={() => addBlock(blockTargetSection.id, type)}>
+                          <span className="block-add-icon">
+                            <PlusIcon />
+                          </span>
+                          <span className="block-add-label">{type}</span>
                         </button>
                       ))}
                     </div>
@@ -702,22 +721,38 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                       .slice()
                       .sort((a, b) => getBlockRect(b, viewport).z - getBlockRect(a, viewport).z)
                       .map((block) => (
-                        <div key={block.id} className="editor-row">
+                        <div key={block.id} className="editor-layer-row">
                           <button type="button" className="btn-secondary" onClick={() => setSelected({ sectionId: section.id, blockId: block.id })}>
-                            {block.type} {block.visible ? "" : "(oculto)"}
+                            {block.type}
                           </button>
-                          <button
-                            type="button"
-                            className="btn-secondary"
-                            onClick={() =>
-                              updateBlock(section.id, block.id, (current) => ({
-                                ...current,
-                                visible: !current.visible
-                              }))
-                            }
-                          >
-                            {block.visible ? "Ocultar" : "Mostrar"}
-                          </button>
+                          <div className="editor-section-actions">
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              aria-label={block.visible ? "Ocultar bloque" : "Mostrar bloque"}
+                              onClick={() =>
+                                updateBlock(section.id, block.id, (current) => ({
+                                  ...current,
+                                  visible: !current.visible
+                                }))
+                              }
+                            >
+                              {block.visible ? <EyeIcon /> : <EyeOffIcon />}
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-btn danger"
+                              aria-label="Eliminar bloque"
+                              onClick={() =>
+                                updateSection(section.id, (current) => ({
+                                  ...current,
+                                  blocks: current.blocks.filter((item) => item.id !== block.id)
+                                }))
+                              }
+                            >
+                              <TrashIcon />
+                            </button>
+                          </div>
                         </div>
                       ))}
                   </div>
@@ -787,6 +822,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                               <img
                                 src={block.content.url || "https://placehold.co/800x520?text=Imagen"}
                                 alt={block.content.alt ?? "Imagen"}
+                                style={{ width: "100%", height: "100%", objectFit: "contain" }}
                               />
                             ) : null}
                             {block.type === "button" ? (
@@ -1341,6 +1377,8 @@ function clampRect(rect: CanvasLayoutRect, maxW: number, maxH: number): CanvasLa
   return { ...rect, x, y, w, h };
 }
 
+// (image auto-fit removed: images should adapt to container size)
+
 function hasInvalidImageUrl(spec: SiteSpecV3) {
   for (const page of spec.pages) {
     for (const section of page.sections) {
@@ -1374,4 +1412,83 @@ function useSavedAgoLabel(lastSavedAt: number | null) {
   if (diffSec < 60) return `hace ${diffSec}s`;
   const diffMin = Math.floor(diffSec / 60);
   return `hace ${diffMin}m`;
+}
+
+function EyeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M3 5l16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6.4 7.5C4 9.3 2 12 2 12s3.5 6 10 6c2.2 0 4.1-.5 5.7-1.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9.8 9.8A3.2 3.2 0 0 0 12 15.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M4 7h16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9 7V5h6v2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M7 7l1 12h8l1-12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path d="M10 11v5M14 11v5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
 }

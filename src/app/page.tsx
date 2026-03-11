@@ -5,6 +5,8 @@ import { SiteRenderer } from "@/components/runtime/site-renderer";
 import { getPublishedSiteBySubdomain } from "@/lib/data/public-site";
 import { getSubdomainFromHost } from "@/lib/tenant";
 
+export const dynamic = "force-dynamic";
+
 export default async function HomePage() {
   const headerStore = await headers();
   const host = headerStore.get("host");

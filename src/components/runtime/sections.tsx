@@ -123,7 +123,7 @@ function CanvasBlockRenderer({
       <img
         src={src}
         alt={block.content.alt ?? "Imagen"}
-        style={{ ...style, objectFit: "cover" as const }}
+        style={{ ...style, objectFit: "contain" as const }}
         onClick={() => onSelectBlock?.(sectionId, block.id)}
       />
     );
