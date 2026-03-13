@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
 import { fontFamilies } from "@/lib/site-spec-v3";
+import type { TemplateId } from "@/lib/templates/types";
 
 type Props = {
   siteId: string;
@@ -43,10 +44,10 @@ type SiteAsset = {
 };
 
 type TemplateCard = {
-  id: string;
+  id: TemplateId;
   name: string;
   description: string;
-  family: string;
+  family: SiteSpecV3["template"]["family"];
   site_type: "informative" | "commerce_lite";
   preview_label: string;
   theme: SiteSpecV3["theme"];
@@ -522,6 +523,8 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
 
   const activeTemplateId = siteSpec.template.id;
   const fontOptions = fontFamilies;
+  const isFontFamily = (value: string): value is (typeof fontFamilies)[number] =>
+    (fontFamilies as readonly string[]).includes(value);
 
   return (
     <div className="editor-shell">
@@ -1134,27 +1137,30 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                       {selectedBlock.type === "text" ? (
                         <label>
                           Tipografía
-                          <select
-                            value={selectedBlock.style.fontFamily ?? "__body"}
-                            onChange={(event) => {
-                              const value = event.target.value;
-                              updateBlock(selected.sectionId, selected.blockId, (block) =>
-                                block.type === "text"
-                                  ? {
-                                      ...block,
-                                      style: {
-                                        ...block.style,
-                                        fontFamily:
-                                          value === "__body"
-                                            ? undefined
-                                            : value === "__heading"
-                                              ? siteSpec.theme.font_heading
-                                              : (value as CanvasBlock["style"]["fontFamily"])
+                            <select
+                              value={selectedBlock.style.fontFamily ?? "__body"}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                let nextFontFamily: (typeof fontFamilies)[number] | undefined;
+                                if (value === "__body") {
+                                  nextFontFamily = undefined;
+                                } else if (value === "__heading") {
+                                  nextFontFamily = isFontFamily(siteSpec.theme.font_heading) ? siteSpec.theme.font_heading : undefined;
+                                } else if (isFontFamily(value)) {
+                                  nextFontFamily = value;
+                                }
+                                updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                  block.type === "text"
+                                    ? {
+                                        ...block,
+                                        style: {
+                                          ...block.style,
+                                        fontFamily: nextFontFamily
+                                        }
                                       }
-                                    }
-                                  : block
-                              );
-                            }}
+                                    : block
+                                );
+                              }}
                           >
                             <option value="__body">Cuerpo (predeterminado)</option>
                             <option value="__heading">Títulos (tema)</option>
