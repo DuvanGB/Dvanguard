@@ -156,7 +156,11 @@ function buildActivationChecklist(spec: AnySiteSpec, status: string) {
     allBlocks.some((block) => block.type === "text" && block.content.text.trim().length >= 12) &&
     enabledSections.length >= 2;
 
-  const hasPrimaryImage = allBlocks.some((block) => block.type === "image" && Boolean(block.content.url));
+  const hasPrimaryImage = allBlocks.some((block) => {
+    if (block.type === "image") return Boolean(block.content.url);
+    if (block.type === "product") return Boolean(block.content.image_url);
+    return false;
+  });
 
   const hasWhatsappButton = allBlocks.some((block) => block.type === "button" && block.content.action === "whatsapp");
   const hasWhatsapp = Boolean(spec.integrations.whatsapp?.enabled && (spec.integrations.whatsapp?.phone || hasWhatsappButton));

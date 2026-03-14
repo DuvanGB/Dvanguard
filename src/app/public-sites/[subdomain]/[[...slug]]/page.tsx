@@ -13,5 +13,5 @@ export default async function PublicSitePage({ params }: { params: Promise<{ sub
     notFound();
   }
 
-  return <SiteRenderer spec={payload.siteSpec} trackEvents siteId={payload.id} subdomain={payload.subdomain} />;
+  return <SiteRenderer spec={payload.siteSpec} trackEvents siteId={payload.id} subdomain={payload.subdomain} enableCart />;
 }

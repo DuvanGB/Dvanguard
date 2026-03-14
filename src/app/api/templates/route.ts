@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
       id: template.id,
       name: template.name,
       description: template.description,
+      tags: template.tags,
       family: template.family,
       site_type: template.site_type,
       preview_label: template.preview_label,

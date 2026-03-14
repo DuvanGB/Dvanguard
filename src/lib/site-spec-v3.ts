@@ -86,6 +86,18 @@ const buttonBlockSchema = blockBaseSchema.extend({
   })
 });
 
+const productBlockSchema = blockBaseSchema.extend({
+  type: z.literal("product"),
+  content: z.object({
+    name: z.string().min(1).max(120),
+    price: z.number().min(0).optional(),
+    currency: z.string().min(1).max(8).optional(),
+    image_url: optionalUrl,
+    sku: z.string().max(40).optional(),
+    description: z.string().max(300).optional()
+  })
+});
+
 const shapeBlockSchema = blockBaseSchema.extend({
   type: z.literal("shape"),
   content: z.object({
@@ -104,6 +116,7 @@ export const canvasBlockSchema = z.discriminatedUnion("type", [
   textBlockSchema,
   imageBlockSchema,
   buttonBlockSchema,
+  productBlockSchema,
   shapeBlockSchema,
   containerBlockSchema
 ]);
@@ -163,7 +176,8 @@ export const siteSpecV3Schema = z.object({
       .object({
         enabled: z.boolean(),
         phone: z.string().optional(),
-        cta_label: z.string().optional()
+        cta_label: z.string().optional(),
+        message: z.string().optional()
       })
       .optional()
   })
@@ -187,6 +201,7 @@ export function buildSiteSpecV3FromBrief(input: {
   tone?: string;
   ctaLabel?: string;
   whatsappPhone?: string;
+  whatsappMessage?: string;
   sectionPreferences?: BusinessBriefDraft["section_preferences"];
 }): SiteSpecV3 {
   const businessName = normalizeBusinessName(input.businessName);
@@ -204,6 +219,8 @@ export function buildSiteSpecV3FromBrief(input: {
   const targetAudience = input.targetAudience?.trim() || "Clientes potenciales en redes sociales y WhatsApp";
   const tone = input.tone?.trim() || "Cercano, claro y orientado a conversión";
   const ctaLabel = input.ctaLabel?.trim() || "Escribir por WhatsApp";
+  const whatsappPhone = normalizeWhatsappPhone(input.whatsappPhone);
+  const whatsappMessage = input.whatsappMessage?.trim() || undefined;
   const sectionOrder = pickSectionOrder(template.section_order, input.sectionPreferences);
 
   const sections = sectionOrder.map((sectionType, index) =>
@@ -239,9 +256,10 @@ export function buildSiteSpecV3FromBrief(input: {
     ],
     integrations: {
       whatsapp: {
-        enabled: true,
-        phone: input.whatsappPhone,
-        cta_label: ctaLabel
+        enabled: Boolean(whatsappPhone),
+        phone: whatsappPhone ?? undefined,
+        cta_label: ctaLabel,
+        message: whatsappMessage
       }
     }
   };
@@ -265,6 +283,15 @@ export function buildFallbackSiteSpecV3(
     tone: "Claro y directo",
     ctaLabel: "Hablar por WhatsApp"
   });
+}
+
+function normalizeWhatsappPhone(value?: string) {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const normalized = trimmed.startsWith("+") ? trimmed : `+${trimmed}`;
+  if (!/^\+\d{8,15}$/.test(normalized)) return undefined;
+  return normalized.replace(/\D/g, "");
 }
 
 function buildSection(input: {
@@ -452,6 +479,22 @@ function buildCatalogCardBlocks(
   const blocks: CanvasBlock[] = [];
 
   cards.forEach((card, index) => {
+    if (siteType === "commerce_lite") {
+      blocks.push(
+        productBlock({
+          id: `${sectionId}-product-${index + 1}`,
+          name: labels[index] ?? `Producto ${index + 1}`,
+          description: descriptions[index] ?? "",
+          price: 120_000 + index * 20_000,
+          currency: "COP",
+          imageUrl: `https://placehold.co/640x420?text=${encodeURIComponent(labels[index] ?? `Producto ${index + 1}`)}`,
+          desktop: rect(card.x, card.y, card.w, card.h, 1),
+          mobile: rect(mobileCards[index].x, mobileCards[index].y, mobileCards[index].w, mobileCards[index].h, 1)
+        })
+      );
+      return;
+    }
+
     blocks.push(
       containerBlock({
         id: `${sectionId}-card-${index + 1}`,
@@ -490,18 +533,6 @@ function buildCatalogCardBlocks(
         style: { fontSize: 16, color: "#475569" }
       })
     );
-
-    if (siteType === "commerce_lite") {
-      blocks.push(
-        textBlock({
-          id: `${sectionId}-price-${index + 1}`,
-          text: "$",
-          desktop: rect(card.x + 16, card.y + 360, 64, 34, 3),
-          mobile: rect(mobileCards[index].x + 12, mobileCards[index].y + 222, 60, 28, 3),
-          style: { fontSize: 22, fontWeight: 700, color: "#0f172a" }
-        })
-      );
-    }
   });
 
   return blocks;
@@ -564,6 +595,34 @@ function buttonBlock(input: {
       label: input.label,
       action: input.action,
       href: input.href
+    }
+  };
+}
+
+function productBlock(input: {
+  id: string;
+  name: string;
+  description?: string;
+  price?: number;
+  currency?: string;
+  imageUrl?: string;
+  desktop: CanvasLayoutRect;
+  mobile?: CanvasLayoutRect;
+  visible?: boolean;
+  style?: z.infer<typeof blockStyleSchema>;
+}): CanvasBlock {
+  return {
+    id: input.id,
+    type: "product",
+    visible: input.visible ?? true,
+    layout: { desktop: input.desktop, mobile: input.mobile },
+    style: input.style ?? { bgColor: "#ffffff", radius: 14, borderColor: "#cbd5e1", borderWidth: 1 },
+    content: {
+      name: input.name,
+      description: input.description,
+      price: input.price,
+      currency: input.currency,
+      image_url: input.imageUrl
     }
   };
 }

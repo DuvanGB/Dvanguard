@@ -50,6 +50,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Template no válida para el tipo de sitio seleccionado." }, { status: 400 });
   }
 
+  const { data: site } = await supabase
+    .from("sites")
+    .select("id, name")
+    .eq("id", siteId)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+  if (!site) {
+    return NextResponse.json({ error: "Site not found" }, { status: 404 });
+  }
+  if (briefDraft.business_name && briefDraft.business_name.trim() && briefDraft.business_name.trim() !== site.name) {
+    await supabase.from("sites").update({ name: briefDraft.business_name.trim() }).eq("id", siteId);
+  }
+
   const admin = getSupabaseAdminClient();
   const prompt = buildPromptFromBrief(briefDraft, { templateId });
 

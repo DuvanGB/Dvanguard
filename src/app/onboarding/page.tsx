@@ -115,7 +115,12 @@ export default async function OnboardingPage({
     <main className="container stack" style={{ paddingTop: "2rem" }}>
       <h1>Onboarding IA</h1>
       <p>Sitio: {site.name}</p>
-      <OnboardingWizard siteId={site.id} maxInputChars={env.onboardingMaxInputChars} voiceLocale={env.voiceLocale} />
+      <OnboardingWizard
+        siteId={site.id}
+        siteName={site.name}
+        maxInputChars={env.onboardingMaxInputChars}
+        voiceLocale={env.voiceLocale}
+      />
     </main>
   );
 }

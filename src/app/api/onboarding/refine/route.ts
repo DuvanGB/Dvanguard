@@ -42,7 +42,12 @@ export async function POST(request: NextRequest) {
   const { siteId, rawInput, inputMode, voiceEvent } = parsed.data;
   const admin = getSupabaseAdminClient();
 
-  const { data: site } = await supabase.from("sites").select("id").eq("id", siteId).eq("owner_id", user.id).maybeSingle();
+  const { data: site } = await supabase
+    .from("sites")
+    .select("id, name")
+    .eq("id", siteId)
+    .eq("owner_id", user.id)
+    .maybeSingle();
   if (!site) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
@@ -77,6 +82,9 @@ export async function POST(request: NextRequest) {
   }
 
   const refined = await refineBusinessBrief({ rawInput, inputMode });
+  const briefDraft = site.name?.trim()
+    ? { ...refined.briefDraft, business_name: site.name.trim() }
+    : refined.briefDraft;
 
   try {
     await recordPlatformEvent(admin, {
@@ -110,7 +118,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({
-    briefDraft: refined.briefDraft,
+    briefDraft,
     confidence: refined.confidence,
     completenessScore: refined.completenessScore,
     warnings: refined.warnings,

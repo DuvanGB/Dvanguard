@@ -60,6 +60,19 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  if (briefDraft?.business_name) {
+    const { data: site } = await supabase
+      .from("sites")
+      .select("id, name")
+      .eq("id", siteId)
+      .eq("owner_id", user.id)
+      .maybeSingle();
+
+    if (site && briefDraft.business_name.trim() && briefDraft.business_name.trim() !== site.name) {
+      await supabase.from("sites").update({ name: briefDraft.business_name.trim() }).eq("id", siteId);
+    }
+  }
+
   const promptToUse = briefDraft ? buildPromptFromBrief(briefDraft, { templateId }) : prompt!;
   const admin = getSupabaseAdminClient();
 

@@ -62,6 +62,8 @@ function buildSeedSpec(input: { prompt: string; templateId?: TemplateId; briefDr
       targetAudience: briefDraft.target_audience,
       tone: briefDraft.tone,
       ctaLabel: briefDraft.primary_cta,
+      whatsappPhone: briefDraft.whatsapp_phone,
+      whatsappMessage: briefDraft.whatsapp_message,
       sectionPreferences: briefDraft.section_preferences
     });
   }
@@ -142,21 +144,35 @@ function applyEnhancements(seedSpec: SiteSpecV3, parsed: unknown): SiteSpecV3 {
   }
 
   if (catalog && Array.isArray(payload.catalog_items)) {
-    payload.catalog_items.slice(0, 3).forEach((item, index) => {
-      const name = catalog.blocks.find((block) => block.type === "text" && block.id.endsWith(`name-${index + 1}`));
-      const desc = catalog.blocks.find((block) => block.type === "text" && block.id.endsWith(`desc-${index + 1}`));
-      const price = catalog.blocks.find((block) => block.type === "text" && block.id.endsWith(`price-${index + 1}`));
+    const productBlocks = catalog.blocks.filter((block) => block.type === "product");
+    if (productBlocks.length) {
+      payload.catalog_items.slice(0, productBlocks.length).forEach((item, index) => {
+        const block = productBlocks[index];
+        if (!block || block.type !== "product") return;
+        if (item.name) block.content.name = item.name.slice(0, 120);
+        if (item.description) block.content.description = item.description.slice(0, 220);
+        if (item.price) {
+          const numeric = Number(item.price.replace(/[^\d.]/g, ""));
+          block.content.price = Number.isFinite(numeric) ? numeric : block.content.price;
+        }
+      });
+    } else {
+      payload.catalog_items.slice(0, 3).forEach((item, index) => {
+        const name = catalog.blocks.find((block) => block.type === "text" && block.id.endsWith(`name-${index + 1}`));
+        const desc = catalog.blocks.find((block) => block.type === "text" && block.id.endsWith(`desc-${index + 1}`));
+        const price = catalog.blocks.find((block) => block.type === "text" && block.id.endsWith(`price-${index + 1}`));
 
-      if (name && name.type === "text" && item.name) {
-        name.content.text = item.name.slice(0, 120);
-      }
-      if (desc && desc.type === "text" && item.description) {
-        desc.content.text = item.description.slice(0, 220);
-      }
-      if (price && price.type === "text" && item.price) {
-        price.content.text = item.price.slice(0, 40);
-      }
-    });
+        if (name && name.type === "text" && item.name) {
+          name.content.text = item.name.slice(0, 120);
+        }
+        if (desc && desc.type === "text" && item.description) {
+          desc.content.text = item.description.slice(0, 220);
+        }
+        if (price && price.type === "text" && item.price) {
+          price.content.text = item.price.slice(0, 40);
+        }
+      });
+    }
   }
 
   if (testimonials && Array.isArray(payload.testimonials)) {

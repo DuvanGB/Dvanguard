@@ -13,7 +13,7 @@ type RefineResponse = {
   completenessScore?: number;
   warnings: string[];
   provider?: "llm" | "heuristic";
-  recommendedTemplateId: TemplateId;
+  recommendedTemplateId: TemplateId | null;
   recommendedTemplateIds: TemplateId[];
   error?: string;
   issues?: Array<{ message?: string }>;
@@ -28,6 +28,7 @@ type GenerateResponse = {
 
 type Props = {
   siteId: string;
+  siteName?: string;
   maxInputChars: number;
   voiceLocale: string;
 };
@@ -36,6 +37,7 @@ type TemplateCard = {
   id: TemplateId;
   name: string;
   description: string;
+  tags: string[];
   family: string;
   site_type: "informative" | "commerce_lite";
   preview_label: string;
@@ -65,7 +67,7 @@ const SECTION_OPTIONS: Array<BusinessBriefDraft["section_preferences"][number]> 
   "contact"
 ];
 
-export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) {
+export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale }: Props) {
   const router = useRouter();
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -75,6 +77,8 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
   const [listening, setListening] = useState(false);
   const [voiceEvent, setVoiceEvent] = useState<"unsupported" | "permission_denied" | null>(null);
   const [briefDraft, setBriefDraft] = useState<BusinessBriefDraft | null>(null);
+  const [whatsappPhoneInput, setWhatsappPhoneInput] = useState("");
+  const [whatsappMessageInput, setWhatsappMessageInput] = useState("");
   const [confidence, setConfidence] = useState<number | null>(null);
   const [completenessScore, setCompletenessScore] = useState<number | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -89,6 +93,10 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
   const [error, setError] = useState<string | null>(null);
 
   const canRefine = useMemo(() => rawInput.trim().length >= 10 && rawInput.length <= maxInputChars, [rawInput, maxInputChars]);
+  const recommendedTemplateLabel = useMemo(
+    () => templateOptions.find((template) => template.id === recommendedTemplateId)?.name ?? null,
+    [recommendedTemplateId, templateOptions]
+  );
 
   useEffect(() => {
     const ctor = getRecognitionCtor();
@@ -239,7 +247,12 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
         return;
       }
 
-      setBriefDraft(data.briefDraft);
+      const nextBrief = siteName?.trim()
+        ? { ...data.briefDraft, business_name: siteName.trim() }
+        : data.briefDraft;
+      setBriefDraft(nextBrief);
+      setWhatsappPhoneInput(nextBrief.whatsapp_phone ?? "");
+      setWhatsappMessageInput(nextBrief.whatsapp_message ?? "");
       setConfidence(data.confidence);
       setCompletenessScore(typeof data.completenessScore === "number" ? data.completenessScore : null);
       setWarnings(data.warnings ?? []);
@@ -248,7 +261,7 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
       setRecommendedTemplateIds(data.recommendedTemplateIds ?? []);
       setStep(2);
 
-      await loadTemplates(data.briefDraft.business_type, data.recommendedTemplateId);
+      await loadTemplates(nextBrief.business_type, data.recommendedTemplateId);
       setLoadingRefine(false);
     } catch {
       setError("No se pudo refinar la propuesta en este momento. Intenta de nuevo.");
@@ -264,13 +277,18 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
     setStep(3);
 
     try {
+      const finalBrief = {
+        ...briefDraft,
+        whatsapp_phone: whatsappPhoneInput.trim() || undefined,
+        whatsapp_message: whatsappMessageInput.trim() || undefined
+      };
       const response = await fetch("/api/onboarding/generate-v3", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           siteId,
           inputMode,
-          briefDraft,
+          briefDraft: finalBrief,
           templateId: selectedTemplateId,
           recommendedTemplateId: recommendedTemplateId ?? undefined,
           refineConfidence: confidence ?? undefined,
@@ -484,6 +502,29 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
           </label>
 
           <label>
+            Número WhatsApp (con país)
+            <input
+              value={whatsappPhoneInput}
+              onChange={(event) => setWhatsappPhoneInput(event.target.value)}
+              placeholder="+573001234567"
+            />
+          </label>
+          {whatsappPhoneInput.trim().length > 0 && !/^\+\d{8,15}$/.test(whatsappPhoneInput.trim()) ? (
+            <small className="muted">Formato esperado: +573001234567</small>
+          ) : null}
+          {!whatsappPhoneInput.trim() ? <small className="muted">Si no agregas número, el CTA WhatsApp no funcionará.</small> : null}
+
+          <label>
+            Mensaje prellenado (opcional)
+            <textarea
+              rows={2}
+              value={whatsappMessageInput}
+              onChange={(event) => setWhatsappMessageInput(event.target.value)}
+              placeholder="Hola, vi tu web y quiero más info."
+            />
+          </label>
+
+          <label>
             Preset visual
             <select
               value={briefDraft.style_preset}
@@ -517,6 +558,11 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
           <div className="stack">
             <strong>Plantilla visual</strong>
             <small>Selecciona una plantilla base para generar el preview.</small>
+            {recommendedTemplateLabel ? (
+              <small>IA sugiere: {recommendedTemplateLabel}</small>
+            ) : (
+              <small>Sin recomendación IA disponible.</small>
+            )}
             <div className="catalog-grid">
               {templateOptions.map((template) => {
                 const selected = selectedTemplateId === template.id;
@@ -538,6 +584,15 @@ export function OnboardingWizard({ siteId, maxInputChars, voiceLocale }: Props) 
                     <strong>{template.name}</strong>
                     <p style={{ margin: "0.35rem 0" }}>{template.description}</p>
                     <small>{template.preview_label}</small>
+                    {template.tags?.length ? (
+                      <div className="template-tags">
+                        {template.tags.map((tag) => (
+                          <span key={tag} className="template-tag">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                     {recommended ? (
                       <small style={{ display: "block", marginTop: "0.35rem" }}>Recomendada por IA</small>
                     ) : null}

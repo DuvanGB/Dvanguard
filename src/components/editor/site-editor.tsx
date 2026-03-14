@@ -47,6 +47,7 @@ type TemplateCard = {
   id: TemplateId;
   name: string;
   description: string;
+  tags: string[];
   family: SiteSpecV3["template"]["family"];
   site_type: "informative" | "commerce_lite";
   preview_label: string;
@@ -60,7 +61,7 @@ const PREVIEW_WIDTH: Record<EditorViewport, number> = {
 };
 
 const SECTION_LIBRARY: Array<SiteSectionV3["type"]> = ["hero", "catalog", "testimonials", "contact"];
-const BLOCK_LIBRARY: Array<CanvasBlock["type"]> = ["text", "image", "button", "shape", "container"];
+const BLOCK_LIBRARY: Array<CanvasBlock["type"]> = ["text", "image", "button", "product", "shape", "container"];
 
 export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) {
   const [siteSpec, setSiteSpec] = useState<SiteSpecV3>(initialSpec);
@@ -226,7 +227,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
 
   function addSection(type: SiteSectionV3["type"]) {
     const index = (home?.sections.filter((item) => item.type === type).length ?? 0) + 1;
-    const section = createDefaultSection(type, index);
+    const section = createDefaultSection(type, index, siteSpec.site_type);
     setHomeSections((sections) => [...sections, section]);
   }
 
@@ -488,10 +489,16 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
   }
 
   function applyAssetToSelected(url: string) {
-    if (!selected || !selectedBlock || selectedBlock.type !== "image") return;
-    updateBlock(selected.sectionId, selected.blockId, (block) =>
-      block.type === "image" ? { ...block, content: { ...block.content, url } } : block
-    );
+    if (!selected || !selectedBlock) return;
+    updateBlock(selected.sectionId, selected.blockId, (block) => {
+      if (block.type === "image") {
+        return { ...block, content: { ...block.content, url } };
+      }
+      if (block.type === "product") {
+        return { ...block, content: { ...block.content, image_url: url } };
+      }
+      return block;
+    });
   }
 
 
@@ -595,6 +602,15 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                       </div>
                       <strong>{template.name}</strong>
                       <p>{template.description}</p>
+                      {template.tags?.length ? (
+                        <div className="template-tags">
+                          {template.tags.map((tag) => (
+                            <span key={tag} className="template-tag">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                     </button>
                   ))}
                 </div>
@@ -837,6 +853,13 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                                 {block.content.label}
                               </button>
                             ) : null}
+                            {block.type === "product" ? (
+                              <div className="canvas-product">
+                                <div className="canvas-product-image" />
+                                <strong>{block.content.name}</strong>
+                                {block.content.price !== undefined ? <span>${block.content.price}</span> : null}
+                              </div>
+                            ) : null}
                             {block.type === "shape" ? <div className="canvas-shape" /> : null}
                             {block.type === "container" ? <div className="canvas-container" /> : null}
                             {isSelected ? (
@@ -1036,6 +1059,125 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                                 }
                               />
                             </label>
+                          ) : null}
+                        </>
+                      ) : null}
+
+                      {selectedBlock.type === "product" ? (
+                        <>
+                          <label>
+                            Nombre
+                            <input
+                              value={selectedBlock.content.name}
+                              onChange={(event) =>
+                                updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                  block.type === "product"
+                                    ? {
+                                        ...block,
+                                        content: { ...block.content, name: event.target.value }
+                                      }
+                                    : block
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            Descripción
+                            <textarea
+                              rows={3}
+                              value={selectedBlock.content.description ?? ""}
+                              onChange={(event) =>
+                                updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                  block.type === "product"
+                                    ? {
+                                        ...block,
+                                        content: { ...block.content, description: event.target.value }
+                                      }
+                                    : block
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            Precio
+                            <input
+                              type="number"
+                              value={selectedBlock.content.price ?? ""}
+                              onChange={(event) =>
+                                updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                  block.type === "product"
+                                    ? {
+                                        ...block,
+                                        content: {
+                                          ...block.content,
+                                          price: event.target.value ? Number(event.target.value) : undefined
+                                        }
+                                      }
+                                    : block
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            Moneda
+                            <input
+                              value={selectedBlock.content.currency ?? ""}
+                              onChange={(event) =>
+                                updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                  block.type === "product"
+                                    ? {
+                                        ...block,
+                                        content: { ...block.content, currency: event.target.value }
+                                      }
+                                    : block
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            Imagen URL
+                            <input
+                              value={selectedBlock.content.image_url ?? ""}
+                              onChange={(event) =>
+                                updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                  block.type === "product"
+                                    ? {
+                                        ...block,
+                                        content: { ...block.content, image_url: event.target.value }
+                                      }
+                                    : block
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            SKU (opcional)
+                            <input
+                              value={selectedBlock.content.sku ?? ""}
+                              onChange={(event) =>
+                                updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                  block.type === "product"
+                                    ? {
+                                        ...block,
+                                        content: { ...block.content, sku: event.target.value }
+                                      }
+                                    : block
+                                )
+                              }
+                            />
+                          </label>
+                          {assets.length ? (
+                            <select
+                              defaultValue=""
+                              onChange={(event) => applyAssetToSelected(assets.find((asset) => asset.id === event.target.value)?.public_url ?? "")}
+                            >
+                              <option value="">Usar imagen de librería...</option>
+                              {assets.map((asset) => (
+                                <option key={asset.id} value={asset.id}>
+                                  {asset.kind === "uploaded" ? "Archivo" : "URL"} • {new Date(asset.created_at).toLocaleDateString()}
+                                </option>
+                              ))}
+                            </select>
                           ) : null}
                         </>
                       ) : null}
@@ -1325,7 +1467,11 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
   );
 }
 
-function createDefaultSection(type: SiteSectionV3["type"], index: number): SiteSectionV3 {
+function createDefaultSection(
+  type: SiteSectionV3["type"],
+  index: number,
+  siteType: "informative" | "commerce_lite"
+): SiteSectionV3 {
   const id = `${type}-${Date.now()}-${index}`;
 
   if (type === "hero") {
@@ -1349,7 +1495,10 @@ function createDefaultSection(type: SiteSectionV3["type"], index: number): SiteS
       enabled: true,
       variant: "cards",
       height: { desktop: 620, mobile: 900 },
-      blocks: [createDefaultBlock(id, "container", 1, "desktop")]
+      blocks:
+        siteType === "commerce_lite"
+          ? [createDefaultBlock(id, "product", 1, "desktop"), createDefaultBlock(id, "product", 2, "desktop"), createDefaultBlock(id, "product", 3, "desktop")]
+          : [createDefaultBlock(id, "container", 1, "desktop")]
     };
   }
 
@@ -1420,6 +1569,27 @@ function createDefaultBlock(sectionId: string, type: CanvasBlock["type"], index:
     };
   }
 
+  if (type === "product") {
+    return {
+      id: `${sectionId}-product-${Date.now()}`,
+      type: "product",
+      visible: true,
+      layout: {
+        ...layout,
+        desktop: { ...desktop, w: 300, h: 360 },
+        mobile: { ...mobile, w: 320, h: 320 }
+      },
+      style: { bgColor: "#ffffff", borderColor: "#e2e8f0", borderWidth: 1, radius: 16 },
+      content: {
+        name: `Producto ${index}`,
+        price: 0,
+        currency: "COP",
+        image_url: "",
+        description: "Descripción breve del producto."
+      }
+    };
+  }
+
   if (type === "shape") {
     return {
       id: `${sectionId}-shape-${Date.now()}`,
@@ -1464,10 +1634,16 @@ function hasInvalidImageUrl(spec: SiteSpecV3) {
   for (const page of spec.pages) {
     for (const section of page.sections) {
       for (const block of section.blocks) {
-        if (block.type !== "image") continue;
-        const url = block.content.url?.trim();
-        if (!url) continue;
-        if (!/^https?:\/\//i.test(url)) return true;
+        if (block.type === "image") {
+          const url = block.content.url?.trim();
+          if (!url) continue;
+          if (!/^https?:\/\//i.test(url)) return true;
+        }
+        if (block.type === "product") {
+          const url = block.content.image_url?.trim();
+          if (!url) continue;
+          if (!/^https?:\/\//i.test(url)) return true;
+        }
       }
     }
   }

@@ -4,7 +4,15 @@ export const templateIds = [
   "local-trust",
   "shop-quick",
   "catalog-social",
-  "promo-dark"
+  "promo-dark",
+  "tech-aurora",
+  "tech-pulse",
+  "health-care",
+  "health-wellness",
+  "fashion-atelier",
+  "fashion-street",
+  "tech-commerce",
+  "health-commerce"
 ] as const;
 
 export type TemplateId = (typeof templateIds)[number];
@@ -36,6 +44,7 @@ export type TemplateDefinition = {
   id: TemplateId;
   name: string;
   description: string;
+  tags: string[];
   family: "clean" | "bold" | "trust" | "shop" | "social" | "dark";
   site_type: TemplateSiteType;
   preview_label: string;

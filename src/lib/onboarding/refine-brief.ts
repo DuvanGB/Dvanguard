@@ -5,7 +5,8 @@ import {
   type OnboardingInputMode,
   type RefineResponse
 } from "@/lib/onboarding/types";
-import { pickTemplateOrFallback, recommendTemplateIds } from "@/lib/templates/selector";
+import { getTemplateById, TEMPLATE_CATALOG } from "@/lib/templates/catalog";
+import { isTemplateId } from "@/lib/templates/selector";
 
 type RefineBriefInput = {
   rawInput: string;
@@ -22,53 +23,36 @@ export async function refineBusinessBrief(input: RefineBriefInput): Promise<Refi
 
   if (env.onboardingRefineProvider === "heuristic") {
     const briefDraft = buildHeuristicBrief(normalizedInput);
-    const recommendedTemplateIds = recommendTemplateIds({
-      businessType: briefDraft.business_type,
-      stylePreset: briefDraft.style_preset,
-      tone: briefDraft.tone
-    });
-    const recommendedTemplateId =
-      recommendedTemplateIds[0] ??
-      pickTemplateOrFallback({
-        siteType: briefDraft.business_type,
-        brief: briefDraft
-      });
     return {
       briefDraft,
       confidence: 0.55,
       completenessScore: computeCompletenessScore(briefDraft, normalizedInput),
       warnings,
       provider: "heuristic",
-      recommendedTemplateIds,
-      recommendedTemplateId
+      recommendedTemplateIds: [],
+      recommendedTemplateId: null
     };
   }
 
   try {
     const llmResponse = await callRefineLLM(normalizedInput, input.inputMode);
     const parsed = safeParseJson(llmResponse);
+    const recommendedTemplateId = extractRecommendedTemplateId(parsed);
     const validated = businessBriefDraftSchema.safeParse(parsed);
 
     if (validated.success) {
-      const recommendedTemplateIds = recommendTemplateIds({
-        businessType: validated.data.business_type,
-        stylePreset: validated.data.style_preset,
-        tone: validated.data.tone
-      });
-      const recommendedTemplateId =
-        recommendedTemplateIds[0] ??
-        pickTemplateOrFallback({
-          siteType: validated.data.business_type,
-          brief: validated.data
-        });
+      const normalizedRecommendation =
+        recommendedTemplateId && getTemplateById(recommendedTemplateId)?.site_type === validated.data.business_type
+          ? recommendedTemplateId
+          : null;
       return {
         briefDraft: validated.data,
         confidence: 0.8,
         completenessScore: computeCompletenessScore(validated.data, normalizedInput),
         warnings,
         provider: "llm",
-        recommendedTemplateIds,
-        recommendedTemplateId
+        recommendedTemplateIds: normalizedRecommendation ? [normalizedRecommendation] : [],
+        recommendedTemplateId: normalizedRecommendation
       };
     }
 
@@ -78,26 +62,14 @@ export async function refineBusinessBrief(input: RefineBriefInput): Promise<Refi
   }
 
   const briefDraft = buildHeuristicBrief(normalizedInput);
-  const recommendedTemplateIds = recommendTemplateIds({
-    businessType: briefDraft.business_type,
-    stylePreset: briefDraft.style_preset,
-    tone: briefDraft.tone
-  });
-  const recommendedTemplateId =
-    recommendedTemplateIds[0] ??
-    pickTemplateOrFallback({
-      siteType: briefDraft.business_type,
-      brief: briefDraft
-    });
-
   return {
     briefDraft,
     confidence: 0.55,
     completenessScore: computeCompletenessScore(briefDraft, normalizedInput),
     warnings,
     provider: "heuristic",
-    recommendedTemplateIds,
-    recommendedTemplateId
+    recommendedTemplateIds: [],
+    recommendedTemplateId: null
   };
 }
 
@@ -119,7 +91,11 @@ async function callRefineLLM(rawInput: string, inputMode: OnboardingInputMode) {
         {
           role: "system",
           content:
-            "Extrae y devuelve SOLO JSON valido para BusinessBriefDraft. Sin markdown, sin comentarios, sin texto adicional."
+            `Devuelve SOLO JSON válido para BusinessBriefDraft y además un campo \"recommended_template_id\".\n` +
+            `Si no puedes recomendar, usa null.\n` +
+            `Plantillas disponibles (id | tipo | tags | descripcion):\n` +
+            `${buildTemplateCatalogContext()}\n` +
+            "No incluyas markdown, ni texto adicional."
         },
         {
           role: "user",
@@ -170,6 +146,21 @@ function safeParseJson(input: string): unknown {
   }
 }
 
+function extractRecommendedTemplateId(parsed: unknown) {
+  if (!parsed || typeof parsed !== "object") return null;
+  const candidate = (parsed as { recommended_template_id?: unknown }).recommended_template_id;
+  if (typeof candidate !== "string") return null;
+  if (!isTemplateId(candidate)) return null;
+  return candidate;
+}
+
+function buildTemplateCatalogContext() {
+  return TEMPLATE_CATALOG.map((template) => {
+    const tags = template.tags?.length ? template.tags.join(", ") : "Sin tags";
+    return `${template.id} | ${template.site_type} | ${tags} | ${template.description}`;
+  }).join("\n");
+}
+
 function buildHeuristicBrief(rawInput: string): BusinessBriefDraft {
   const lower = rawInput.toLowerCase();
 
@@ -199,6 +190,8 @@ function buildHeuristicBrief(rawInput: string): BusinessBriefDraft {
     target_audience: inferAudience(lower),
     tone: inferTone(lower),
     primary_cta: "WhatsApp",
+    whatsapp_phone: undefined,
+    whatsapp_message: undefined,
     section_preferences: [...sectionPreferences],
     style_preset: stylePreset
   };

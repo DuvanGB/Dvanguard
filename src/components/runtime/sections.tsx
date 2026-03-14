@@ -1,3 +1,5 @@
+import type { MouseEvent } from "react";
+
 import type { CanvasBlock, SiteSectionV3 } from "@/lib/site-spec-v3";
 
 type Theme = {
@@ -14,6 +16,7 @@ export type SectionRenderProps = {
   viewport: "desktop" | "mobile";
   theme: Theme;
   whatsappLink?: string;
+  onAddToCart?: (item: ProductCartItem) => void;
   onTrackCtaClick?: (sectionId: string) => void;
   onTrackWhatsappClick?: (sectionId: string) => void;
   onSelectBlock?: (sectionId: string, blockId: string) => void;
@@ -21,11 +24,21 @@ export type SectionRenderProps = {
   editable?: boolean;
 };
 
+export type ProductCartItem = {
+  blockId: string;
+  name: string;
+  price?: number;
+  currency?: string;
+  imageUrl?: string;
+  description?: string;
+};
+
 export function CanvasSection({
   section,
   viewport,
   theme,
   whatsappLink,
+  onAddToCart,
   onTrackCtaClick,
   onTrackWhatsappClick,
   onSelectBlock,
@@ -54,6 +67,7 @@ export function CanvasSection({
             sectionId={section.id}
             viewport={viewport}
             whatsappLink={whatsappLink}
+            onAddToCart={onAddToCart}
             onTrackCtaClick={onTrackCtaClick}
             onTrackWhatsappClick={onTrackWhatsappClick}
             onSelectBlock={onSelectBlock}
@@ -70,6 +84,7 @@ function CanvasBlockRenderer({
   sectionId,
   viewport,
   whatsappLink,
+  onAddToCart,
   onTrackCtaClick,
   onTrackWhatsappClick,
   onSelectBlock,
@@ -80,6 +95,7 @@ function CanvasBlockRenderer({
   sectionId: string;
   viewport: "desktop" | "mobile";
   whatsappLink?: string;
+  onAddToCart?: (item: ProductCartItem) => void;
   onTrackCtaClick?: (sectionId: string) => void;
   onTrackWhatsappClick?: (sectionId: string) => void;
   onSelectBlock?: (sectionId: string, blockId: string) => void;
@@ -165,6 +181,55 @@ function CanvasBlockRenderer({
     );
   }
 
+  if (block.type === "product") {
+    const handleAdd = (event: MouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      if (editable) {
+        onSelectBlock?.(sectionId, block.id);
+        return;
+      }
+      onAddToCart?.({
+        blockId: block.id,
+        name: block.content.name,
+        price: block.content.price,
+        currency: block.content.currency,
+        imageUrl: block.content.image_url,
+        description: block.content.description
+      });
+    };
+
+    const priceLabel = formatPrice(block.content.price, block.content.currency);
+
+    return (
+      <div
+        style={{
+          ...style,
+          padding: 12,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8
+        }}
+        onClick={() => onSelectBlock?.(sectionId, block.id)}
+      >
+        <div style={{ flex: "0 0 auto", borderRadius: block.style.radius ?? 12, overflow: "hidden" }}>
+          <img
+            src={block.content.image_url || "https://placehold.co/640x420?text=Producto"}
+            alt={block.content.name}
+            style={{ width: "100%", height: 160, objectFit: "cover" }}
+          />
+        </div>
+        <strong style={{ fontSize: 18 }}>{block.content.name}</strong>
+        {block.content.description ? <span style={{ fontSize: 14, color: "#475569" }}>{block.content.description}</span> : null}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
+          <span style={{ fontWeight: 700 }}>{priceLabel}</span>
+          <button type="button" onClick={handleAdd} style={{ padding: "0.45rem 0.8rem", borderRadius: 999, border: "none", background: "#0c4a6e", color: "#fff" }}>
+            Agregar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (block.type === "shape") {
     const shapeStyle =
       block.content.shape === "circle"
@@ -177,6 +242,20 @@ function CanvasBlockRenderer({
   }
 
   return <div style={{ ...style }} onClick={() => onSelectBlock?.(sectionId, block.id)} />;
+}
+
+function formatPrice(value?: number, currency?: string) {
+  if (value === undefined || value === null) return "Consultar";
+  const normalizedCurrency = currency?.trim() || "COP";
+  try {
+    return new Intl.NumberFormat("es-CO", {
+      style: "currency",
+      currency: normalizedCurrency,
+      maximumFractionDigits: 0
+    }).format(value);
+  } catch {
+    return `${normalizedCurrency} ${value}`;
+  }
 }
 
 export function blockRect(block: CanvasBlock, viewport: "desktop" | "mobile") {
