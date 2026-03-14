@@ -14,17 +14,27 @@ const optionalUrl = z.preprocess(
   z.string().url().optional()
 );
 
+export const CANVAS_BASE_WIDTH = {
+  desktop: 1120,
+  mobile: 390
+} as const;
+
 const canvasRectSchema = z.object({
-  x: z.number().min(0).max(3000),
-  y: z.number().min(0).max(3000),
-  w: z.number().min(40).max(3000),
-  h: z.number().min(24).max(3000),
+  x: z.number().min(0).max(100),
+  y: z.number().min(0).max(100),
+  w: z.number().min(1).max(100),
+  h: z.number().min(1).max(100),
   z: z.number().int().min(0).max(999)
 });
 
 const blockLayoutSchema = z.object({
   desktop: canvasRectSchema,
   mobile: canvasRectSchema.optional()
+});
+
+const sectionHeightRatioSchema = z.object({
+  desktop: z.number().min(0.2).max(3),
+  mobile: z.number().min(0.2).max(3)
 });
 
 export const fontFamilies = [
@@ -140,10 +150,7 @@ const sectionSchema = z.object({
   type: z.enum(["hero", "catalog", "testimonials", "contact"]),
   enabled: z.boolean().default(true),
   variant: sectionVariantSchema,
-  height: z.object({
-    desktop: z.number().min(260).max(1800),
-    mobile: z.number().min(220).max(2200)
-  }),
+  height_ratio: sectionHeightRatioSchema,
   blocks: z.array(canvasBlockSchema).min(1).max(120)
 });
 
@@ -183,13 +190,240 @@ export const siteSpecV3Schema = z.object({
   })
 });
 
+const legacyCanvasRectSchema = z.object({
+  x: z.number().min(0).max(3000),
+  y: z.number().min(0).max(3000),
+  w: z.number().min(40).max(3000),
+  h: z.number().min(24).max(3000),
+  z: z.number().int().min(0).max(999)
+});
+
+const legacyBlockLayoutSchema = z.object({
+  desktop: legacyCanvasRectSchema,
+  mobile: legacyCanvasRectSchema.optional()
+});
+
+const legacyBlockBaseSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(120).optional(),
+  visible: z.boolean().default(true),
+  layout: legacyBlockLayoutSchema,
+  style: blockStyleSchema.default({})
+});
+
+const legacyTextBlockSchema = legacyBlockBaseSchema.extend({
+  type: z.literal("text"),
+  content: z.object({
+    text: z.string().min(1).max(1200)
+  })
+});
+
+const legacyImageBlockSchema = legacyBlockBaseSchema.extend({
+  type: z.literal("image"),
+  content: z.object({
+    url: optionalUrl,
+    alt: z.string().max(180).optional()
+  })
+});
+
+const legacyButtonBlockSchema = legacyBlockBaseSchema.extend({
+  type: z.literal("button"),
+  content: z.object({
+    label: z.string().min(1).max(120),
+    href: z.string().max(1024).optional(),
+    action: z.enum(["whatsapp", "link"]).default("whatsapp")
+  })
+});
+
+const legacyProductBlockSchema = legacyBlockBaseSchema.extend({
+  type: z.literal("product"),
+  content: z.object({
+    name: z.string().min(1).max(120),
+    price: z.number().min(0).optional(),
+    currency: z.string().min(1).max(8).optional(),
+    image_url: optionalUrl,
+    sku: z.string().max(40).optional(),
+    description: z.string().max(300).optional()
+  })
+});
+
+const legacyShapeBlockSchema = legacyBlockBaseSchema.extend({
+  type: z.literal("shape"),
+  content: z.object({
+    shape: z.enum(["rect", "pill", "circle"]).default("rect")
+  })
+});
+
+const legacyContainerBlockSchema = legacyBlockBaseSchema.extend({
+  type: z.literal("container"),
+  content: z.object({
+    title: z.string().max(120).optional()
+  })
+});
+
+const legacyCanvasBlockSchema = z.discriminatedUnion("type", [
+  legacyTextBlockSchema,
+  legacyImageBlockSchema,
+  legacyButtonBlockSchema,
+  legacyProductBlockSchema,
+  legacyShapeBlockSchema,
+  legacyContainerBlockSchema
+]);
+
+const legacySectionSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(["hero", "catalog", "testimonials", "contact"]),
+  enabled: z.boolean().default(true),
+  variant: sectionVariantSchema,
+  height: z.object({
+    desktop: z.number().min(260).max(1800),
+    mobile: z.number().min(220).max(2200)
+  }),
+  blocks: z.array(legacyCanvasBlockSchema).min(1).max(120)
+});
+
+const legacyPageSchema = z.object({
+  id: z.string().min(1),
+  slug: z.string().min(1),
+  title: z.string().min(1).max(140),
+  sections: z.array(legacySectionSchema).min(1).max(20)
+});
+
+const legacySiteSpecV3Schema = z.object({
+  schema_version: z.literal("3.0"),
+  site_type: z.enum(["informative", "commerce_lite"]),
+  locale: z.literal("es-LATAM"),
+  template: z.object({
+    id: z.enum(templateIds),
+    family: z.enum(["clean", "bold", "trust", "shop", "social", "dark"])
+  }),
+  theme: z.object({
+    primary: colorToken,
+    secondary: colorToken,
+    background: colorToken,
+    font_heading: z.string().min(1),
+    font_body: z.string().min(1),
+    radius: z.enum(["sm", "md", "lg"])
+  }),
+  pages: z.array(legacyPageSchema).min(1),
+  integrations: z.object({
+    whatsapp: z
+      .object({
+        enabled: z.boolean(),
+        phone: z.string().optional(),
+        cta_label: z.string().optional(),
+        message: z.string().optional()
+      })
+      .optional()
+  })
+});
+
 export type CanvasLayoutRect = z.infer<typeof canvasRectSchema>;
 export type CanvasBlock = z.infer<typeof canvasBlockSchema>;
 export type SiteSpecV3 = z.infer<typeof siteSpecV3Schema>;
 export type SiteSectionV3 = SiteSpecV3["pages"][number]["sections"][number];
 
 export function parseSiteSpecV3(input: unknown) {
-  return siteSpecV3Schema.safeParse(input);
+  const parsed = siteSpecV3Schema.safeParse(input);
+  if (parsed.success) {
+    return parsed;
+  }
+
+  const legacyParsed = legacySiteSpecV3Schema.safeParse(input);
+  if (!legacyParsed.success) {
+    return parsed;
+  }
+
+  return {
+    success: true as const,
+    data: convertLegacySpecToPercent(legacyParsed.data)
+  };
+}
+
+export function normalizeSiteSpecV3(input: unknown) {
+  const parsed = siteSpecV3Schema.safeParse(input);
+  if (parsed.success) {
+    return { spec: parsed.data, migrated: false };
+  }
+  const legacyParsed = legacySiteSpecV3Schema.safeParse(input);
+  if (legacyParsed.success) {
+    return { spec: convertLegacySpecToPercent(legacyParsed.data), migrated: true };
+  }
+  return null;
+}
+
+type LegacySiteSpecV3 = z.infer<typeof legacySiteSpecV3Schema>;
+type LegacySection = LegacySiteSpecV3["pages"][number]["sections"][number];
+type LegacyCanvasLayoutRect = z.infer<typeof legacyCanvasRectSchema>;
+type LegacyCanvasBlock = z.infer<typeof legacyCanvasBlockSchema>;
+
+function convertLegacySpecToPercent(spec: LegacySiteSpecV3): SiteSpecV3 {
+  const pages = spec.pages.map((page) => ({
+    ...page,
+    sections: page.sections.map((section) => {
+      const desktopHeight = section.height.desktop;
+      const mobileHeight = section.height.mobile;
+      const desktopRatio = toRatio(desktopHeight, CANVAS_BASE_WIDTH.desktop);
+      const mobileRatio = toRatio(mobileHeight, CANVAS_BASE_WIDTH.mobile);
+
+      const blocks = section.blocks.map((block) => ({
+        ...block,
+        layout: {
+          desktop: rectPxToPercent(block.layout.desktop, CANVAS_BASE_WIDTH.desktop, desktopHeight),
+          mobile: block.layout.mobile
+            ? rectPxToPercent(block.layout.mobile, CANVAS_BASE_WIDTH.mobile, mobileHeight)
+            : undefined
+        }
+      }));
+
+      return {
+        id: section.id,
+        type: section.type,
+        enabled: section.enabled,
+        variant: section.variant,
+        height_ratio: {
+          desktop: desktopRatio,
+          mobile: mobileRatio
+        },
+        blocks
+      };
+    })
+  }));
+
+  return {
+    schema_version: "3.0",
+    site_type: spec.site_type,
+    locale: spec.locale,
+    template: spec.template,
+    theme: spec.theme,
+    pages,
+    integrations: spec.integrations
+  };
+}
+
+function toRatio(height: number, width: number) {
+  if (!width) return 1;
+  return round(height / width, 4);
+}
+
+function rectPxToPercent(rect: { x: number; y: number; w: number; h: number; z: number }, width: number, height: number): CanvasLayoutRect {
+  return {
+    x: clampPercent((rect.x / width) * 100),
+    y: clampPercent((rect.y / height) * 100),
+    w: clampPercent((rect.w / width) * 100),
+    h: clampPercent((rect.h / height) * 100),
+    z: rect.z
+  };
+}
+
+function clampPercent(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, round(value, 4)));
+}
+
+function round(value: number, decimals = 3) {
+  const factor = Math.pow(10, decimals);
+  return Math.round(value * factor) / factor;
 }
 
 export function buildSiteSpecV3FromBrief(input: {
@@ -237,10 +471,10 @@ export function buildSiteSpecV3FromBrief(input: {
     })
   );
 
-  return {
-    schema_version: "3.0" as const,
+  const legacySpec: LegacySiteSpecV3 = {
+    schema_version: "3.0",
     site_type: input.siteType,
-    locale: "es-LATAM" as const,
+    locale: "es-LATAM",
     template: {
       id: template.id,
       family: template.family
@@ -263,6 +497,8 @@ export function buildSiteSpecV3FromBrief(input: {
       }
     }
   };
+
+  return convertLegacySpecToPercent(legacySpec);
 }
 
 export function buildFallbackSiteSpecV3(
@@ -309,7 +545,7 @@ function buildSection(input: {
     testimonials: string;
     contact: string;
   };
-}): SiteSectionV3 {
+}): LegacySection {
   const id = `${input.sectionType}-${input.index + 1}`;
 
   if (input.sectionType === "hero") {
@@ -476,7 +712,7 @@ function buildCatalogCardBlocks(
     { x: 24, y: 626, w: 320, h: 240 }
   ];
 
-  const blocks: CanvasBlock[] = [];
+  const blocks: LegacyCanvasBlock[] = [];
 
   cards.forEach((card, index) => {
     if (siteType === "commerce_lite") {
@@ -541,11 +777,11 @@ function buildCatalogCardBlocks(
 function textBlock(input: {
   id: string;
   text: string;
-  desktop: CanvasLayoutRect;
-  mobile?: CanvasLayoutRect;
+  desktop: LegacyCanvasLayoutRect;
+  mobile?: LegacyCanvasLayoutRect;
   visible?: boolean;
   style?: z.infer<typeof blockStyleSchema>;
-}): CanvasBlock {
+}): LegacyCanvasBlock {
   return {
     id: input.id,
     type: "text",
@@ -560,11 +796,11 @@ function imageBlock(input: {
   id: string;
   url?: string;
   alt?: string;
-  desktop: CanvasLayoutRect;
-  mobile?: CanvasLayoutRect;
+  desktop: LegacyCanvasLayoutRect;
+  mobile?: LegacyCanvasLayoutRect;
   visible?: boolean;
   style?: z.infer<typeof blockStyleSchema>;
-}): CanvasBlock {
+}): LegacyCanvasBlock {
   return {
     id: input.id,
     type: "image",
@@ -580,11 +816,11 @@ function buttonBlock(input: {
   label: string;
   action: "whatsapp" | "link";
   href?: string;
-  desktop: CanvasLayoutRect;
-  mobile?: CanvasLayoutRect;
+  desktop: LegacyCanvasLayoutRect;
+  mobile?: LegacyCanvasLayoutRect;
   visible?: boolean;
   style?: z.infer<typeof blockStyleSchema>;
-}): CanvasBlock {
+}): LegacyCanvasBlock {
   return {
     id: input.id,
     type: "button",
@@ -606,11 +842,11 @@ function productBlock(input: {
   price?: number;
   currency?: string;
   imageUrl?: string;
-  desktop: CanvasLayoutRect;
-  mobile?: CanvasLayoutRect;
+  desktop: LegacyCanvasLayoutRect;
+  mobile?: LegacyCanvasLayoutRect;
   visible?: boolean;
   style?: z.infer<typeof blockStyleSchema>;
-}): CanvasBlock {
+}): LegacyCanvasBlock {
   return {
     id: input.id,
     type: "product",
@@ -629,11 +865,11 @@ function productBlock(input: {
 
 function containerBlock(input: {
   id: string;
-  desktop: CanvasLayoutRect;
-  mobile?: CanvasLayoutRect;
+  desktop: LegacyCanvasLayoutRect;
+  mobile?: LegacyCanvasLayoutRect;
   visible?: boolean;
   style?: z.infer<typeof blockStyleSchema>;
-}): CanvasBlock {
+}): LegacyCanvasBlock {
   return {
     id: input.id,
     type: "container",
@@ -644,7 +880,7 @@ function containerBlock(input: {
   };
 }
 
-function rect(x: number, y: number, w: number, h: number, z: number): CanvasLayoutRect {
+function rect(x: number, y: number, w: number, h: number, z: number): LegacyCanvasLayoutRect {
   return { x, y, w, h, z };
 }
 

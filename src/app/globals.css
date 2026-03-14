@@ -504,6 +504,24 @@ td {
   border-bottom: 1px solid rgba(148, 163, 184, 0.2);
 }
 
+.canvas-section.selected {
+  outline: 2px solid rgba(14, 165, 233, 0.6);
+  outline-offset: -2px;
+}
+
+.canvas-section-resize {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  width: 120px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.12);
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  transform: translateX(-50%);
+  cursor: ns-resize;
+}
+
 .canvas-block {
   position: absolute;
   box-sizing: border-box;

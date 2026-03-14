@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
-import { fontFamilies } from "@/lib/site-spec-v3";
+import { CANVAS_BASE_WIDTH, fontFamilies, normalizeSiteSpecV3 } from "@/lib/site-spec-v3";
 import type { TemplateId } from "@/lib/templates/types";
 
 type Props = {
@@ -12,6 +12,7 @@ type Props = {
   siteName: string;
   subdomain: string;
   initialSpec: SiteSpecV3;
+  initialMigrated?: boolean;
 };
 
 type EditorSaveState = "idle" | "saving" | "saved" | "error";
@@ -29,7 +30,17 @@ type DragState = {
   blockId: string;
   startX: number;
   startY: number;
-  initialRect: CanvasLayoutRect;
+  initialRectPx: CanvasLayoutRect;
+  sectionWidth: number;
+  sectionHeight: number;
+};
+
+type SectionDragState = {
+  sectionId: string;
+  startY: number;
+  initialHeight: number;
+  sectionWidth: number;
+  viewport: EditorViewport;
 };
 
 type SiteAsset = {
@@ -55,27 +66,33 @@ type TemplateCard = {
   variants: Record<SiteSectionV3["type"], SiteSectionV3["variant"]>;
 };
 
-const PREVIEW_WIDTH: Record<EditorViewport, number> = {
-  desktop: 1120,
-  mobile: 390
+const MIN_BLOCK_SIZE = {
+  w: 40,
+  h: 24
 };
 
 const SECTION_LIBRARY: Array<SiteSectionV3["type"]> = ["hero", "catalog", "testimonials", "contact"];
 const BLOCK_LIBRARY: Array<CanvasBlock["type"]> = ["text", "image", "button", "product", "shape", "container"];
 
-export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) {
-  const [siteSpec, setSiteSpec] = useState<SiteSpecV3>(initialSpec);
+export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMigrated }: Props) {
+  const normalized = useMemo(() => normalizeSiteSpecV3(initialSpec) ?? { spec: initialSpec, migrated: false }, [initialSpec]);
+  const [siteSpec, setSiteSpec] = useState<SiteSpecV3>(normalized.spec);
+  const [wasMigrated] = useState(() => initialMigrated ?? normalized.migrated);
   const [viewport, setViewport] = useState<EditorViewport>("desktop");
   const [selected, setSelected] = useState<SelectedBlock | null>(null);
   const [saveState, setSaveState] = useState<EditorSaveState>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
-  const [lastPersistedHash, setLastPersistedHash] = useState(() => hashSpec(initialSpec));
+  const [lastPersistedHash, setLastPersistedHash] = useState(() => hashSpec(normalized.spec));
   const [message, setMessage] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const dragStateRef = useRef<DragState | null>(null);
+  const sectionDragRef = useRef<SectionDragState | null>(null);
+  const migrationRunRef = useRef(false);
   const [leftTab, setLeftTab] = useState<"templates" | "sections" | "layers">("templates");
   const [rightTab, setRightTab] = useState<"content" | "style" | "position">("content");
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [canvasWidth, setCanvasWidth] = useState<number>(CANVAS_BASE_WIDTH.desktop);
+  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
 
   const [assets, setAssets] = useState<SiteAsset[]>([]);
   const [assetsLoading, setAssetsLoading] = useState(false);
@@ -94,6 +111,8 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
   const home = useMemo(() => siteSpec.pages.find((page) => page.slug === "/") ?? siteSpec.pages[0] ?? null, [siteSpec]);
   const selectedSection = home?.sections.find((section) => section.id === selected?.sectionId) ?? null;
   const selectedBlock = selectedSection?.blocks.find((block) => block.id === selected?.blockId) ?? null;
+  const activeSectionId = selected?.sectionId ?? selectedSectionId ?? home?.sections[0]?.id ?? null;
+  const activeSection = home?.sections.find((section) => section.id === activeSectionId) ?? null;
   const blockTargetSection =
     (blockTargetSectionId && home?.sections.find((section) => section.id === blockTargetSectionId)) ?? selectedSection ?? home?.sections[0] ?? null;
 
@@ -108,6 +127,44 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
     void loadAssets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId]);
+
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const node = canvasRef.current;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setCanvasWidth(entry.contentRect.width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!wasMigrated) return;
+    if (migrationRunRef.current) return;
+    migrationRunRef.current = true;
+    let cancelled = false;
+
+    const run = async () => {
+      setSaveState("saving");
+      const result = await persistSpec(siteSpec, "canvas_manual_checkpoint");
+      if (cancelled) return;
+      if (!result.ok) {
+        setSaveState("error");
+        setMessage(result.error);
+        return;
+      }
+      setLastPersistedHash(result.hash);
+      setLastSavedAt(Date.now());
+      setSaveState("saved");
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [siteSpec, wasMigrated]);
 
   useEffect(() => {
     void loadTemplates();
@@ -139,6 +196,21 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
 
   useEffect(() => {
     const onMouseMove = (event: MouseEvent) => {
+      const sectionDrag = sectionDragRef.current;
+      if (sectionDrag) {
+        const deltaY = event.clientY - sectionDrag.startY;
+        const nextHeight = Math.max(200, sectionDrag.initialHeight + deltaY);
+        const nextRatio = clampRatio(nextHeight / sectionDrag.sectionWidth);
+        updateSection(sectionDrag.sectionId, (section) => ({
+          ...section,
+          height_ratio: {
+            ...section.height_ratio,
+            [sectionDrag.viewport]: nextRatio
+          }
+        }));
+        return;
+      }
+
       const drag = dragStateRef.current;
       if (!drag) return;
 
@@ -147,37 +219,38 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
 
       const deltaX = event.clientX - drag.startX;
       const deltaY = event.clientY - drag.startY;
-      const maxW = PREVIEW_WIDTH[viewport];
-      const maxH = viewport === "mobile" ? section.height.mobile : section.height.desktop;
+      const sectionWidth = drag.sectionWidth;
+      const sectionHeight = drag.sectionHeight;
 
       if (drag.mode === "move") {
-        const nextRect = clampRect(
+        const nextRectPx = clampRectPx(
           {
-            ...drag.initialRect,
-            x: drag.initialRect.x + deltaX,
-            y: drag.initialRect.y + deltaY
+            ...drag.initialRectPx,
+            x: drag.initialRectPx.x + deltaX,
+            y: drag.initialRectPx.y + deltaY
           },
-          maxW,
-          maxH
+          sectionWidth,
+          sectionHeight
         );
-        updateBlockRect(drag.sectionId, drag.blockId, nextRect);
+        updateBlockRect(drag.sectionId, drag.blockId, rectPxToPercent(nextRectPx, sectionWidth, sectionHeight));
         return;
       }
 
-      const resized = clampRect(
+      const resizedPx = clampRectPx(
         {
-          ...drag.initialRect,
-          w: drag.initialRect.w + deltaX,
-          h: drag.initialRect.h + deltaY
+          ...drag.initialRectPx,
+          w: drag.initialRectPx.w + deltaX,
+          h: drag.initialRectPx.h + deltaY
         },
-        maxW,
-        maxH
+        sectionWidth,
+        sectionHeight
       );
-      updateBlockRect(drag.sectionId, drag.blockId, resized);
+      updateBlockRect(drag.sectionId, drag.blockId, rectPxToPercent(resizedPx, sectionWidth, sectionHeight));
     };
 
     const onMouseUp = () => {
       dragStateRef.current = null;
+      sectionDragRef.current = null;
     };
 
     window.addEventListener("mousemove", onMouseMove);
@@ -216,11 +289,16 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
   }
 
   function updateBlockRect(sectionId: string, blockId: string, nextRect: CanvasLayoutRect) {
+    const section = home?.sections.find((item) => item.id === sectionId);
+    if (!section) return;
+    const sectionWidth = canvasWidth;
+    const sectionHeight = getSectionHeightPx(section, viewport, sectionWidth);
+    const clamped = clampRectPercent(nextRect, sectionWidth, sectionHeight);
     updateBlock(sectionId, blockId, (block) => ({
       ...block,
       layout: {
         ...block.layout,
-        [viewport]: nextRect
+        [viewport]: clamped
       }
     }));
   }
@@ -241,12 +319,14 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
     if (!section) return;
 
     const index = section.blocks.length + 1;
-    const block = createDefaultBlock(sectionId, type, index, viewport);
+    const block = createDefaultBlock(sectionId, type, index, section.height_ratio);
     updateSection(sectionId, (current) => ({
       ...current,
       blocks: [...current.blocks, block]
     }));
     setSelected({ sectionId, blockId: block.id });
+    setSelectedSectionId(sectionId);
+    setBlockTargetSectionId(sectionId);
   }
 
   function deleteSelectedBlock() {
@@ -279,6 +359,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
     }));
 
     setSelected({ sectionId: selected.sectionId, blockId: cloned.id });
+    setBlockTargetSectionId(selected.sectionId);
   }
 
   function bringSelectedToFront() {
@@ -303,15 +384,41 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
     event.preventDefault();
     event.stopPropagation();
 
+    const section = home?.sections.find((item) => item.id === sectionId);
+    if (!section) return;
+    const sectionWidth = canvasWidth;
+    const sectionHeight = getSectionHeightPx(section, viewport, sectionWidth);
+
     dragStateRef.current = {
       mode,
       sectionId,
       blockId: block.id,
       startX: event.clientX,
       startY: event.clientY,
-      initialRect: getBlockRect(block, viewport)
+      initialRectPx: rectPercentToPx(getBlockRect(block, viewport), sectionWidth, sectionHeight),
+      sectionWidth,
+      sectionHeight
     };
     setSelected({ sectionId, blockId: block.id });
+    setSelectedSectionId(sectionId);
+    setBlockTargetSectionId(sectionId);
+  }
+
+  function startSectionResize(event: React.MouseEvent, section: SiteSectionV3) {
+    event.preventDefault();
+    event.stopPropagation();
+    const sectionWidth = canvasWidth;
+    const sectionHeight = getSectionHeightPx(section, viewport, sectionWidth);
+    sectionDragRef.current = {
+      sectionId: section.id,
+      startY: event.clientY,
+      initialHeight: sectionHeight,
+      sectionWidth,
+      viewport
+    };
+    setSelectedSectionId(section.id);
+    setSelected(null);
+    setBlockTargetSectionId(section.id);
   }
 
   async function persistSpec(specToPersist: SiteSpecV3, source: "canvas_auto_save" | "canvas_manual_checkpoint" | "manual") {
@@ -636,7 +743,15 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                         <button
                           type="button"
                           className="btn-secondary"
-                          onClick={() => setSelected({ sectionId: section.id, blockId: section.blocks[0]?.id ?? "" })}
+                          onClick={() => {
+                            setSelectedSectionId(section.id);
+                            if (section.blocks[0]?.id) {
+                              setSelected({ sectionId: section.id, blockId: section.blocks[0].id });
+                            } else {
+                              setSelected(null);
+                            }
+                            setBlockTargetSectionId(section.id);
+                          }}
                         >
                           {section.type}
                         </button>
@@ -743,7 +858,15 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                       .sort((a, b) => getBlockRect(b, viewport).z - getBlockRect(a, viewport).z)
                       .map((block) => (
                         <div key={block.id} className="editor-layer-row">
-                          <button type="button" className="btn-secondary" onClick={() => setSelected({ sectionId: section.id, blockId: block.id })}>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            onClick={() => {
+                              setSelectedSectionId(section.id);
+                              setSelected({ sectionId: section.id, blockId: block.id });
+                              setBlockTargetSectionId(section.id);
+                            }}
+                          >
                             {block.type}
                           </button>
                           <div className="editor-section-actions">
@@ -787,151 +910,161 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
           <div className="editor-canvas-shell">
             <div
               className="editor-canvas"
+              ref={canvasRef}
               style={{
-                width: PREVIEW_WIDTH[viewport],
+                width: "100%",
                 background: siteSpec.theme.background,
                 fontFamily: siteSpec.theme.font_body
               }}
             >
               {(home?.sections ?? [])
                 .filter((section) => section.enabled)
-                .map((section) => (
-                  <article
-                    key={section.id}
-                    className="canvas-section"
-                    style={{
-                      minHeight: viewport === "mobile" ? section.height.mobile : section.height.desktop
-                    }}
-                    onClick={() => setSelected((prev) => (prev?.sectionId === section.id ? prev : { sectionId: section.id, blockId: section.blocks[0]?.id ?? "" }))}
-                  >
-                    {section.blocks
-                      .filter((block) => block.visible)
-                      .map((block) => {
-                        const rect = getBlockRect(block, viewport);
-                        const isSelected = selected?.sectionId === section.id && selected?.blockId === block.id;
+                .map((section) => {
+                  const sectionWidth = canvasWidth;
+                  const sectionHeight = getSectionHeightPx(section, viewport, sectionWidth);
 
-                        return (
-                          <div
-                            key={block.id}
-                            className={`canvas-block ${isSelected ? "selected" : ""}`}
-                            style={{
-                              left: rect.x,
-                              top: rect.y,
-                              width: rect.w,
-                              height: rect.h,
-                              zIndex: rect.z,
-                              borderRadius: block.style.radius ?? 0,
-                              color: block.style.color,
-                              background: block.style.bgColor,
-                              borderStyle: block.style.borderWidth ? "solid" : undefined,
-                              borderWidth: block.style.borderWidth,
-                              borderColor: block.style.borderColor,
-                              opacity: block.style.opacity,
-                              fontSize: block.style.fontSize,
-                              fontWeight: block.style.fontWeight,
-                              fontFamily: block.style.fontFamily ?? siteSpec.theme.font_body,
-                              textAlign: block.style.textAlign as "left" | "center" | "right" | undefined,
-                              padding: block.type === "text" ? 8 : 0,
-                              overflow: isSelected ? "visible" : "hidden"
-                            }}
-                            onMouseDown={(event) => startDragging(event, section.id, block, "move")}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setSelected({ sectionId: section.id, blockId: block.id });
-                            }}
-                          >
-                            {block.type === "text" ? block.content.text : null}
-                            {block.type === "image" ? (
-                              <img
-                                src={block.content.url || "https://placehold.co/800x520?text=Imagen"}
-                                alt={block.content.alt ?? "Imagen"}
-                                style={{ width: "100%", height: "100%", objectFit: "contain" }}
-                              />
-                            ) : null}
-                            {block.type === "button" ? (
-                              <button type="button">
-                                {block.content.label}
-                              </button>
-                            ) : null}
-                            {block.type === "product" ? (
-                              <div className="canvas-product">
-                                <div className="canvas-product-image" />
-                                <strong>{block.content.name}</strong>
-                                {block.content.price !== undefined ? <span>${block.content.price}</span> : null}
-                              </div>
-                            ) : null}
-                            {block.type === "shape" ? <div className="canvas-shape" /> : null}
-                            {block.type === "container" ? <div className="canvas-container" /> : null}
-                            {isSelected ? (
-                              <>
-                                <div
-                                  className="canvas-resize-handle"
-                                  onMouseDown={(event) => startDragging(event, section.id, block, "resize")}
+                  return (
+                    <article
+                      key={section.id}
+                      className={`canvas-section ${activeSectionId === section.id ? "selected" : ""}`}
+                      style={{
+                        minHeight: sectionHeight,
+                        height: sectionHeight
+                      }}
+                      onClick={() => {
+                        setSelectedSectionId(section.id);
+                        setSelected(null);
+                        setBlockTargetSectionId(section.id);
+                      }}
+                    >
+                      {section.blocks
+                        .filter((block) => block.visible)
+                        .map((block) => {
+                          const rect = rectPercentToPx(getBlockRect(block, viewport), sectionWidth, sectionHeight);
+                          const isSelected = selected?.sectionId === section.id && selected?.blockId === block.id;
+
+                          return (
+                            <div
+                              key={block.id}
+                              className={`canvas-block ${isSelected ? "selected" : ""}`}
+                              style={{
+                                left: rect.x,
+                                top: rect.y,
+                                width: rect.w,
+                                height: rect.h,
+                                zIndex: rect.z,
+                                borderRadius: block.style.radius ?? 0,
+                                color: block.style.color,
+                                background: block.style.bgColor,
+                                borderStyle: block.style.borderWidth ? "solid" : undefined,
+                                borderWidth: block.style.borderWidth,
+                                borderColor: block.style.borderColor,
+                                opacity: block.style.opacity,
+                                fontSize: block.style.fontSize,
+                                fontWeight: block.style.fontWeight,
+                                fontFamily: block.style.fontFamily ?? siteSpec.theme.font_body,
+                                textAlign: block.style.textAlign as "left" | "center" | "right" | undefined,
+                                padding: block.type === "text" ? 8 : 0,
+                                overflow: isSelected ? "visible" : "hidden"
+                              }}
+                              onMouseDown={(event) => startDragging(event, section.id, block, "move")}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setSelectedSectionId(section.id);
+                                setSelected({ sectionId: section.id, blockId: block.id });
+                                setBlockTargetSectionId(section.id);
+                              }}
+                            >
+                              {block.type === "text" ? block.content.text : null}
+                              {block.type === "image" ? (
+                                <img
+                                  src={block.content.url || "https://placehold.co/800x520?text=Imagen"}
+                                  alt={block.content.alt ?? "Imagen"}
+                                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
                                 />
-                                <div
-                                  className="canvas-toolbar"
-                                  onClick={(event) => event.stopPropagation()}
-                                  onMouseDown={(event) => event.stopPropagation()}
-                                >
-                                  <button type="button" onClick={duplicateSelectedBlock}>
-                                    Duplicar
-                                  </button>
-                                  <button type="button" onClick={deleteSelectedBlock}>
-                                    Eliminar
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      updateBlock(selected.sectionId, selected.blockId, (current) => ({
-                                        ...current,
-                                        visible: !current.visible
-                                      }))
-                                    }
-                                  >
-                                    {selectedBlock?.visible ? "Ocultar" : "Mostrar"}
-                                  </button>
-                                  <button type="button" onClick={bringSelectedToFront}>
-                                    Frente
-                                  </button>
-                                  <button type="button" onClick={sendSelectedToBack}>
-                                    Fondo
-                                  </button>
+                              ) : null}
+                              {block.type === "button" ? <button type="button">{block.content.label}</button> : null}
+                              {block.type === "product" ? (
+                                <div className="canvas-product">
+                                  <div className="canvas-product-image" />
+                                  <strong>{block.content.name}</strong>
+                                  {block.content.price !== undefined ? <span>${block.content.price}</span> : null}
                                 </div>
-                              </>
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                  </article>
-                ))}
+                              ) : null}
+                              {block.type === "shape" ? <div className="canvas-shape" /> : null}
+                              {block.type === "container" ? <div className="canvas-container" /> : null}
+                              {isSelected ? (
+                                <>
+                                  <div
+                                    className="canvas-resize-handle"
+                                    onMouseDown={(event) => startDragging(event, section.id, block, "resize")}
+                                  />
+                                  <div
+                                    className="canvas-toolbar"
+                                    onClick={(event) => event.stopPropagation()}
+                                    onMouseDown={(event) => event.stopPropagation()}
+                                  >
+                                    <button type="button" onClick={duplicateSelectedBlock}>
+                                      Duplicar
+                                    </button>
+                                    <button type="button" onClick={deleteSelectedBlock}>
+                                      Eliminar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateBlock(selected.sectionId, selected.blockId, (current) => ({
+                                          ...current,
+                                          visible: !current.visible
+                                        }))
+                                      }
+                                    >
+                                      {selectedBlock?.visible ? "Ocultar" : "Mostrar"}
+                                    </button>
+                                    <button type="button" onClick={bringSelectedToFront}>
+                                      Frente
+                                    </button>
+                                    <button type="button" onClick={sendSelectedToBack}>
+                                      Fondo
+                                    </button>
+                                  </div>
+                                </>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      {activeSectionId === section.id ? (
+                        <div
+                          className="canvas-section-resize"
+                          onMouseDown={(event) => startSectionResize(event, section)}
+                        />
+                      ) : null}
+                    </article>
+                  );
+                })}
             </div>
           </div>
         </section>
 
-        <aside className={`editor-inspector ${inspectorOpen ? "open" : "collapsed"}`}>
+        <aside className="editor-inspector">
           <div className="editor-inspector-header">
-            <strong>Inspector</strong>
-            <button type="button" className="btn-secondary" onClick={() => setInspectorOpen((prev) => !prev)}>
-              {inspectorOpen ? "Cerrar" : "Abrir"}
+          
+          </div>
+
+          <div className="editor-tabs">
+            <button type="button" className={rightTab === "content" ? "tab active" : "tab"} onClick={() => setRightTab("content")}>
+              Contenido
+            </button>
+            <button type="button" className={rightTab === "style" ? "tab active" : "tab"} onClick={() => setRightTab("style")}>
+              Estilo
+            </button>
+            <button type="button" className={rightTab === "position" ? "tab active" : "tab"} onClick={() => setRightTab("position")}>
+              Posición
             </button>
           </div>
 
-          {inspectorOpen ? (
-            <>
-              <div className="editor-tabs">
-                <button type="button" className={rightTab === "content" ? "tab active" : "tab"} onClick={() => setRightTab("content")}>
-                  Contenido
-                </button>
-                <button type="button" className={rightTab === "style" ? "tab active" : "tab"} onClick={() => setRightTab("style")}>
-                  Estilo
-                </button>
-                <button type="button" className={rightTab === "position" ? "tab active" : "tab"} onClick={() => setRightTab("position")}>
-                  Posición
-                </button>
-              </div>
-
-              <div className="editor-inspector-content">
-                {rightTab === "content" ? (
+          <div className="editor-inspector-content">
+            {rightTab === "content" ? (
                   selected && selectedBlock ? (
                     <div className="stack">
                       <strong>Bloque: {selectedBlock.type}</strong>
@@ -1388,56 +1521,97 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                   selected && selectedBlock ? (
                     <div className="stack">
                       <strong>Posición</strong>
+                      <small className="muted">Valores en porcentaje respecto a la sección.</small>
                       <label>
-                        X
+                        X (%)
                         <input
                           type="number"
+                          step="0.1"
                           value={getBlockRect(selectedBlock, viewport).x}
-                          onChange={(event) =>
-                            updateBlockRect(selected.sectionId, selected.blockId, {
-                              ...getBlockRect(selectedBlock, viewport),
-                              x: Number(event.target.value)
-                            })
-                          }
+                          onChange={(event) => {
+                            const sectionWidth = canvasWidth;
+                            const sectionHeight = selectedSection
+                              ? getSectionHeightPx(selectedSection, viewport, sectionWidth)
+                              : sectionWidth;
+                            const next = clampRectPercent(
+                              {
+                                ...getBlockRect(selectedBlock, viewport),
+                                x: Number(event.target.value)
+                              },
+                              sectionWidth,
+                              sectionHeight
+                            );
+                            updateBlockRect(selected.sectionId, selected.blockId, next);
+                          }}
                         />
                       </label>
                       <label>
-                        Y
+                        Y (%)
                         <input
                           type="number"
+                          step="0.1"
                           value={getBlockRect(selectedBlock, viewport).y}
-                          onChange={(event) =>
-                            updateBlockRect(selected.sectionId, selected.blockId, {
-                              ...getBlockRect(selectedBlock, viewport),
-                              y: Number(event.target.value)
-                            })
-                          }
+                          onChange={(event) => {
+                            const sectionWidth = canvasWidth;
+                            const sectionHeight = selectedSection
+                              ? getSectionHeightPx(selectedSection, viewport, sectionWidth)
+                              : sectionWidth;
+                            const next = clampRectPercent(
+                              {
+                                ...getBlockRect(selectedBlock, viewport),
+                                y: Number(event.target.value)
+                              },
+                              sectionWidth,
+                              sectionHeight
+                            );
+                            updateBlockRect(selected.sectionId, selected.blockId, next);
+                          }}
                         />
                       </label>
                       <label>
-                        W
+                        W (%)
                         <input
                           type="number"
+                          step="0.1"
                           value={getBlockRect(selectedBlock, viewport).w}
-                          onChange={(event) =>
-                            updateBlockRect(selected.sectionId, selected.blockId, {
-                              ...getBlockRect(selectedBlock, viewport),
-                              w: Number(event.target.value)
-                            })
-                          }
+                          onChange={(event) => {
+                            const sectionWidth = canvasWidth;
+                            const sectionHeight = selectedSection
+                              ? getSectionHeightPx(selectedSection, viewport, sectionWidth)
+                              : sectionWidth;
+                            const next = clampRectPercent(
+                              {
+                                ...getBlockRect(selectedBlock, viewport),
+                                w: Number(event.target.value)
+                              },
+                              sectionWidth,
+                              sectionHeight
+                            );
+                            updateBlockRect(selected.sectionId, selected.blockId, next);
+                          }}
                         />
                       </label>
                       <label>
-                        H
+                        H (%)
                         <input
                           type="number"
+                          step="0.1"
                           value={getBlockRect(selectedBlock, viewport).h}
-                          onChange={(event) =>
-                            updateBlockRect(selected.sectionId, selected.blockId, {
-                              ...getBlockRect(selectedBlock, viewport),
-                              h: Number(event.target.value)
-                            })
-                          }
+                          onChange={(event) => {
+                            const sectionWidth = canvasWidth;
+                            const sectionHeight = selectedSection
+                              ? getSectionHeightPx(selectedSection, viewport, sectionWidth)
+                              : sectionWidth;
+                            const next = clampRectPercent(
+                              {
+                                ...getBlockRect(selectedBlock, viewport),
+                                h: Number(event.target.value)
+                              },
+                              sectionWidth,
+                              sectionHeight
+                            );
+                            updateBlockRect(selected.sectionId, selected.blockId, next);
+                          }}
                         />
                       </label>
                       <label>
@@ -1459,8 +1633,6 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec }: Props) 
                   )
                 ) : null}
               </div>
-            </>
-          ) : null}
         </aside>
       </section>
     </div>
@@ -1480,10 +1652,19 @@ function createDefaultSection(
       type: "hero",
       enabled: true,
       variant: "centered",
-      height: { desktop: 520, mobile: 540 },
+      height_ratio: {
+        desktop: ratioFromPx(520, "desktop"),
+        mobile: ratioFromPx(540, "mobile")
+      },
       blocks: [
-        createDefaultBlock(id, "text", 1, "desktop"),
-        createDefaultBlock(id, "button", 2, "desktop")
+        createDefaultBlock(id, "text", 1, {
+          desktop: ratioFromPx(520, "desktop"),
+          mobile: ratioFromPx(540, "mobile")
+        }),
+        createDefaultBlock(id, "button", 2, {
+          desktop: ratioFromPx(520, "desktop"),
+          mobile: ratioFromPx(540, "mobile")
+        })
       ]
     };
   }
@@ -1494,11 +1675,32 @@ function createDefaultSection(
       type: "catalog",
       enabled: true,
       variant: "cards",
-      height: { desktop: 620, mobile: 900 },
+      height_ratio: {
+        desktop: ratioFromPx(620, "desktop"),
+        mobile: ratioFromPx(900, "mobile")
+      },
       blocks:
         siteType === "commerce_lite"
-          ? [createDefaultBlock(id, "product", 1, "desktop"), createDefaultBlock(id, "product", 2, "desktop"), createDefaultBlock(id, "product", 3, "desktop")]
-          : [createDefaultBlock(id, "container", 1, "desktop")]
+          ? [
+              createDefaultBlock(id, "product", 1, {
+                desktop: ratioFromPx(620, "desktop"),
+                mobile: ratioFromPx(900, "mobile")
+              }),
+              createDefaultBlock(id, "product", 2, {
+                desktop: ratioFromPx(620, "desktop"),
+                mobile: ratioFromPx(900, "mobile")
+              }),
+              createDefaultBlock(id, "product", 3, {
+                desktop: ratioFromPx(620, "desktop"),
+                mobile: ratioFromPx(900, "mobile")
+              })
+            ]
+          : [
+              createDefaultBlock(id, "container", 1, {
+                desktop: ratioFromPx(620, "desktop"),
+                mobile: ratioFromPx(900, "mobile")
+              })
+            ]
     };
   }
 
@@ -1508,8 +1710,16 @@ function createDefaultSection(
       type: "testimonials",
       enabled: true,
       variant: "cards",
-      height: { desktop: 520, mobile: 700 },
-      blocks: [createDefaultBlock(id, "text", 1, "desktop")]
+      height_ratio: {
+        desktop: ratioFromPx(520, "desktop"),
+        mobile: ratioFromPx(700, "mobile")
+      },
+      blocks: [
+        createDefaultBlock(id, "text", 1, {
+          desktop: ratioFromPx(520, "desktop"),
+          mobile: ratioFromPx(700, "mobile")
+        })
+      ]
     };
   }
 
@@ -1518,15 +1728,35 @@ function createDefaultSection(
     type: "contact",
     enabled: true,
     variant: "simple",
-    height: { desktop: 360, mobile: 420 },
-    blocks: [createDefaultBlock(id, "text", 1, "desktop"), createDefaultBlock(id, "button", 2, "desktop")]
+    height_ratio: {
+      desktop: ratioFromPx(360, "desktop"),
+      mobile: ratioFromPx(420, "mobile")
+    },
+    blocks: [
+      createDefaultBlock(id, "text", 1, {
+        desktop: ratioFromPx(360, "desktop"),
+        mobile: ratioFromPx(420, "mobile")
+      }),
+      createDefaultBlock(id, "button", 2, {
+        desktop: ratioFromPx(360, "desktop"),
+        mobile: ratioFromPx(420, "mobile")
+      })
+    ]
   };
 }
 
-function createDefaultBlock(sectionId: string, type: CanvasBlock["type"], index: number, viewport: EditorViewport): CanvasBlock {
+function createDefaultBlock(
+  sectionId: string,
+  type: CanvasBlock["type"],
+  index: number,
+  sectionRatios: { desktop: number; mobile: number }
+): CanvasBlock {
   const desktop = { x: 40 + index * 12, y: 50 + index * 12, w: 260, h: 90, z: index + 1 };
   const mobile = { x: 24, y: 40 + index * 14, w: 300, h: 86, z: index + 1 };
-  const layout = viewport === "mobile" ? { desktop, mobile } : { desktop };
+  const layout = {
+    desktop: rectFromPx(desktop, "desktop", sectionRatios.desktop),
+    mobile: rectFromPx(mobile, "mobile", sectionRatios.mobile)
+  };
 
   if (type === "text") {
     return {
@@ -1545,9 +1775,8 @@ function createDefaultBlock(sectionId: string, type: CanvasBlock["type"], index:
       type: "image",
       visible: true,
       layout: {
-        ...layout,
-        desktop: { ...desktop, h: 180 },
-        mobile: { ...mobile, h: 150 }
+        desktop: rectFromPx({ ...desktop, h: 180 }, "desktop", sectionRatios.desktop),
+        mobile: rectFromPx({ ...mobile, h: 150 }, "mobile", sectionRatios.mobile)
       },
       style: { radius: 12 },
       content: { url: "", alt: "" }
@@ -1560,9 +1789,8 @@ function createDefaultBlock(sectionId: string, type: CanvasBlock["type"], index:
       type: "button",
       visible: true,
       layout: {
-        ...layout,
-        desktop: { ...desktop, w: 220, h: 50 },
-        mobile: { ...mobile, w: 220, h: 48 }
+        desktop: rectFromPx({ ...desktop, w: 220, h: 50 }, "desktop", sectionRatios.desktop),
+        mobile: rectFromPx({ ...mobile, w: 220, h: 48 }, "mobile", sectionRatios.mobile)
       },
       style: { bgColor: "#0c4a6e", color: "#ffffff", radius: 12, fontWeight: 700, textAlign: "center" },
       content: { label: "Botón", action: "whatsapp" }
@@ -1575,9 +1803,8 @@ function createDefaultBlock(sectionId: string, type: CanvasBlock["type"], index:
       type: "product",
       visible: true,
       layout: {
-        ...layout,
-        desktop: { ...desktop, w: 300, h: 360 },
-        mobile: { ...mobile, w: 320, h: 320 }
+        desktop: rectFromPx({ ...desktop, w: 300, h: 360 }, "desktop", sectionRatios.desktop),
+        mobile: rectFromPx({ ...mobile, w: 320, h: 320 }, "mobile", sectionRatios.mobile)
       },
       style: { bgColor: "#ffffff", borderColor: "#e2e8f0", borderWidth: 1, radius: 16 },
       content: {
@@ -1606,9 +1833,8 @@ function createDefaultBlock(sectionId: string, type: CanvasBlock["type"], index:
     type: "container",
     visible: true,
     layout: {
-      ...layout,
-      desktop: { ...desktop, w: 300, h: 260 },
-      mobile: { ...mobile, w: 320, h: 220 }
+      desktop: rectFromPx({ ...desktop, w: 300, h: 260 }, "desktop", sectionRatios.desktop),
+      mobile: rectFromPx({ ...mobile, w: 320, h: 220 }, "mobile", sectionRatios.mobile)
     },
     style: { bgColor: "#ffffff", borderColor: "#cbd5e1", borderWidth: 1, radius: 14 },
     content: {}
@@ -1620,12 +1846,77 @@ function getBlockRect(block: CanvasBlock, viewport: EditorViewport) {
   return block.layout.desktop;
 }
 
-function clampRect(rect: CanvasLayoutRect, maxW: number, maxH: number): CanvasLayoutRect {
-  const w = Math.max(40, Math.min(rect.w, maxW));
-  const h = Math.max(24, Math.min(rect.h, maxH));
+function getSectionHeightPx(section: SiteSectionV3, viewport: EditorViewport, width: number) {
+  const ratio = viewport === "mobile" ? section.height_ratio.mobile : section.height_ratio.desktop;
+  return Math.max(1, width * ratio);
+}
+
+function rectFromPx(
+  rect: { x: number; y: number; w: number; h: number; z: number },
+  viewport: EditorViewport,
+  sectionRatio: number
+): CanvasLayoutRect {
+  const baseWidth = CANVAS_BASE_WIDTH[viewport];
+  const baseHeight = baseWidth * sectionRatio;
+  return rectPxToPercent(rect, baseWidth, baseHeight);
+}
+
+function rectPercentToPx(rect: CanvasLayoutRect, width: number, height: number) {
+  return {
+    x: (rect.x / 100) * width,
+    y: (rect.y / 100) * height,
+    w: (rect.w / 100) * width,
+    h: (rect.h / 100) * height,
+    z: rect.z
+  };
+}
+
+function rectPxToPercent(rect: { x: number; y: number; w: number; h: number; z: number }, width: number, height: number): CanvasLayoutRect {
+  return {
+    x: clampPercent((rect.x / width) * 100),
+    y: clampPercent((rect.y / height) * 100),
+    w: clampPercent((rect.w / width) * 100),
+    h: clampPercent((rect.h / height) * 100),
+    z: rect.z
+  };
+}
+
+function clampPercent(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, round(value, 3)));
+}
+
+function clampRectPx(rect: CanvasLayoutRect, maxW: number, maxH: number): CanvasLayoutRect {
+  const w = Math.max(MIN_BLOCK_SIZE.w, Math.min(rect.w, maxW));
+  const h = Math.max(MIN_BLOCK_SIZE.h, Math.min(rect.h, maxH));
   const x = Math.max(0, Math.min(rect.x, maxW - w));
   const y = Math.max(0, Math.min(rect.y, maxH - h));
   return { ...rect, x, y, w, h };
+}
+
+function clampRectPercent(rect: CanvasLayoutRect, width: number, height: number) {
+  const safeWidth = Math.max(1, width);
+  const safeHeight = Math.max(1, height);
+  const minW = (MIN_BLOCK_SIZE.w / safeWidth) * 100;
+  const minH = (MIN_BLOCK_SIZE.h / safeHeight) * 100;
+  const w = Math.max(minW, Math.min(rect.w, 100));
+  const h = Math.max(minH, Math.min(rect.h, 100));
+  const x = Math.max(0, Math.min(rect.x, 100 - w));
+  const y = Math.max(0, Math.min(rect.y, 100 - h));
+  return { ...rect, x, y, w, h };
+}
+
+function ratioFromPx(value: number, viewport: EditorViewport) {
+  return round(value / CANVAS_BASE_WIDTH[viewport], 4);
+}
+
+function clampRatio(value: number) {
+  return Math.max(0.2, Math.min(3, round(value, 4)));
+}
+
+function round(value: number, decimals = 3) {
+  const factor = Math.pow(10, decimals);
+  return Math.round(value * factor) / factor;
 }
 
 // (image auto-fit removed: images should adapt to container size)

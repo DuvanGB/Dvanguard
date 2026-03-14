@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { MouseEvent } from "react";
 
 import type { CanvasBlock, SiteSectionV3 } from "@/lib/site-spec-v3";
@@ -45,21 +46,22 @@ export function CanvasSection({
   selectedBlockId,
   editable
 }: SectionRenderProps) {
-  const sectionHeight = viewport === "mobile" ? section.height.mobile : section.height.desktop;
+  const visibleBlocks = useMemo(() => section.blocks.filter((block) => block.visible), [section.blocks]);
+  const sectionRatio = viewport === "mobile" ? section.height_ratio.mobile : section.height_ratio.desktop;
 
   return (
     <section
       data-section-id={section.id}
       style={{
         position: "relative",
-        minHeight: sectionHeight,
+        width: "100%",
+        aspectRatio: `${1}/${sectionRatio}`,
         borderBottom: `1px solid ${theme.secondary}25`,
         overflow: "hidden"
       }}
     >
-      {section.blocks
-        .filter((block) => block.visible)
-        .sort((a, b) => blockRect(a, viewport).z - blockRect(b, viewport).z)
+      {visibleBlocks
+        .sort((a, b) => getBlockLayout(a, viewport).z - getBlockLayout(b, viewport).z)
         .map((block) => (
           <CanvasBlockRenderer
             key={block.id}
@@ -102,31 +104,32 @@ function CanvasBlockRenderer({
   isSelected: boolean;
   editable?: boolean;
 }) {
-  const rect = blockRect(block, viewport);
+  const rect = getBlockLayout(block, viewport);
   const style = {
     position: "absolute" as const,
-    left: rect.x,
-    top: rect.y,
-    width: rect.w,
-    height: rect.h,
+    left: `${rect.x}%`,
+    top: `${rect.y}%`,
+    width: `${rect.w}%`,
+    height: `${rect.h}%`,
     zIndex: rect.z,
-    borderRadius: block.style.radius ?? 0,
-    color: block.style.color,
-    background: block.style.bgColor,
-    borderStyle: block.style.borderWidth ? "solid" : undefined,
-    borderWidth: block.style.borderWidth,
-    borderColor: block.style.borderColor,
-    opacity: block.style.opacity,
-    fontSize: block.style.fontSize,
-    fontWeight: block.style.fontWeight,
-    fontFamily: block.style.fontFamily,
-    textAlign: block.style.textAlign as "left" | "center" | "right" | undefined,
+    borderRadius: block.style?.radius ?? 0,
+    color: block.style?.color,
+    background: block.style?.bgColor,
+    borderStyle: block.style?.borderWidth ? "solid" : undefined,
+    borderWidth: block.style?.borderWidth,
+    borderColor: block.style?.borderColor,
+    opacity: block.style?.opacity,
+    fontSize: block.style?.fontSize,
+    fontWeight: block.style?.fontWeight,
+    fontFamily: block.style?.fontFamily,
+    textAlign: block.style?.textAlign as "left" | "center" | "right" | undefined,
     boxSizing: "border-box" as const,
     outline: editable && isSelected ? "2px solid #0ea5e9" : "none",
     cursor: editable ? "pointer" : "default"
   };
 
   if (block.type === "text") {
+    if (!block.content || typeof block.content.text !== "string") return null;
     return (
       <div style={{ ...style, padding: 8 }} onClick={() => onSelectBlock?.(sectionId, block.id)}>
         {block.content.text}
@@ -135,6 +138,7 @@ function CanvasBlockRenderer({
   }
 
   if (block.type === "image") {
+    if (!block.content) return null;
     const src = block.content.url || "https://placehold.co/800x520?text=Imagen";
     return (
       <img
@@ -147,6 +151,7 @@ function CanvasBlockRenderer({
   }
 
   if (block.type === "button") {
+    if (!block.content) return null;
     const href =
       block.content.action === "whatsapp"
         ? whatsappLink
@@ -182,6 +187,7 @@ function CanvasBlockRenderer({
   }
 
   if (block.type === "product") {
+    if (!block.content) return null;
     const handleAdd = (event: MouseEvent<HTMLButtonElement>) => {
       event.stopPropagation();
       if (editable) {
@@ -231,6 +237,7 @@ function CanvasBlockRenderer({
   }
 
   if (block.type === "shape") {
+    if (!block.content) return null;
     const shapeStyle =
       block.content.shape === "circle"
         ? { borderRadius: "999px" }
@@ -258,7 +265,7 @@ function formatPrice(value?: number, currency?: string) {
   }
 }
 
-export function blockRect(block: CanvasBlock, viewport: "desktop" | "mobile") {
+export function getBlockLayout(block: CanvasBlock, viewport: "desktop" | "mobile") {
   if (viewport === "mobile" && block.layout.mobile) {
     return block.layout.mobile;
   }

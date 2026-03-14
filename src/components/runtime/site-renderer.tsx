@@ -17,8 +17,9 @@ type Props = {
   enableCart?: boolean;
 };
 
-export function SiteRenderer({ spec, viewport = "desktop", trackEvents = false, siteId, subdomain, enableCart = false }: Props) {
+export function SiteRenderer({ spec, viewport, trackEvents = false, siteId, subdomain, enableCart = false }: Props) {
   const trackedVisitRef = useRef(false);
+  const [responsiveViewport, setResponsiveViewport] = useState<EditorViewport>(viewport ?? "desktop");
   const parsed = parseSiteSpecV3(spec);
   const normalized = parsed.success
     ? parsed.data
@@ -67,7 +68,18 @@ export function SiteRenderer({ spec, viewport = "desktop", trackEvents = false, 
     });
   }, [pageSlug, siteId, subdomain, trackEvents]);
 
-  const rendererWidth = viewport === "mobile" ? 390 : "100%";
+  useEffect(() => {
+    if (viewport) return;
+    const updateViewport = () => {
+      setResponsiveViewport(window.innerWidth < 768 ? "mobile" : "desktop");
+    };
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
+  }, [viewport]);
+
+  const activeViewport = viewport ?? responsiveViewport;
+  const rendererWidth = activeViewport === "mobile" ? "100%" : "100%";
 
   function trackCta(sectionId: string) {
     if (!trackEvents || !siteId || !subdomain) return;
@@ -112,7 +124,7 @@ export function SiteRenderer({ spec, viewport = "desktop", trackEvents = false, 
           <CanvasSection
             key={section.id}
             section={section}
-            viewport={viewport}
+            viewport={activeViewport}
             theme={normalized.theme}
             whatsappLink={whatsappLink}
             onAddToCart={cartEnabled ? cart.addItem : undefined}

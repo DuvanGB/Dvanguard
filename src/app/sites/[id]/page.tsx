@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { SiteEditor } from "@/components/editor/site-editor";
 import { requireUser } from "@/lib/auth";
-import { parseSiteSpecV3, buildSiteSpecV3FromBrief, type SiteSpecV3 } from "@/lib/site-spec-v3";
+import { buildSiteSpecV3FromBrief, normalizeSiteSpecV3, type SiteSpecV3 } from "@/lib/site-spec-v3";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export default async function SiteEditorPage({ params }: { params: Promise<{ id: string }> }) {
@@ -24,6 +24,7 @@ export default async function SiteEditorPage({ params }: { params: Promise<{ id:
     siteType: site.site_type,
     businessName: site.name
   });
+  let initialMigrated = false;
 
   if (site.current_version_id) {
     const { data: version } = await admin
@@ -32,15 +33,22 @@ export default async function SiteEditorPage({ params }: { params: Promise<{ id:
       .eq("id", site.current_version_id)
       .maybeSingle();
 
-    const parsed = parseSiteSpecV3(version?.site_spec_json);
-    if (parsed.success) {
-      initialSpec = parsed.data;
+    const normalized = normalizeSiteSpecV3(version?.site_spec_json);
+    if (normalized) {
+      initialSpec = normalized.spec;
+      initialMigrated = normalized.migrated;
     }
   }
 
   return (
     <main className="editor-page">
-      <SiteEditor siteId={site.id} siteName={site.name} subdomain={site.subdomain} initialSpec={initialSpec} />
+      <SiteEditor
+        siteId={site.id}
+        siteName={site.name}
+        subdomain={site.subdomain}
+        initialSpec={initialSpec}
+        initialMigrated={initialMigrated}
+      />
     </main>
   );
 }
