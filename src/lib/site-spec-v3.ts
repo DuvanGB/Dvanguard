@@ -79,6 +79,27 @@ const blockBaseSchema = z.object({
   style: blockStyleSchema.default({})
 });
 
+type BlockStyle = z.infer<typeof blockStyleSchema>;
+
+function normalizeTemplateStyle(style?: TemplateBlockBlueprint["style"]): BlockStyle {
+  if (!style) return {};
+  const normalized: BlockStyle = {
+    fontSize: style.fontSize,
+    fontWeight: style.fontWeight,
+    color: style.color,
+    bgColor: style.bgColor,
+    radius: style.radius,
+    borderColor: style.borderColor,
+    borderWidth: style.borderWidth,
+    opacity: style.opacity,
+    textAlign: style.textAlign
+  };
+  if (style.fontFamily && fontFamilies.includes(style.fontFamily as (typeof fontFamilies)[number])) {
+    normalized.fontFamily = style.fontFamily as (typeof fontFamilies)[number];
+  }
+  return normalized;
+}
+
 const textBlockSchema = blockBaseSchema.extend({
   type: z.literal("text"),
   content: z.object({
@@ -557,7 +578,7 @@ function buildBlockFromBlueprint(input: {
 }): CanvasBlock {
   const { blueprint, sectionId, sectionType, businessName, offerSummary, targetAudience, tone, ctaLabel, siteType } = input;
   const blockId = `${sectionId}-${blueprint.id}`;
-  const style = blueprint.style ?? {};
+  const style = normalizeTemplateStyle(blueprint.style);
 
   if (blueprint.type === "text") {
     const text =
