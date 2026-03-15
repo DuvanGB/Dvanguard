@@ -468,6 +468,14 @@ td {
   color: #ffffff;
 }
 
+.block-type-option {
+  cursor: grab;
+}
+
+.block-type-option:active {
+  cursor: grabbing;
+}
+
 .editor-section-add-actions {
   display: flex;
   gap: 0.35rem;
@@ -570,6 +578,12 @@ td {
 .canvas-section.selected {
   outline: 2px solid rgba(14, 165, 233, 0.6);
   outline-offset: -2px;
+}
+
+.canvas-section.drop-target {
+  outline: 2px dashed rgba(14, 165, 233, 0.7);
+  outline-offset: -2px;
+  background: rgba(14, 165, 233, 0.04);
 }
 
 .canvas-section-resize {

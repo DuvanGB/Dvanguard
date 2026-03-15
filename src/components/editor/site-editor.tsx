@@ -106,6 +106,8 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
   const [blockTargetSectionId, setBlockTargetSectionId] = useState<string | null>(null);
   const [sectionAddType, setSectionAddType] = useState<SiteSectionV3["type"]>(SECTION_LIBRARY[0]);
   const [blockAddType, setBlockAddType] = useState<CanvasBlock["type"]>(BLOCK_LIBRARY[0]);
+  const [draggingBlockType, setDraggingBlockType] = useState<CanvasBlock["type"] | null>(null);
+  const [canvasDropSectionId, setCanvasDropSectionId] = useState<string | null>(null);
   const [draggingSectionId, setDraggingSectionId] = useState<string | null>(null);
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
 
@@ -362,6 +364,41 @@ function addSection(type: SiteSectionV3["type"]) {
       blocks: [...current.blocks, block]
     }));
     setSelected({ sectionId, blockId: block.id });
+    setSelectedSectionId(sectionId);
+    setBlockTargetSectionId(sectionId);
+  }
+
+  function addBlockAtPosition(
+    sectionId: string,
+    type: CanvasBlock["type"],
+    xPx: number,
+    yPx: number,
+    sectionWidth: number,
+    sectionHeight: number
+  ) {
+    const section = home?.sections.find((item) => item.id === sectionId);
+    if (!section) return;
+
+    const index = section.blocks.length + 1;
+    const block = createDefaultBlock(sectionId, type, index, section.height_ratio);
+    const baseRectPx = rectPercentToPx(getBlockRect(block, viewport), sectionWidth, sectionHeight);
+    const desired = {
+      ...baseRectPx,
+      x: xPx - baseRectPx.w / 2,
+      y: yPx - baseRectPx.h / 2
+    };
+    const clamped = clampRectPx(desired, sectionWidth, sectionHeight);
+    const layout = {
+      ...block.layout,
+      [viewport]: rectPxToPercent(clamped, sectionWidth, sectionHeight)
+    };
+    const nextBlock = { ...block, layout };
+
+    updateSection(sectionId, (current) => ({
+      ...current,
+      blocks: [...current.blocks, nextBlock]
+    }));
+    setSelected({ sectionId, blockId: nextBlock.id });
     setSelectedSectionId(sectionId);
     setBlockTargetSectionId(sectionId);
   }
@@ -926,9 +963,27 @@ function addSection(type: SiteSectionV3["type"]) {
                           </button>
                         </div>
                       </div>
+                      <div className="muted" style={{ fontSize: "0.72rem" }}>
+                        Arrastra un bloque al canvas para añadirlo.
+                      </div>
                       <div className="section-type-options">
                         {BLOCK_LIBRARY.map((type) => (
-                          <label key={type} className={`section-type-option ${blockAddType === type ? "active" : ""}`}>
+                          <label
+                            key={type}
+                            className={`section-type-option block-type-option ${blockAddType === type ? "active" : ""}`}
+                            draggable
+                            onDragStart={(event) => {
+                              setBlockAddType(type);
+                              setDraggingBlockType(type);
+                              event.dataTransfer.effectAllowed = "copy";
+                              event.dataTransfer.setData("application/x-block-type", type);
+                              event.dataTransfer.setData("text/plain", type);
+                            }}
+                            onDragEnd={() => {
+                              setDraggingBlockType(null);
+                              setCanvasDropSectionId(null);
+                            }}
+                          >
                             <input
                               type="radio"
                               name="block-add-type"
@@ -1063,10 +1118,32 @@ function addSection(type: SiteSectionV3["type"]) {
                   return (
                     <article
                       key={section.id}
-                      className={`canvas-section ${activeSectionId === section.id ? "selected" : ""}`}
+                      className={`canvas-section ${activeSectionId === section.id ? "selected" : ""} ${
+                        canvasDropSectionId === section.id ? "drop-target" : ""
+                      }`}
                       style={{
                         minHeight: sectionHeight,
                         height: sectionHeight
+                      }}
+                      onDragOver={(event) => {
+                        if (!draggingBlockType) return;
+                        event.preventDefault();
+                        setCanvasDropSectionId(section.id);
+                      }}
+                      onDragLeave={() => {
+                        if (canvasDropSectionId === section.id) {
+                          setCanvasDropSectionId(null);
+                        }
+                      }}
+                      onDrop={(event) => {
+                        if (!draggingBlockType) return;
+                        event.preventDefault();
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const x = event.clientX - rect.left;
+                        const y = event.clientY - rect.top;
+                        addBlockAtPosition(section.id, draggingBlockType, x, y, sectionWidth, sectionHeight);
+                        setDraggingBlockType(null);
+                        setCanvasDropSectionId(null);
                       }}
                       onClick={() => {
                         setSelectedSectionId(section.id);
@@ -1835,10 +1912,6 @@ function createDefaultSection(
       },
       blocks: [
         createDefaultBlock(id, "text", 1, {
-          desktop: ratioFromPx(520, "desktop"),
-          mobile: ratioFromPx(540, "mobile")
-        }),
-        createDefaultBlock(id, "button", 2, {
           desktop: ratioFromPx(520, "desktop"),
           mobile: ratioFromPx(540, "mobile")
         })

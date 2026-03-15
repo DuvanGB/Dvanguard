@@ -867,14 +867,6 @@ function buildSection(input: {
           mobile: rect(24, 152, 320, 92, 2),
           style: { fontSize: 19, color: "#334155" }
         }),
-        buttonBlock({
-          id: `${id}-cta`,
-          label: input.ctaLabel,
-          action: "whatsapp",
-          desktop: rect(56, 286, 240, 52, 3),
-          mobile: rect(24, 262, 220, 50, 3),
-          style: { bgColor: "#0c4a6e", color: "#ffffff", radius: 14, fontWeight: 700, fontSize: 17 }
-        }),
         imageBlock({
           id: `${id}-image`,
           url: `https://placehold.co/800x520?text=${encodeURIComponent(input.businessName)}`,
