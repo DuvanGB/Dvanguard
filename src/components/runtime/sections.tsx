@@ -52,6 +52,7 @@ export function CanvasSection({
   return (
     <section
       data-section-id={section.id}
+      id={section.id}
       style={{
         position: "relative",
         width: "100%",
@@ -140,11 +141,12 @@ function CanvasBlockRenderer({
   if (block.type === "image") {
     if (!block.content) return null;
     const src = block.content.url || "https://placehold.co/800x520?text=Imagen";
+    const fit = block.content.fit ?? "contain";
     return (
       <img
         src={src}
         alt={block.content.alt ?? "Imagen"}
-        style={{ ...style, objectFit: "contain" as const }}
+        style={{ ...style, objectFit: fit as "cover" | "contain" }}
         onClick={() => onSelectBlock?.(sectionId, block.id)}
       />
     );

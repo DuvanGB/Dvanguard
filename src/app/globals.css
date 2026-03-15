@@ -250,7 +250,8 @@ td {
   position: sticky;
   top: 90px;
   height: calc(100vh - 120px);
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 1rem;
@@ -266,7 +267,8 @@ td {
 }
 
 .editor-rail-content {
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 0.25rem;
 }
 
@@ -387,6 +389,13 @@ td {
   background: #f8fafc;
   display: grid;
   gap: 0.6rem;
+  cursor: grab;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.editor-section-card.drag-over {
+  border-color: #0ea5e9;
+  box-shadow: 0 8px 20px rgba(14, 165, 233, 0.15);
 }
 
 .editor-section-header {
@@ -408,6 +417,60 @@ td {
   display: inline-flex;
   gap: 0.35rem;
   align-items: center;
+}
+
+.editor-section-add-row {
+  border: 1px dashed #e2e8f0;
+  border-radius: 0.9rem;
+  padding: 0.65rem 0.75rem;
+  background: #ffffff;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.section-add-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.section-type-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.section-type-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #0f172a;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.section-type-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.section-type-option.active {
+  border-color: #0c4a6e;
+  background: #0c4a6e;
+  color: #ffffff;
+}
+
+.editor-section-add-actions {
+  display: flex;
+  gap: 0.35rem;
 }
 
 .icon-btn {

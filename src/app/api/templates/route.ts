@@ -29,8 +29,10 @@ export async function GET(request: NextRequest) {
       family: template.family,
       site_type: template.site_type,
       preview_label: template.preview_label,
+      default_header_variant: template.default_header_variant,
       theme: template.theme,
-      variants: template.variants
+      variants: template.variants,
+      layout_blueprint: template.layout_blueprint
     }))
   });
 }

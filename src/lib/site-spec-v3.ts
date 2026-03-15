@@ -3,7 +3,14 @@ import { z } from "zod";
 import type { BusinessBriefDraft } from "@/lib/onboarding/types";
 import { getTemplateById } from "@/lib/templates/catalog";
 import { pickTemplateOrFallback } from "@/lib/templates/selector";
-import { templateIds, type TemplateId } from "@/lib/templates/types";
+import {
+  templateIds,
+  type HeaderVariant,
+  type TemplateBlockBlueprint,
+  type TemplateDefinition,
+  type TemplateId,
+  type TemplateLayoutBlueprint
+} from "@/lib/templates/types";
 
 const colorToken = z
   .string()
@@ -83,7 +90,8 @@ const imageBlockSchema = blockBaseSchema.extend({
   type: z.literal("image"),
   content: z.object({
     url: optionalUrl,
-    alt: z.string().max(180).optional()
+    alt: z.string().max(180).optional(),
+    fit: z.enum(["cover", "contain"]).optional()
   })
 });
 
@@ -161,6 +169,23 @@ const pageSchema = z.object({
   sections: z.array(sectionSchema).min(1).max(20)
 });
 
+const headerVariantSchema = z.enum(["none", "hamburger-side", "hamburger-overlay", "top-bar"]);
+
+const headerSchema = z
+  .object({
+    variant: headerVariantSchema,
+    brand: z.string().max(140).optional(),
+    links: z
+      .array(
+        z.object({
+          label: z.string().min(1).max(80),
+          href: z.string().min(1).max(200)
+        })
+      )
+      .optional()
+  })
+  .optional();
+
 export const siteSpecV3Schema = z.object({
   schema_version: z.literal("3.0"),
   site_type: z.enum(["informative", "commerce_lite"]),
@@ -178,6 +203,7 @@ export const siteSpecV3Schema = z.object({
     radius: z.enum(["sm", "md", "lg"])
   }),
   pages: z.array(pageSchema).min(1),
+  header: headerSchema,
   integrations: z.object({
     whatsapp: z
       .object({
@@ -222,7 +248,8 @@ const legacyImageBlockSchema = legacyBlockBaseSchema.extend({
   type: z.literal("image"),
   content: z.object({
     url: optionalUrl,
-    alt: z.string().max(180).optional()
+    alt: z.string().max(180).optional(),
+    fit: z.enum(["cover", "contain"]).optional()
   })
 });
 
@@ -306,6 +333,7 @@ const legacySiteSpecV3Schema = z.object({
     radius: z.enum(["sm", "md", "lg"])
   }),
   pages: z.array(legacyPageSchema).min(1),
+  header: headerSchema,
   integrations: z.object({
     whatsapp: z
       .object({
@@ -396,6 +424,7 @@ function convertLegacySpecToPercent(spec: LegacySiteSpecV3): SiteSpecV3 {
     locale: spec.locale,
     template: spec.template,
     theme: spec.theme,
+    header: spec.header,
     pages,
     integrations: spec.integrations
   };
@@ -424,6 +453,268 @@ function clampPercent(value: number) {
 function round(value: number, decimals = 3) {
   const factor = Math.pow(10, decimals);
   return Math.round(value * factor) / factor;
+}
+
+function buildHeaderLinks(sections: SiteSectionV3[]) {
+  const labels: Record<SiteSectionV3["type"], string> = {
+    hero: "Inicio",
+    catalog: "Catálogo",
+    testimonials: "Testimonios",
+    contact: "Contacto"
+  };
+
+  return sections.filter((section) => section.enabled).map((section) => ({
+    label: labels[section.type] ?? section.type,
+    href: `#${section.id}`
+  }));
+}
+
+function buildDefaultHeaderVariant(template: TemplateDefinition): HeaderVariant {
+  return template.default_header_variant ?? "none";
+}
+
+function getProductBaseLabels(siteType: "informative" | "commerce_lite") {
+  if (siteType === "commerce_lite") {
+    return ["Producto estrella", "Producto recomendado", "Producto popular"];
+  }
+  return ["Servicio principal", "Servicio complementario", "Servicio premium"];
+}
+
+function getProductDescriptions(offerSummary: string, tone: string) {
+  return [
+    offerSummary,
+    "Ideal para clientes que buscan resultados rápidos.",
+    `Atención ${tone.toLowerCase()} con soporte por WhatsApp.`
+  ];
+}
+
+function getTestimonialQuotes() {
+  return [
+    "La experiencia fue rápida y muy clara desde el primer contacto.",
+    "Excelente atención por WhatsApp y respuesta en pocos minutos.",
+    "Se siente profesional y fácil de usar para nuestros clientes."
+  ];
+}
+
+function placeholderImage(label: string, size = "1200x800") {
+  return `https://placehold.co/${size}?text=${encodeURIComponent(label)}`;
+}
+
+function resolveTextForBlock(input: {
+  sectionType: SiteSectionV3["type"];
+  blockId: string;
+  businessName: string;
+  offerSummary: string;
+  targetAudience: string;
+  tone: string;
+  siteType: "informative" | "commerce_lite";
+}) {
+  const { sectionType, blockId, businessName, offerSummary, targetAudience, tone, siteType } = input;
+  const productLabels = getProductBaseLabels(siteType);
+  const productDescriptions = getProductDescriptions(offerSummary, tone);
+  const quotes = getTestimonialQuotes();
+
+  if (sectionType === "hero") {
+    if (blockId.includes("headline")) return businessName;
+    if (blockId.includes("subheadline")) {
+      return `${offerSummary} Para ${targetAudience.toLowerCase()}.`;
+    }
+    if (blockId.includes("eyebrow")) return "Nuevo";
+  }
+
+  if (sectionType === "catalog") {
+    if (blockId.includes("title")) return siteType === "commerce_lite" ? "Catálogo destacado" : "Servicios principales";
+    const nameMatch = blockId.match(/name-(\d+)/);
+    if (nameMatch) return productLabels[Number(nameMatch[1]) - 1] ?? productLabels[0];
+    const descMatch = blockId.match(/desc-(\d+)/);
+    if (descMatch) return productDescriptions[Number(descMatch[1]) - 1] ?? productDescriptions[0];
+  }
+
+  if (sectionType === "testimonials") {
+    if (blockId.includes("title")) return "Clientes que confían en nosotros";
+    const quoteMatch = blockId.match(/quote-(\d+)/);
+    if (quoteMatch) return quotes[Number(quoteMatch[1]) - 1] ?? quotes[0];
+  }
+
+  if (sectionType === "contact") {
+    if (blockId.includes("title")) return "Contáctanos";
+    if (blockId.includes("description")) return `Escríbenos y recibe una respuesta ${tone.toLowerCase()}.`;
+  }
+
+  return offerSummary;
+}
+
+function buildBlockFromBlueprint(input: {
+  blueprint: TemplateBlockBlueprint;
+  sectionId: string;
+  sectionType: SiteSectionV3["type"];
+  businessName: string;
+  offerSummary: string;
+  targetAudience: string;
+  tone: string;
+  ctaLabel: string;
+  siteType: "informative" | "commerce_lite";
+}): CanvasBlock {
+  const { blueprint, sectionId, sectionType, businessName, offerSummary, targetAudience, tone, ctaLabel, siteType } = input;
+  const blockId = `${sectionId}-${blueprint.id}`;
+  const style = blueprint.style ?? {};
+
+  if (blueprint.type === "text") {
+    const text =
+      blueprint.content?.text ??
+      resolveTextForBlock({
+        sectionType,
+        blockId: blueprint.id,
+        businessName,
+        offerSummary,
+        targetAudience,
+        tone,
+        siteType
+      });
+    return {
+      id: blockId,
+      type: "text",
+      visible: true,
+      layout: blueprint.layout,
+      style,
+      content: { text }
+    };
+  }
+
+  if (blueprint.type === "button") {
+    const label = blueprint.content?.label ?? ctaLabel;
+    return {
+      id: blockId,
+      type: "button",
+      visible: true,
+      layout: blueprint.layout,
+      style,
+      content: {
+        label,
+        action: blueprint.content?.action ?? "whatsapp",
+        href: blueprint.content?.href
+      }
+    };
+  }
+
+  if (blueprint.type === "image") {
+    const isHero = sectionType === "hero" || blueprint.id.includes("hero");
+    const label = isHero ? businessName : "Imagen";
+    return {
+      id: blockId,
+      type: "image",
+      visible: true,
+      layout: blueprint.layout,
+      style,
+      content: {
+        url: blueprint.content?.url ?? placeholderImage(label, isHero ? "1400x900" : "1000x700"),
+        alt: blueprint.content?.alt ?? label,
+        fit: blueprint.content?.fit
+      }
+    };
+  }
+
+  if (blueprint.type === "product") {
+    const indexMatch = blueprint.id.match(/product-(\d+)/);
+    const index = indexMatch ? Number(indexMatch[1]) - 1 : 0;
+    const productLabels = getProductBaseLabels(siteType);
+    const productDescriptions = getProductDescriptions(offerSummary, tone);
+    const name = blueprint.content?.name ?? productLabels[index] ?? productLabels[0];
+    const price =
+      typeof blueprint.content?.price === "number"
+        ? blueprint.content.price
+        : typeof blueprint.content?.price === "string"
+          ? Number(blueprint.content.price)
+          : 120000 + index * 20000;
+    return {
+      id: blockId,
+      type: "product",
+      visible: true,
+      layout: blueprint.layout,
+      style,
+      content: {
+        name,
+        description: blueprint.content?.description ?? productDescriptions[index] ?? productDescriptions[0],
+        price: Number.isFinite(price) ? price : undefined,
+        currency: blueprint.content?.currency ?? "COP",
+        image_url: blueprint.content?.image_url ?? placeholderImage(name, "640x420"),
+        sku: undefined
+      }
+    };
+  }
+
+  if (blueprint.type === "shape") {
+    return {
+      id: blockId,
+      type: "shape",
+      visible: true,
+      layout: blueprint.layout,
+      style,
+      content: {
+        shape: blueprint.content?.shape ?? "rect"
+      }
+    };
+  }
+
+  return {
+    id: blockId,
+    type: "container",
+    visible: true,
+    layout: blueprint.layout,
+    style,
+    content: {
+      title: blueprint.content?.title
+    }
+  };
+}
+
+function buildSectionFromBlueprint(input: {
+  sectionType: SiteSectionV3["type"];
+  index: number;
+  template: TemplateDefinition;
+  blueprint: TemplateLayoutBlueprint;
+  businessName: string;
+  offerSummary: string;
+  targetAudience: string;
+  tone: string;
+  ctaLabel: string;
+  siteType: "informative" | "commerce_lite";
+}): SiteSectionV3 {
+  const {
+    sectionType,
+    index,
+    template,
+    blueprint,
+    businessName,
+    offerSummary,
+    targetAudience,
+    tone,
+    ctaLabel,
+    siteType
+  } = input;
+  const sectionId = `${sectionType}-${index + 1}`;
+  const sectionBlueprint = blueprint[sectionType];
+
+  return {
+    id: sectionId,
+    type: sectionType,
+    enabled: true,
+    variant: template.variants[sectionType] as SiteSectionV3["variant"],
+    height_ratio: sectionBlueprint.height_ratio,
+    blocks: sectionBlueprint.blocks.map((block) =>
+      buildBlockFromBlueprint({
+        blueprint: block,
+        sectionId,
+        sectionType,
+        businessName,
+        offerSummary,
+        targetAudience,
+        tone,
+        ctaLabel,
+        siteType
+      })
+    )
+  };
 }
 
 export function buildSiteSpecV3FromBrief(input: {
@@ -458,20 +749,21 @@ export function buildSiteSpecV3FromBrief(input: {
   const sectionOrder = pickSectionOrder(template.section_order, input.sectionPreferences);
 
   const sections = sectionOrder.map((sectionType, index) =>
-    buildSection({
+    buildSectionFromBlueprint({
       sectionType,
       index,
+      template,
+      blueprint: template.layout_blueprint,
       businessName,
       offerSummary,
       targetAudience,
       tone,
       ctaLabel,
-      templateVariants: template.variants,
       siteType: input.siteType
     })
   );
 
-  const legacySpec: LegacySiteSpecV3 = {
+  const spec: SiteSpecV3 = {
     schema_version: "3.0",
     site_type: input.siteType,
     locale: "es-LATAM",
@@ -480,6 +772,11 @@ export function buildSiteSpecV3FromBrief(input: {
       family: template.family
     },
     theme: template.theme,
+    header: {
+      variant: buildDefaultHeaderVariant(template),
+      brand: businessName,
+      links: buildHeaderLinks(sections)
+    },
     pages: [
       {
         id: "home",
@@ -498,7 +795,7 @@ export function buildSiteSpecV3FromBrief(input: {
     }
   };
 
-  return convertLegacySpecToPercent(legacySpec);
+  return spec;
 }
 
 export function buildFallbackSiteSpecV3(
@@ -796,6 +1093,7 @@ function imageBlock(input: {
   id: string;
   url?: string;
   alt?: string;
+  fit?: "cover" | "contain";
   desktop: LegacyCanvasLayoutRect;
   mobile?: LegacyCanvasLayoutRect;
   visible?: boolean;
@@ -807,7 +1105,7 @@ function imageBlock(input: {
     visible: input.visible ?? true,
     layout: { desktop: input.desktop, mobile: input.mobile },
     style: input.style ?? { radius: 14 },
-    content: { url: input.url, alt: input.alt }
+    content: { url: input.url, alt: input.alt, fit: input.fit }
   };
 }
 

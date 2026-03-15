@@ -104,6 +104,10 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesMessage, setTemplatesMessage] = useState<string | null>(null);
   const [blockTargetSectionId, setBlockTargetSectionId] = useState<string | null>(null);
+  const [sectionAddType, setSectionAddType] = useState<SiteSectionV3["type"]>(SECTION_LIBRARY[0]);
+  const [blockAddType, setBlockAddType] = useState<CanvasBlock["type"]>(BLOCK_LIBRARY[0]);
+  const [draggingSectionId, setDraggingSectionId] = useState<string | null>(null);
+  const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
 
   const currentHash = useMemo(() => hashSpec(siteSpec), [siteSpec]);
   const isDirty = currentHash !== lastPersistedHash;
@@ -115,6 +119,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
   const activeSection = home?.sections.find((section) => section.id === activeSectionId) ?? null;
   const blockTargetSection =
     (blockTargetSectionId && home?.sections.find((section) => section.id === blockTargetSectionId)) ?? selectedSection ?? home?.sections[0] ?? null;
+  const headerVariant = siteSpec.header?.variant ?? "none";
 
   useEffect(() => {
     if (!home?.sections?.length) return;
@@ -281,6 +286,17 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
     setHomeSections((sections) => sections.map((section) => (section.id === sectionId ? updater(section) : section)));
   }
 
+  function updateHeaderVariant(nextVariant: "none" | "hamburger-side" | "hamburger-overlay" | "top-bar") {
+    setSiteSpec((prev) => ({
+      ...prev,
+      header: {
+        variant: nextVariant,
+        brand: prev.header?.brand ?? siteName,
+        links: buildHeaderLinksForEditor(prev)
+      }
+    }));
+  }
+
   function updateBlock(sectionId: string, blockId: string, updater: (block: CanvasBlock) => CanvasBlock) {
     updateSection(sectionId, (section) => ({
       ...section,
@@ -303,15 +319,36 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
     }));
   }
 
-  function addSection(type: SiteSectionV3["type"]) {
-    const index = (home?.sections.filter((item) => item.type === type).length ?? 0) + 1;
-    const section = createDefaultSection(type, index, siteSpec.site_type);
-    setHomeSections((sections) => [...sections, section]);
+function addSection(type: SiteSectionV3["type"]) {
+  const index = (home?.sections.filter((item) => item.type === type).length ?? 0) + 1;
+  const section = createDefaultSection(type, index, siteSpec.site_type);
+  setHomeSections((sections) => [...sections, section]);
+  setSelectedSectionId(section.id);
+  setBlockTargetSectionId(section.id);
+}
+
+  function reorderSections(sourceId: string, targetId: string) {
+    setHomeSections((sections) => {
+      const sourceIndex = sections.findIndex((section) => section.id === sourceId);
+      const targetIndex = sections.findIndex((section) => section.id === targetId);
+      if (sourceIndex === -1 || targetIndex === -1 || sourceIndex === targetIndex) return sections;
+      const next = [...sections];
+      const [moved] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
   }
 
   function removeSection(sectionId: string) {
     setHomeSections((sections) => sections.filter((section) => section.id !== sectionId));
     if (selected?.sectionId === sectionId) setSelected(null);
+  }
+
+  function removeLastSectionOfType(type: SiteSectionV3["type"]) {
+    const sections = home?.sections ?? [];
+    const target = [...sections].reverse().find((section) => section.type === type);
+    if (!target) return;
+    removeSection(target.id);
   }
 
   function addBlock(sectionId: string, type: CanvasBlock["type"]) {
@@ -327,6 +364,20 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
     setSelected({ sectionId, blockId: block.id });
     setSelectedSectionId(sectionId);
     setBlockTargetSectionId(sectionId);
+  }
+
+  function removeLastBlockOfType(sectionId: string, type: CanvasBlock["type"]) {
+    const section = home?.sections.find((item) => item.id === sectionId);
+    if (!section) return;
+    const target = [...section.blocks].reverse().find((block) => block.type === type);
+    if (!target) return;
+    updateSection(sectionId, (current) => ({
+      ...current,
+      blocks: current.blocks.filter((block) => block.id !== target.id)
+    }));
+    if (selected?.blockId === target.id) {
+      setSelected(null);
+    }
   }
 
   function deleteSelectedBlock() {
@@ -422,18 +473,20 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
   }
 
   async function persistSpec(specToPersist: SiteSpecV3, source: "canvas_auto_save" | "canvas_manual_checkpoint" | "manual") {
-    if (hasInvalidImageUrl(specToPersist)) {
+    const normalizedSpec = sanitizeSpecForSave(specToPersist);
+
+    if (hasInvalidImageUrl(normalizedSpec)) {
       return {
         ok: false as const,
         error: "Hay una URL de imagen inválida. Usa formato http:// o https://"
       };
     }
 
-    const hash = hashSpec(specToPersist);
+    const hash = hashSpec(normalizedSpec);
     const response = await fetch(`/api/sites/${siteId}/versions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ siteSpec: specToPersist, source })
+      body: JSON.stringify({ siteSpec: normalizedSpec, source })
     });
 
     const data = (await response.json()) as { error?: string; versionId?: string; deduped?: boolean };
@@ -727,18 +780,36 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
             {leftTab === "sections" ? (
               <div className="stack">
                 <div className="stack">
-                  <strong>Agregar sección</strong>
-                  {SECTION_LIBRARY.map((type) => (
-                    <button key={type} type="button" className="btn-secondary" onClick={() => addSection(type)}>
-                      + {type}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="stack">
                   <strong>Secciones del sitio</strong>
                   {(home?.sections ?? []).map((section) => (
-                    <div key={section.id} className="editor-section-card">
+                    <div
+                      key={section.id}
+                      className={`editor-section-card ${dragOverSectionId === section.id ? "drag-over" : ""}`}
+                      draggable
+                      onDragStart={(event) => {
+                        setDraggingSectionId(section.id);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", section.id);
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setDragOverSectionId(section.id);
+                      }}
+                      onDragLeave={() => setDragOverSectionId(null)}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        const sourceId = event.dataTransfer.getData("text/plain");
+                        if (sourceId) {
+                          reorderSections(sourceId, section.id);
+                        }
+                        setDragOverSectionId(null);
+                        setDraggingSectionId(null);
+                      }}
+                      onDragEnd={() => {
+                        setDragOverSectionId(null);
+                        setDraggingSectionId(null);
+                      }}
+                    >
                       <div className="editor-section-header">
                         <button
                           type="button"
@@ -759,6 +830,14 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
                           <button
                             type="button"
                             className="icon-btn"
+                            aria-label={`Agregar sección ${section.type}`}
+                            onClick={() => addSection(section.type)}
+                          >
+                            <PlusIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn"
                             aria-label={section.enabled ? "Ocultar sección" : "Mostrar sección"}
                             onClick={() =>
                               updateSection(section.id, (current) => ({
@@ -770,12 +849,46 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
                             {section.enabled ? <EyeIcon /> : <EyeOffIcon />}
                           </button>
                           <button type="button" className="icon-btn danger" aria-label="Eliminar sección" onClick={() => removeSection(section.id)}>
-                            <TrashIcon />
+                            <MinusIcon />
                           </button>
                         </div>
                       </div>
                     </div>
                   ))}
+                  {home ? (
+                    <div className="editor-section-add-row">
+                      <div className="section-add-header">
+                        <span className="muted">Agregar sección</span>
+                        <div className="editor-section-add-actions">
+                          <button type="button" className="icon-btn" aria-label="Agregar sección" onClick={() => addSection(sectionAddType)}>
+                            <PlusIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn danger"
+                            aria-label="Eliminar última sección del tipo seleccionado"
+                            onClick={() => removeLastSectionOfType(sectionAddType)}
+                          >
+                            <MinusIcon />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="section-type-options">
+                        {SECTION_LIBRARY.map((type) => (
+                          <label key={type} className={`section-type-option ${sectionAddType === type ? "active" : ""}`}>
+                            <input
+                              type="radio"
+                              name="section-add-type"
+                              value={type}
+                              checked={sectionAddType === type}
+                              onChange={() => setSectionAddType(type)}
+                            />
+                            <span>{type}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 {blockTargetSection ? (
@@ -783,10 +896,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
                     <strong>Agregar bloque</strong>
                     <label>
                       Sección destino
-                      <select
-                        value={blockTargetSection.id}
-                        onChange={(event) => setBlockTargetSectionId(event.target.value)}
-                      >
+                      <select value={blockTargetSection.id} onChange={(event) => setBlockTargetSectionId(event.target.value)}>
                         {(home?.sections ?? []).map((section) => (
                           <option key={section.id} value={section.id}>
                             {section.type}
@@ -794,15 +904,42 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
                         ))}
                       </select>
                     </label>
-                    <div className="editor-inline">
-                      {BLOCK_LIBRARY.map((type) => (
-                        <button key={type} type="button" className="block-add-btn" onClick={() => addBlock(blockTargetSection.id, type)}>
-                          <span className="block-add-icon">
+                    <div className="editor-section-add-row">
+                      <div className="section-add-header">
+                        <span className="muted">Tipo de bloque</span>
+                        <div className="editor-section-add-actions">
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            aria-label="Agregar bloque"
+                            onClick={() => addBlock(blockTargetSection.id, blockAddType)}
+                          >
                             <PlusIcon />
-                          </span>
-                          <span className="block-add-label">{type}</span>
-                        </button>
-                      ))}
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn danger"
+                            aria-label="Eliminar último bloque del tipo seleccionado"
+                            onClick={() => removeLastBlockOfType(blockTargetSection.id, blockAddType)}
+                          >
+                            <MinusIcon />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="section-type-options">
+                        {BLOCK_LIBRARY.map((type) => (
+                          <label key={type} className={`section-type-option ${blockAddType === type ? "active" : ""}`}>
+                            <input
+                              type="radio"
+                              name="block-add-type"
+                              value={type}
+                              checked={blockAddType === type}
+                              onChange={() => setBlockAddType(type)}
+                            />
+                            <span>{type}</span>
+                          </label>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ) : null}
@@ -980,7 +1117,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
                                 <img
                                   src={block.content.url || "https://placehold.co/800x520?text=Imagen"}
                                   alt={block.content.alt ?? "Imagen"}
-                                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                                  style={{ width: "100%", height: "100%", objectFit: block.content.fit ?? "contain" }}
                                 />
                               ) : null}
                               {block.type === "button" ? <button type="button">{block.content.label}</button> : null}
@@ -1048,7 +1185,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
 
         <aside className="editor-inspector">
           <div className="editor-inspector-header">
-          
+            <strong>Inspector</strong>
           </div>
 
           <div className="editor-tabs">
@@ -1065,9 +1202,27 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
 
           <div className="editor-inspector-content">
             {rightTab === "content" ? (
-                  selected && selectedBlock ? (
-                    <div className="stack">
-                      <strong>Bloque: {selectedBlock.type}</strong>
+              <div className="stack">
+                <div className="stack">
+                  <strong>Navegación</strong>
+                  <label>
+                    Menú
+                    <select
+                      value={headerVariant}
+                      onChange={(event) =>
+                        updateHeaderVariant(event.target.value as "none" | "hamburger-side" | "hamburger-overlay" | "top-bar")
+                      }
+                    >
+                      <option value="none">Sin menú</option>
+                      <option value="hamburger-side">Hamburguesa lateral</option>
+                      <option value="hamburger-overlay">Hamburguesa overlay</option>
+                      <option value="top-bar">Top bar</option>
+                    </select>
+                  </label>
+                </div>
+                {selected && selectedBlock ? (
+                  <div className="stack">
+                    <strong>Bloque: {selectedBlock.type}</strong>
                       {selectedBlock.type === "text" ? (
                         <label>
                           Texto
@@ -1121,6 +1276,25 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
                                 )
                               }
                             />
+                          </label>
+                          <label>
+                            Ajuste de imagen
+                            <select
+                              value={selectedBlock.content.fit ?? "contain"}
+                              onChange={(event) =>
+                                updateBlock(selected.sectionId, selected.blockId, (block) =>
+                                  block.type === "image"
+                                    ? {
+                                        ...block,
+                                        content: { ...block.content, fit: event.target.value as "cover" | "contain" }
+                                      }
+                                    : block
+                                )
+                              }
+                            >
+                              <option value="contain">Contener</option>
+                              <option value="cover">Cubrir</option>
+                            </select>
                           </label>
                           {assets.length ? (
                             <select
@@ -1314,11 +1488,12 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
                           ) : null}
                         </>
                       ) : null}
-                    </div>
-                  ) : (
-                    <p className="muted">Selecciona un bloque en el canvas para editar su contenido.</p>
-                  )
-                ) : null}
+                  </div>
+                ) : (
+                  <p className="muted">Selecciona un bloque en el canvas para editar su contenido.</p>
+                )}
+              </div>
+            ) : null}
 
                 {rightTab === "style" ? (
                   <div className="stack">
@@ -1397,13 +1572,15 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
                         Radio
                         <input
                           type="number"
+                          min={0}
+                          max={200}
                           value={selectedBlock.style.radius ?? 0}
                             onChange={(event) =>
                               updateBlock(selected.sectionId, selected.blockId, (block) => ({
                                 ...block,
                                 style: {
                                   ...block.style,
-                                  radius: Number(event.target.value)
+                                  radius: Math.min(200, Math.max(0, Number(event.target.value)))
                                 }
                               }))
                             }
@@ -1779,7 +1956,7 @@ function createDefaultBlock(
         mobile: rectFromPx({ ...mobile, h: 150 }, "mobile", sectionRatios.mobile)
       },
       style: { radius: 12 },
-      content: { url: "", alt: "" }
+      content: { url: "", alt: "", fit: "contain" }
     };
   }
 
@@ -1941,6 +2118,49 @@ function hasInvalidImageUrl(spec: SiteSpecV3) {
   return false;
 }
 
+function sanitizeSpecForSave(spec: SiteSpecV3): SiteSpecV3 {
+  const next = structuredClone(spec);
+  for (const page of next.pages) {
+    for (const section of page.sections) {
+      for (const block of section.blocks) {
+        const style = block.style ?? {};
+        if (style.radius !== undefined) {
+          style.radius = Math.min(200, Math.max(0, style.radius));
+        }
+        if (style.borderWidth !== undefined) {
+          style.borderWidth = Math.min(12, Math.max(0, style.borderWidth));
+        }
+        if (style.opacity !== undefined) {
+          style.opacity = Math.min(1, Math.max(0.1, style.opacity));
+        }
+        if (style.fontSize !== undefined) {
+          style.fontSize = Math.min(120, Math.max(10, style.fontSize));
+        }
+        if (style.fontWeight !== undefined) {
+          style.fontWeight = Math.min(900, Math.max(100, style.fontWeight));
+        }
+        block.style = style;
+      }
+    }
+  }
+  return next;
+}
+
+function buildHeaderLinksForEditor(spec: SiteSpecV3) {
+  const home = spec.pages.find((page) => page.slug === "/") ?? spec.pages[0];
+  if (!home) return [];
+  const labels: Record<SiteSectionV3["type"], string> = {
+    hero: "Inicio",
+    catalog: "Catálogo",
+    testimonials: "Testimonios",
+    contact: "Contacto"
+  };
+  return home.sections.filter((section) => section.enabled).map((section) => ({
+    label: labels[section.type] ?? section.type,
+    href: `#${section.id}`
+  }));
+}
+
 function hashSpec(spec: SiteSpecV3) {
   return JSON.stringify(spec);
 }
@@ -2037,6 +2257,14 @@ function PlusIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MinusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
