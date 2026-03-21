@@ -5,7 +5,7 @@ import { requireApiUser } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { getRequestClientKey } from "@/lib/http";
 import { refineBusinessBrief } from "@/lib/onboarding/refine-brief";
-import { onboardingInputModeSchema } from "@/lib/onboarding/types";
+import { businessBriefDraftSchema, onboardingInputModeSchema } from "@/lib/onboarding/types";
 import { recordPlatformEvent } from "@/lib/platform-events";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
@@ -14,6 +14,8 @@ const bodySchema = z.object({
   siteId: z.string().uuid(),
   rawInput: z.string().min(10).max(env.onboardingMaxInputChars),
   inputMode: onboardingInputModeSchema,
+  currentBrief: businessBriefDraftSchema.partial().optional(),
+  followUpAnswer: z.string().min(1).max(500).optional(),
   voiceEvent: z.enum(["unsupported", "permission_denied"]).nullable().optional()
 });
 
@@ -81,7 +83,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const refined = await refineBusinessBrief({ rawInput, inputMode });
+  const refined = await refineBusinessBrief({
+    rawInput,
+    inputMode,
+    currentBrief: parsed.data.currentBrief ?? null,
+    followUpAnswer: parsed.data.followUpAnswer ?? null
+  });
   const briefDraft = site.name?.trim()
     ? { ...refined.briefDraft, business_name: site.name.trim() }
     : refined.briefDraft;
@@ -96,21 +103,8 @@ export async function POST(request: NextRequest) {
         confidence: refined.confidence,
         completenessScore: refined.completenessScore,
         warningsCount: refined.warnings.length,
-        provider: refined.provider
-      }
-    });
-  } catch {
-    // best effort
-  }
-
-  try {
-    await recordPlatformEvent(admin, {
-      eventType: "template.recommended",
-      userId: user.id,
-      siteId,
-      payload: {
-        recommendedTemplateId: refined.recommendedTemplateId,
-        recommendedTemplateIds: refined.recommendedTemplateIds
+        provider: refined.provider,
+        missingFields: refined.missingFields
       }
     });
   } catch {
@@ -123,7 +117,7 @@ export async function POST(request: NextRequest) {
     completenessScore: refined.completenessScore,
     warnings: refined.warnings,
     provider: refined.provider,
-    recommendedTemplateId: refined.recommendedTemplateId,
-    recommendedTemplateIds: refined.recommendedTemplateIds
+    followUpQuestion: refined.followUpQuestion ?? null,
+    missingFields: refined.missingFields
   });
 }

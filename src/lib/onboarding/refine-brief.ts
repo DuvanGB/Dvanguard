@@ -1,200 +1,265 @@
-import { env } from "@/lib/env";
+import { requestRefineFromWorker } from "@/lib/ai/worker-client";
 import {
   businessBriefDraftSchema,
+  missingBriefFieldSchema,
   type BusinessBriefDraft,
+  type MissingBriefField,
   type OnboardingInputMode,
   type RefineResponse
 } from "@/lib/onboarding/types";
-import { getTemplateById, TEMPLATE_CATALOG } from "@/lib/templates/catalog";
-import { isTemplateId } from "@/lib/templates/selector";
 
 type RefineBriefInput = {
   rawInput: string;
   inputMode: OnboardingInputMode;
+  currentBrief?: Partial<BusinessBriefDraft> | null;
+  followUpAnswer?: string | null;
 };
 
 export async function refineBusinessBrief(input: RefineBriefInput): Promise<RefineResponse> {
   const normalizedInput = input.rawInput.trim();
-  const warnings: string[] = buildActionableWarnings(normalizedInput);
-
-  if (normalizedInput.length < 30) {
-    warnings.push("La descripción es corta; considera agregar oferta, público y estilo para mayor precisión.");
-  }
-
-  if (env.onboardingRefineProvider === "heuristic") {
-    const briefDraft = buildHeuristicBrief(normalizedInput);
-    return {
-      briefDraft,
-      confidence: 0.55,
-      completenessScore: computeCompletenessScore(briefDraft, normalizedInput),
-      warnings,
-      provider: "heuristic",
-      recommendedTemplateIds: [],
-      recommendedTemplateId: null
-    };
-  }
-
-  try {
-    const llmResponse = await callRefineLLM(normalizedInput, input.inputMode);
-    const parsed = safeParseJson(llmResponse);
-    const recommendedTemplateId = extractRecommendedTemplateId(parsed);
-    const validated = businessBriefDraftSchema.safeParse(parsed);
-
-    if (validated.success) {
-      const normalizedRecommendation =
-        recommendedTemplateId && getTemplateById(recommendedTemplateId)?.site_type === validated.data.business_type
-          ? recommendedTemplateId
-          : null;
-      return {
-        briefDraft: validated.data,
-        confidence: 0.8,
-        completenessScore: computeCompletenessScore(validated.data, normalizedInput),
-        warnings,
-        provider: "llm",
-        recommendedTemplateIds: normalizedRecommendation ? [normalizedRecommendation] : [],
-        recommendedTemplateId: normalizedRecommendation
-      };
-    }
-
-    warnings.push("Se aplicó refinamiento heurístico por respuesta IA inválida.");
-  } catch (error) {
-    warnings.push(`Se aplicó refinamiento heurístico por timeout/error de IA (${humanizeLlmError(error)}).`);
-  }
-
-  const briefDraft = buildHeuristicBrief(normalizedInput);
-  return {
-    briefDraft,
-    confidence: 0.55,
-    completenessScore: computeCompletenessScore(briefDraft, normalizedInput),
-    warnings,
-    provider: "heuristic",
-    recommendedTemplateIds: [],
-    recommendedTemplateId: null
-  };
-}
-
-async function callRefineLLM(rawInput: string, inputMode: OnboardingInputMode) {
-  if (env.aiProvider === "mock" || !env.aiBaseUrl) {
-    throw new Error("LLM refine unavailable");
-  }
-
-  const response = await fetch(env.aiBaseUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: env.aiApiKey ? `Bearer ${env.aiApiKey}` : ""
-    },
-    body: JSON.stringify({
-      model: env.aiModel,
-      temperature: 0.1,
-      messages: [
-        {
-          role: "system",
-          content:
-            `Devuelve SOLO JSON válido para BusinessBriefDraft y además un campo \"recommended_template_id\".\n` +
-            `Si no puedes recomendar, usa null.\n` +
-            `Plantillas disponibles (id | tipo | tags | descripcion):\n` +
-            `${buildTemplateCatalogContext()}\n` +
-            "No incluyas markdown, ni texto adicional."
-        },
-        {
-          role: "user",
-          content: `Modo de entrada: ${inputMode}. Descripción del negocio: ${rawInput}`
-        }
-      ]
-    })
+  const workerAttempt = await requestRefineFromWorker({
+    rawInput: normalizedInput,
+    inputMode: input.inputMode,
+    currentBrief: input.currentBrief ?? null,
+    followUpAnswer: input.followUpAnswer ?? null
   });
 
-  if (!response.ok) {
-    const responseText = await response.text().catch(() => "");
-    throw new Error(`LLM request failed: ${response.status}${responseText ? ` | ${responseText.slice(0, 220)}` : ""}`);
+  if (workerAttempt.ok) {
+    const normalized = normalizeWorkerRefineResponse(workerAttempt.data, normalizedInput, input.currentBrief ?? null);
+    if (normalized) {
+      return normalized;
+    }
   }
 
-  const data = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-    output_text?: string;
+  return buildFallbackRefineResponse({
+    rawInput: normalizedInput,
+    currentBrief: input.currentBrief ?? null,
+    followUpAnswer: input.followUpAnswer ?? null
+  });
+}
+
+function normalizeWorkerRefineResponse(
+  payload: unknown,
+  rawInput: string,
+  currentBrief?: Partial<BusinessBriefDraft> | null
+): RefineResponse | null {
+  if (!payload || typeof payload !== "object") return null;
+
+  const candidate = payload as {
+    briefDraft?: unknown;
+    confidence?: unknown;
+    completenessScore?: unknown;
+    warnings?: unknown;
+    provider?: unknown;
+    followUpQuestion?: unknown;
+    missingFields?: unknown;
   };
 
-  const content = data.choices?.[0]?.message?.content ?? data.output_text;
-  if (!content) {
-    throw new Error("LLM returned empty content");
-  }
+  const parsedBrief = businessBriefDraftSchema.safeParse(candidate.briefDraft);
+  const mergedDraft = mergeCurrentBrief(
+    parsedBrief.success ? parsedBrief.data : null,
+    currentBrief,
+    rawInput
+  );
+  const parsed = businessBriefDraftSchema.safeParse(mergedDraft);
+  if (!parsed.success) return null;
 
-  return content;
+  const missingFields = normalizeMissingFields(candidate.missingFields, parsed.data);
+  return {
+    briefDraft: parsed.data,
+    confidence: typeof candidate.confidence === "number" ? clamp01(candidate.confidence) : 0.82,
+    completenessScore:
+      typeof candidate.completenessScore === "number"
+        ? clampScore(candidate.completenessScore)
+        : computeCompletenessScore(parsed.data, rawInput),
+    warnings: Array.isArray(candidate.warnings) ? candidate.warnings.filter((item): item is string => typeof item === "string") : [],
+    provider: candidate.provider === "heuristic" ? "heuristic" : "llm",
+    followUpQuestion: typeof candidate.followUpQuestion === "string" && candidate.followUpQuestion.trim() ? candidate.followUpQuestion.trim() : buildFollowUpQuestion(missingFields),
+    missingFields
+  };
 }
 
-function humanizeLlmError(error: unknown) {
-  const rawMessage = error instanceof Error ? error.message : String(error ?? "");
-
-  if (rawMessage.includes("401")) return "401 no autorizado (API key inválida o sin permisos)";
-  if (rawMessage.includes("429")) return "429 límite/cuota excedida";
-  if (rawMessage.includes("404")) return "404 endpoint/modelo no disponible";
-  if (rawMessage.includes("400")) return "400 solicitud inválida (modelo o payload)";
-  if (rawMessage.includes("timeout")) return "timeout";
-  if (rawMessage.includes("mock")) return "provider en modo mock";
-  if (rawMessage.includes("LLM refine unavailable")) return "LLM no disponible por configuración";
-
-  return "error de conexión o proveedor";
-}
-
-function safeParseJson(input: string): unknown {
-  try {
-    return JSON.parse(input);
-  } catch {
-    const cleaned = input.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
-    return JSON.parse(cleaned);
-  }
-}
-
-function extractRecommendedTemplateId(parsed: unknown) {
-  if (!parsed || typeof parsed !== "object") return null;
-  const candidate = (parsed as { recommended_template_id?: unknown }).recommended_template_id;
-  if (typeof candidate !== "string") return null;
-  if (!isTemplateId(candidate)) return null;
-  return candidate;
-}
-
-function buildTemplateCatalogContext() {
-  return TEMPLATE_CATALOG.map((template) => {
-    const tags = template.tags?.length ? template.tags.join(", ") : "Sin tags";
-    return `${template.id} | ${template.site_type} | ${tags} | ${template.description}`;
-  }).join("\n");
-}
-
-function buildHeuristicBrief(rawInput: string): BusinessBriefDraft {
-  const lower = rawInput.toLowerCase();
-
-  const businessType: BusinessBriefDraft["business_type"] =
-    lower.includes("tienda") || lower.includes("catalog") || lower.includes("catálogo") || lower.includes("vender")
-      ? "commerce_lite"
-      : "informative";
-
-  const stylePreset: BusinessBriefDraft["style_preset"] = lower.includes("moderno")
-    ? "ocean"
-    : lower.includes("premium") || lower.includes("elegante")
-      ? "sunset"
-      : "mono";
-
-  const sectionPreferences =
-    businessType === "commerce_lite"
-      ? (["hero", "catalog", "testimonials", "contact"] as const)
-      : (["hero", "testimonials", "contact"] as const);
-
-  const businessName = inferBusinessName(rawInput);
-  const offerSummary = rawInput.trim().length >= 12 ? rawInput.slice(0, 600) : `${rawInput.trim()} Servicios para clientes locales.`;
+function buildFallbackRefineResponse(input: {
+  rawInput: string;
+  currentBrief?: Partial<BusinessBriefDraft> | null;
+  followUpAnswer?: string | null;
+}): RefineResponse {
+  const briefDraft = mergeCurrentBrief(
+    buildHeuristicBrief(input.rawInput, input.currentBrief ?? null, input.followUpAnswer ?? null),
+    input.currentBrief ?? null,
+    input.rawInput
+  );
+  const warnings = buildActionableWarnings(input.rawInput, briefDraft);
+  const missingFields = collectMissingFields(briefDraft);
 
   return {
-    business_name: businessName,
-    business_type: businessType,
-    offer_summary: offerSummary,
-    target_audience: inferAudience(lower),
-    tone: inferTone(lower),
-    primary_cta: "WhatsApp",
-    whatsapp_phone: undefined,
-    whatsapp_message: undefined,
-    section_preferences: [...sectionPreferences],
-    style_preset: stylePreset
+    briefDraft,
+    confidence: 0.6,
+    completenessScore: computeCompletenessScore(briefDraft, input.rawInput),
+    warnings,
+    provider: "heuristic",
+    followUpQuestion: buildFollowUpQuestion(missingFields),
+    missingFields
   };
+}
+
+function buildHeuristicBrief(
+  rawInput: string,
+  currentBrief?: Partial<BusinessBriefDraft> | null,
+  followUpAnswer?: string | null
+): BusinessBriefDraft {
+  const mergedInput = [rawInput, followUpAnswer ?? ""].filter(Boolean).join(" ").trim();
+  const lower = mergedInput.toLowerCase();
+  const baseFallback: BusinessBriefDraft = {
+    business_name: inferBusinessName(rawInput),
+    business_type: /(tienda|catalog|catálogo|vender|venta|producto|stock|carrito)/i.test(rawInput) ? "commerce_lite" : "informative",
+    offer_summary: rawInput.trim().length >= 12 ? rawInput.trim().slice(0, 600) : `${inferBusinessName(rawInput)} ofrece una propuesta clara y útil.`,
+    target_audience: inferAudience(rawInput.toLowerCase()),
+    tone: inferTone(rawInput.toLowerCase()),
+    primary_cta: "WhatsApp",
+    whatsapp_phone: extractWhatsappPhone(rawInput),
+    whatsapp_message: undefined
+  };
+  const beforeAnswer = mergeCurrentBrief(baseFallback, currentBrief, rawInput);
+  const missingBefore = collectMissingFields(beforeAnswer);
+  const answer = followUpAnswer?.trim() ?? "";
+
+  const businessType =
+    currentBrief?.business_type ??
+    (/(tienda|catalog|catálogo|vender|venta|producto|stock|carrito)/i.test(mergedInput) ? "commerce_lite" : "informative");
+
+  const base: BusinessBriefDraft = {
+    business_name: currentBrief?.business_name?.trim() || inferBusinessName(rawInput),
+    business_type: businessType,
+    offer_summary:
+      currentBrief?.offer_summary?.trim() ||
+      (rawInput.trim().length >= 12 ? rawInput.trim().slice(0, 600) : `${inferBusinessName(rawInput)} ofrece una propuesta clara y útil.`),
+    target_audience: currentBrief?.target_audience?.trim() || inferAudience(lower),
+    tone: currentBrief?.tone?.trim() || inferTone(lower),
+    primary_cta: currentBrief?.primary_cta?.trim() || "WhatsApp",
+    whatsapp_phone: currentBrief?.whatsapp_phone,
+    whatsapp_message: currentBrief?.whatsapp_message?.trim() || undefined
+  };
+
+  if (answer) {
+    const firstMissing = missingBefore[0];
+    if (firstMissing === "offer_summary" && !currentBrief?.offer_summary?.trim()) base.offer_summary = answer.slice(0, 600);
+    if (firstMissing === "target_audience" && !currentBrief?.target_audience?.trim()) base.target_audience = answer.slice(0, 180);
+    if (firstMissing === "tone" && !currentBrief?.tone?.trim()) base.tone = answer.slice(0, 80);
+    if (firstMissing === "business_type" && !currentBrief?.business_type) {
+      base.business_type = /tienda|catalog|catálogo|producto|vender|venta|stock|carrito/i.test(answer) ? "commerce_lite" : "informative";
+    }
+    if (firstMissing === "whatsapp_phone" && !currentBrief?.whatsapp_phone) {
+      const extracted = extractWhatsappPhone(answer);
+      if (extracted) base.whatsapp_phone = extracted;
+    }
+  }
+
+  const extractedPhone = extractWhatsappPhone(mergedInput);
+  if (extractedPhone) {
+    base.whatsapp_phone = extractedPhone;
+  }
+
+  if (/whatsapp|escr[ií]benos|chatea|cont[aá]ctanos/i.test(mergedInput) && !base.primary_cta) {
+    base.primary_cta = "WhatsApp";
+  }
+
+  return base;
+}
+
+function mergeCurrentBrief(
+  nextBrief: BusinessBriefDraft | null,
+  currentBrief: Partial<BusinessBriefDraft> | null | undefined,
+  rawInput: string
+): BusinessBriefDraft {
+  const fallback = nextBrief ?? {
+    business_name: inferBusinessName(rawInput),
+    business_type: /(tienda|catalog|catálogo|vender|venta|producto|stock|carrito)/i.test(rawInput) ? "commerce_lite" : "informative",
+    offer_summary: rawInput.trim().length >= 12 ? rawInput.trim().slice(0, 600) : `${inferBusinessName(rawInput)} ofrece una propuesta clara y útil.`,
+    target_audience: inferAudience(rawInput.toLowerCase()),
+    tone: inferTone(rawInput.toLowerCase()),
+    primary_cta: "WhatsApp",
+    whatsapp_phone: extractWhatsappPhone(rawInput),
+    whatsapp_message: undefined
+  };
+  return {
+    business_name: nextBrief?.business_name?.trim() || currentBrief?.business_name?.trim() || fallback.business_name,
+    business_type: nextBrief?.business_type || currentBrief?.business_type || fallback.business_type,
+    offer_summary: nextBrief?.offer_summary?.trim() || currentBrief?.offer_summary?.trim() || fallback.offer_summary,
+    target_audience: nextBrief?.target_audience?.trim() || currentBrief?.target_audience?.trim() || fallback.target_audience,
+    tone: nextBrief?.tone?.trim() || currentBrief?.tone?.trim() || fallback.tone,
+    primary_cta: nextBrief?.primary_cta?.trim() || currentBrief?.primary_cta?.trim() || fallback.primary_cta,
+    whatsapp_phone: nextBrief?.whatsapp_phone || currentBrief?.whatsapp_phone || fallback.whatsapp_phone,
+    whatsapp_message: nextBrief?.whatsapp_message?.trim() || currentBrief?.whatsapp_message?.trim() || fallback.whatsapp_message
+  };
+}
+
+function normalizeMissingFields(input: unknown, brief: BusinessBriefDraft): MissingBriefField[] {
+  if (Array.isArray(input)) {
+    const parsed = input
+      .map((item) => missingBriefFieldSchema.safeParse(item))
+      .filter((item): item is { success: true; data: MissingBriefField } => item.success)
+      .map((item) => item.data);
+    if (parsed.length) return parsed;
+  }
+
+  return collectMissingFields(brief);
+}
+
+function collectMissingFields(brief: BusinessBriefDraft): MissingBriefField[] {
+  const missing: MissingBriefField[] = [];
+  if (!brief.offer_summary.trim() || brief.offer_summary.trim().length < 24) missing.push("offer_summary");
+  if (!brief.target_audience.trim() || brief.target_audience.trim().length < 8) missing.push("target_audience");
+  if (!brief.tone.trim() || brief.tone.trim().length < 4) missing.push("tone");
+  if (!brief.business_type) missing.push("business_type");
+  return missing;
+}
+
+function buildActionableWarnings(rawInput: string, brief: BusinessBriefDraft) {
+  const lower = rawInput.toLowerCase();
+  const warnings: string[] = [];
+
+  if (brief.offer_summary.trim().length < 30) {
+    warnings.push("Aún falta explicar mejor qué vendes o qué ofreces exactamente.");
+  }
+  if (brief.target_audience.trim().length < 10) {
+    warnings.push("Falta dejar más claro para quién está pensada la página.");
+  }
+  if (!containsValueProposition(lower) && brief.offer_summary.trim().length < 80) {
+    warnings.push("Conviene mencionar por qué te deberían elegir frente a otras opciones.");
+  }
+  if (!containsLocationInfo(lower)) {
+    warnings.push("Si tu negocio depende de ubicación, añade ciudad o zona para personalizar mejor la propuesta.");
+  }
+
+  return warnings;
+}
+
+function computeCompletenessScore(brief: BusinessBriefDraft, rawInput: string) {
+  let score = 0;
+  const lower = rawInput.toLowerCase();
+
+  if (rawInput.length >= 40) score += 15;
+  if (brief.offer_summary.trim().length >= 40) score += 25;
+  if (brief.target_audience.trim().length >= 8) score += 20;
+  if (brief.tone.trim().length >= 4) score += 15;
+  if (containsLocationInfo(lower)) score += 10;
+  if (containsValueProposition(lower) || brief.offer_summary.trim().length >= 90) score += 15;
+
+  return clampScore(score);
+}
+
+function buildFollowUpQuestion(missingFields: MissingBriefField[]) {
+  const first = missingFields[0];
+  if (!first) return null;
+
+  return {
+    offer_summary: "Cuéntame en una frase clara qué ofreces y qué hace diferente tu negocio.",
+    target_audience: "¿Para quién está pensado tu producto o servicio?",
+    tone: "¿Qué estilo quieres transmitir en la página: más formal, moderno, cercano, premium o directo?",
+    whatsapp_phone: "Si quieres activar contacto por WhatsApp, compárteme el número con indicativo de país.",
+    business_type: "¿Tu página será más de catálogo/venta o más informativa/presentación del negocio?"
+  }[first];
 }
 
 function inferBusinessName(rawInput: string) {
@@ -222,65 +287,23 @@ function inferTone(lower: string) {
   return "Cercano y claro";
 }
 
-function buildActionableWarnings(rawInput: string) {
-  const lower = rawInput.toLowerCase();
-  const warnings: string[] = [];
-
-  if (!containsPriceInfo(lower)) {
-    warnings.push("Falta rango de precios. Añádelo para mejorar propuestas de catálogo y CTA.");
-  }
-
-  if (!containsLocationInfo(lower)) {
-    warnings.push("Falta ubicación/ciudad. Añádela para personalizar mensajes de confianza local.");
-  }
-
-  if (!containsAudienceInfo(lower)) {
-    warnings.push("Falta público objetivo explícito. Añade para ajustar tono y secciones.");
-  }
-
-  if (!containsValueProposition(lower)) {
-    warnings.push("Falta beneficio principal diferencial. Explica por qué te deberían elegir.");
-  }
-
-  return warnings;
-}
-
-function computeCompletenessScore(
-  brief: {
-    offer_summary: string;
-    target_audience: string;
-    tone: string;
-    section_preferences: string[];
-  },
-  rawInput: string
-) {
-  let score = 0;
-  const lower = rawInput.toLowerCase();
-
-  if (rawInput.length >= 40) score += 20;
-  if (brief.offer_summary.trim().length >= 40) score += 20;
-  if (brief.target_audience.trim().length >= 8) score += 15;
-  if (brief.tone.trim().length >= 4) score += 10;
-  if (brief.section_preferences.length >= 3) score += 10;
-  if (containsPriceInfo(lower)) score += 10;
-  if (containsLocationInfo(lower)) score += 10;
-  if (containsValueProposition(lower)) score += 5;
-
-  return Math.max(0, Math.min(100, score));
-}
-
-function containsPriceInfo(lower: string) {
-  return /\$\s?\d+/.test(lower) || /\d+\s?(usd|cop|mxn|soles|pesos|euros)/.test(lower) || lower.includes("precio");
-}
-
 function containsLocationInfo(lower: string) {
   return lower.includes("bogotá") || lower.includes("medellín") || lower.includes("cali") || lower.includes("cdmx") || lower.includes("ciudad") || lower.includes("barrio") || lower.includes("colombia") || lower.includes("méxico") || lower.includes("perú") || lower.includes("chile");
 }
 
-function containsAudienceInfo(lower: string) {
-  return lower.includes("para ") || lower.includes("clientes") || lower.includes("emprendedores") || lower.includes("familias") || lower.includes("jóvenes") || lower.includes("mujeres") || lower.includes("hombres");
+function containsValueProposition(lower: string) {
+  return lower.includes("rápido") || lower.includes("garant") || lower.includes("calidad") || lower.includes("a domicilio") || lower.includes("personalizado") || lower.includes("24/7") || lower.includes("únic") || lower.includes("especial");
 }
 
-function containsValueProposition(lower: string) {
-  return lower.includes("rápido") || lower.includes("garant") || lower.includes("calidad") || lower.includes("a domicilio") || lower.includes("personalizado") || lower.includes("24/7");
+function extractWhatsappPhone(input: string) {
+  const match = input.match(/\+\d{8,15}/);
+  return match?.[0];
+}
+
+function clampScore(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
 }

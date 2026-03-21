@@ -4,7 +4,6 @@ import type { BusinessBriefDraft } from "@/lib/onboarding/types";
 
 export function recommendTemplateIds(input: {
   businessType: "informative" | "commerce_lite";
-  stylePreset?: "ocean" | "sunset" | "mono";
   tone?: string;
 }): TemplateId[] {
   const templates = getTemplatesBySiteType(input.businessType);
@@ -21,14 +20,10 @@ export function recommendTemplateIds(input: {
 
 function scoreTemplate(
   template: TemplateDefinition,
-  input: { businessType: "informative" | "commerce_lite"; stylePreset?: "ocean" | "sunset" | "mono"; tone?: string }
+  input: { businessType: "informative" | "commerce_lite"; tone?: string }
 ) {
   let score = 0;
   if (template.site_type === input.businessType) score += 5;
-
-  if (input.stylePreset === "mono" && (template.family === "clean" || template.family === "dark")) score += 3;
-  if (input.stylePreset === "ocean" && (template.family === "shop" || template.family === "social")) score += 3;
-  if (input.stylePreset === "sunset" && (template.family === "bold" || template.family === "trust")) score += 3;
 
   const tone = (input.tone ?? "").toLowerCase();
   if (tone.includes("premium") && (template.family === "dark" || template.family === "bold")) score += 2;
@@ -52,7 +47,6 @@ export function pickTemplateOrFallback(input: {
 
   const recommended = recommendTemplateIds({
     businessType: input.siteType,
-    stylePreset: input.brief?.style_preset,
     tone: input.brief?.tone
   });
 

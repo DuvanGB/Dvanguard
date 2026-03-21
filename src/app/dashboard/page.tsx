@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ProRequestButton } from "@/components/account/pro-request-button";
 import { PublishSiteButton } from "@/components/dashboard/publish-site-button";
 import { CreateSiteForm } from "@/components/forms/create-site-form";
+import { ModuleTour } from "@/components/guided/module-tour";
 import { requireUser } from "@/lib/auth";
 import { getUsageSnapshot } from "@/lib/billing/usage";
 import { getOwnerSiteAnalytics } from "@/lib/data/dashboard/analytics";
@@ -49,6 +50,26 @@ export default async function DashboardPage() {
               <Link href="/onboarding" className="btn-primary">
                 Regenerar con IA
               </Link>
+              <ModuleTour
+                module="dashboard"
+                title="Guía rápida del dashboard"
+                description="Aquí controlas tus sitios, inicias nuevos proyectos y revisas el rendimiento de tu negocio."
+                compact
+                steps={[
+                  {
+                    title: "Crea o retoma un sitio",
+                    body: "Desde este panel puedes crear un sitio nuevo o volver a editar uno ya existente."
+                  },
+                  {
+                    title: "Usa IA para arrancar más rápido",
+                    body: "Regenerar con IA te lleva al onboarding para capturar y refinar la información del negocio."
+                  },
+                  {
+                    title: "Edita, publica y abre tu sitio",
+                    body: "Cada tarjeta te permite editar el sitio, publicarlo y abrir la versión pública cuando esté lista."
+                  }
+                ]}
+              />
             </div>
           </div>
           <div className="dashboard-email">{user.email}</div>

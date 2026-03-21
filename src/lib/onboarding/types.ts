@@ -1,13 +1,16 @@
 import { z } from "zod";
 
-import { templateIds } from "@/lib/templates/types";
-
 export const onboardingInputModeSchema = z.enum(["text", "voice"]);
 export type OnboardingInputMode = z.infer<typeof onboardingInputModeSchema>;
 
 export const businessTypeSchema = z.enum(["informative", "commerce_lite"]);
-export const stylePresetSchema = z.enum(["ocean", "sunset", "mono"]);
-export const sectionPreferenceSchema = z.enum(["hero", "catalog", "testimonials", "contact"]);
+export const missingBriefFieldSchema = z.enum([
+  "offer_summary",
+  "target_audience",
+  "tone",
+  "whatsapp_phone",
+  "business_type"
+]);
 
 const optionalE164Phone = z.preprocess(
   (value) => (typeof value === "string" && value.trim().length === 0 ? undefined : value),
@@ -22,12 +25,11 @@ export const businessBriefDraftSchema = z.object({
   tone: z.string().min(2).max(80),
   primary_cta: z.string().min(2).max(80).default("WhatsApp"),
   whatsapp_phone: optionalE164Phone,
-  whatsapp_message: z.string().max(500).optional(),
-  section_preferences: z.array(sectionPreferenceSchema).min(1).max(4),
-  style_preset: stylePresetSchema
+  whatsapp_message: z.string().max(500).optional()
 });
 
 export type BusinessBriefDraft = z.infer<typeof businessBriefDraftSchema>;
+export type MissingBriefField = z.infer<typeof missingBriefFieldSchema>;
 
 export const refineResponseSchema = z.object({
   briefDraft: businessBriefDraftSchema,
@@ -35,8 +37,8 @@ export const refineResponseSchema = z.object({
   completenessScore: z.number().min(0).max(100),
   warnings: z.array(z.string()),
   provider: z.enum(["llm", "heuristic"]),
-  recommendedTemplateIds: z.array(z.enum(templateIds)),
-  recommendedTemplateId: z.enum(templateIds).nullable()
+  followUpQuestion: z.string().max(240).nullable().optional(),
+  missingFields: z.array(missingBriefFieldSchema).default([])
 });
 
 export type RefineResponse = z.infer<typeof refineResponseSchema>;

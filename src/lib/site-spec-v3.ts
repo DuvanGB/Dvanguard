@@ -748,7 +748,6 @@ export function buildSiteSpecV3FromBrief(input: {
   ctaLabel?: string;
   whatsappPhone?: string;
   whatsappMessage?: string;
-  sectionPreferences?: BusinessBriefDraft["section_preferences"];
 }): SiteSpecV3 {
   const businessName = normalizeBusinessName(input.businessName);
   const templateId = pickTemplateOrFallback({
@@ -767,7 +766,7 @@ export function buildSiteSpecV3FromBrief(input: {
   const ctaLabel = input.ctaLabel?.trim() || "Escribir por WhatsApp";
   const whatsappPhone = normalizeWhatsappPhone(input.whatsappPhone);
   const whatsappMessage = input.whatsappMessage?.trim() || undefined;
-  const sectionOrder = pickSectionOrder(template.section_order, input.sectionPreferences);
+  const sectionOrder = pickSectionOrder(template.section_order, input.siteType);
 
   const sections = sectionOrder.map((sectionType, index) =>
     buildSectionFromBlueprint({
@@ -1197,17 +1196,17 @@ function rect(x: number, y: number, w: number, h: number, z: number): LegacyCanv
 
 function pickSectionOrder(
   templateOrder: Array<"hero" | "catalog" | "testimonials" | "contact">,
-  preferences?: BusinessBriefDraft["section_preferences"]
+  siteType: "informative" | "commerce_lite"
 ) {
-  if (!preferences?.length) return templateOrder;
-
-  const preferredSet = new Set(preferences);
-  const filtered = templateOrder.filter((section) => preferredSet.has(section));
-
-  if (!filtered.includes("hero")) filtered.unshift("hero");
-  if (!filtered.includes("contact")) filtered.push("contact");
-
-  return filtered;
+  const allowed = new Set(
+    siteType === "commerce_lite"
+      ? (["hero", "catalog", "testimonials", "contact"] as const)
+      : (["hero", "testimonials", "contact"] as const)
+  );
+  const filtered = templateOrder.filter((section) => allowed.has(section));
+  const fallback: Array<"hero" | "catalog" | "testimonials" | "contact"> =
+    siteType === "commerce_lite" ? ["hero", "catalog", "testimonials", "contact"] : ["hero", "testimonials", "contact"];
+  return filtered.length ? filtered : fallback;
 }
 
 function normalizeBusinessName(value: string) {

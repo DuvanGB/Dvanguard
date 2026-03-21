@@ -192,8 +192,7 @@ export function buildTemplateAlternativeSpec(input: {
     tone: input.briefDraft.tone,
     ctaLabel: input.briefDraft.primary_cta,
     whatsappPhone: input.briefDraft.whatsapp_phone,
-    whatsappMessage: input.briefDraft.whatsapp_message,
-    sectionPreferences: input.briefDraft.section_preferences
+    whatsappMessage: input.briefDraft.whatsapp_message
   });
 }
 
@@ -313,7 +312,7 @@ export function buildHeuristicLayoutProposal(input: {
     [brief?.business_name ?? "", brief?.offer_summary ?? "", brief?.tone ?? "", brief?.target_audience ?? "", prompt].join("|")
   );
   const siteType = brief?.business_type ?? inferSiteType(prompt);
-  const stylePreset = brief?.style_preset ?? inferStylePreset(prompt);
+  const stylePreset = inferStylePreset([brief?.tone ?? "", brief?.offer_summary ?? "", prompt].join(" "));
   const premium = /premium|lujo|exclusiv|editorial|atelier|streetwear/i.test(prompt);
   const fashion = /moda|ropa|zapato|sneaker|boutique|fashion/i.test(prompt);
   const sport = /deport|fitness|gym|gimnas|running/i.test(prompt);
@@ -322,9 +321,7 @@ export function buildHeuristicLayoutProposal(input: {
   const sectionOrder =
     siteType === "commerce_lite"
       ? (["hero", "catalog", "testimonials", "contact"] as SiteSectionV3["type"][])
-      : (brief?.section_preferences?.length
-          ? normalizeSectionOrder(brief.section_preferences)
-          : (["hero", "catalog", "testimonials", "contact"] as SiteSectionV3["type"][]));
+      : (["hero", "testimonials", "contact"] as SiteSectionV3["type"][]);
   const normalizedSectionOrder = enforceDefaultSectionOrder(sectionOrder);
 
   const themeDirection = themeFromStyle(stylePreset, { premium, tech, health, fashion, sport });
@@ -434,12 +431,11 @@ function buildNeutralProposalSeed(input: {
   const businessName = brief?.business_name?.trim() || input.prompt.slice(0, 80) || "Tu negocio";
   const offerSummary = brief?.offer_summary?.trim() || "Presentación principal del negocio.";
   const targetAudience = brief?.target_audience?.trim() || "Clientes potenciales en redes y WhatsApp";
-  const theme = themeFromStyle(brief?.style_preset ?? inferStylePreset(input.prompt), {});
-  const sectionOrder = brief?.section_preferences?.length
-    ? normalizeSectionOrder(brief.section_preferences)
-    : siteType === "commerce_lite"
+  const theme = themeFromStyle(inferStylePreset([brief?.tone ?? "", offerSummary, input.prompt].join(" ")), {});
+  const sectionOrder =
+    siteType === "commerce_lite"
       ? (["hero", "catalog", "testimonials", "contact"] as SiteSectionV3["type"][])
-      : (["hero", "catalog", "testimonials", "contact"] as SiteSectionV3["type"][]);
+      : (["hero", "testimonials", "contact"] as SiteSectionV3["type"][]);
   const normalizedSectionOrder = enforceDefaultSectionOrder(sectionOrder);
 
   const sections = normalizedSectionOrder.map((type, index) => buildSeedSection({
@@ -1002,7 +998,7 @@ function contactCardCta(theme: Partial<SiteSpecV3["theme"]>): SectionComposition
 }
 
 function themeFromStyle(
-  stylePreset: BusinessBriefDraft["style_preset"],
+  stylePreset: "ocean" | "sunset" | "mono",
   flags: { premium?: boolean; tech?: boolean; health?: boolean; fashion?: boolean; sport?: boolean }
 ): SiteSpecV3["theme"] {
   if (stylePreset === "mono") {
@@ -1221,7 +1217,7 @@ function inferSiteType(prompt: string): SiteSpecV3["site_type"] {
   return /tienda|catalog|catálogo|producto|vender|venta|stock/i.test(prompt) ? "commerce_lite" : "informative";
 }
 
-function inferStylePreset(prompt: string): BusinessBriefDraft["style_preset"] {
+function inferStylePreset(prompt: string): "ocean" | "sunset" | "mono" {
   if (/premium|elegante|lujo/i.test(prompt)) return "sunset";
   if (/tech|digital|moderno|software|app|deport|fitness/i.test(prompt)) return "ocean";
   if (/salud|clinica|wellness|spa|medic|moda|ropa|zapato|sneaker/i.test(prompt)) return "sunset";
@@ -1231,12 +1227,6 @@ function inferStylePreset(prompt: string): BusinessBriefDraft["style_preset"] {
 function buildHeroSubtitle(brief?: BusinessBriefDraft) {
   if (!brief) return "Propuesta clara, visual y lista para convertir.";
   return `${brief.offer_summary} Para ${brief.target_audience.toLowerCase()}.`.slice(0, 220);
-}
-
-function normalizeSectionOrder(preferences: BusinessBriefDraft["section_preferences"]) {
-  const ordered = preferences.filter((value, index, list) => list.indexOf(value) === index);
-  if (!ordered.includes("hero")) ordered.unshift("hero");
-  return enforceDefaultSectionOrder(ordered);
 }
 
 function enforceDefaultSectionOrder(order: SiteSectionV3["type"][]) {

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
+import { ModuleTour } from "@/components/guided/module-tour";
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
 import { CANVAS_BASE_WIDTH, fontFamilies, normalizeSiteSpecV3 } from "@/lib/site-spec-v3";
 import type { TemplateId } from "@/lib/templates/types";
@@ -852,6 +853,26 @@ function addSection(type: SiteSectionV3["type"]) {
           </div>
         </div>
         <div className="editor-topbar-actions">
+          <ModuleTour
+            module="editor"
+            title="Cómo editar tu sitio"
+            description="Este editor te permite ajustar el layout, el contenido y la publicación de tu página."
+            compact
+            steps={[
+              {
+                title: "Selecciona y mueve bloques",
+                body: "Haz clic sobre cualquier bloque para editarlo y arrástralo dentro de la sección para reubicarlo."
+              },
+              {
+                title: "Usa el panel izquierdo y el inspector",
+                body: "Desde secciones y capas agregas contenido; desde el inspector cambias texto, estilo, posición y navegación."
+              },
+              {
+                title: "Guarda, revisa y publica",
+                body: "El editor hace autosave, pero también puedes guardar checkpoints y publicar cuando la web ya esté lista."
+              }
+            ]}
+          />
           <Link href="/dashboard" className="btn-secondary">
             Dashboard
           </Link>

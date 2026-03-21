@@ -63,8 +63,7 @@ function buildSeedSpec(input: { prompt: string; templateId?: TemplateId; briefDr
       tone: briefDraft.tone,
       ctaLabel: briefDraft.primary_cta,
       whatsappPhone: briefDraft.whatsapp_phone,
-      whatsappMessage: briefDraft.whatsapp_message,
-      sectionPreferences: briefDraft.section_preferences
+      whatsappMessage: briefDraft.whatsapp_message
     });
   }
 

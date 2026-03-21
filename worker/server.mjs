@@ -16,7 +16,8 @@ createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/refine") {
       if (!isAuthorized(req)) return sendJson(res, 401, { error: "Unauthorized" });
       const body = await readJson(req);
-      return sendJson(res, 200, { briefDraft: buildHeuristicBrief(body.rawInput || "") });
+      const refined = await requestRefineFromModel(body).catch(() => buildHeuristicRefine(body));
+      return sendJson(res, 200, refined);
     }
 
     if (req.method === "POST" && url.pathname === "/design/generate-home") {
@@ -184,7 +185,13 @@ function buildHeuristicLayoutProposal(input) {
   const sport = /deport|fitness|gym|gimnas|running/.test(prompt);
   const tech = /tech|software|digital|app|saas|gadgets|tecnolog/.test(prompt);
   const health = /salud|clinica|wellness|spa|medic/.test(prompt);
-  const stylePreset = brief.style_preset || (tech || sport ? "ocean" : health || fashion || premium ? "sunset" : "ocean");
+  const stylePreset = inferStylePreset([brief.tone || "", brief.offer_summary || "", prompt].join(" "), {
+    tech,
+    sport,
+    health,
+    fashion,
+    premium
+  });
   const theme = themeFor(stylePreset, { premium, health, fashion });
 
   const sectionOrder =
@@ -512,20 +519,202 @@ function hashString(value) {
   return Math.abs(hash);
 }
 
-function buildHeuristicBrief(rawInput) {
-  const trimmed = String(rawInput || "").trim();
+async function requestRefineFromModel(input) {
+  const rawInput = String(input.rawInput || "").trim();
+  const currentBrief = input.currentBrief || null;
+  const followUpAnswer = String(input.followUpAnswer || "").trim();
+
+  if (!promptAvailable(rawInput)) {
+    return buildHeuristicRefine(input);
+  }
+
+  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: MODEL,
+      stream: false,
+      format: "json",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Devuelve SOLO JSON válido con este contrato: " +
+            "{briefDraft:{business_name,business_type,offer_summary,target_audience,tone,primary_cta,whatsapp_phone,whatsapp_message}," +
+            "confidence,completenessScore,warnings,followUpQuestion,missingFields}. " +
+            "No incluyas section_preferences ni style_preset. " +
+            "missingFields solo puede contener offer_summary,target_audience,tone,whatsapp_phone,business_type."
+        },
+        {
+          role: "user",
+          content: [
+            `Descripción inicial: ${rawInput}`,
+            `Brief actual: ${JSON.stringify(currentBrief || {})}`,
+            `Última respuesta del usuario: ${followUpAnswer || "(sin respuesta adicional)"}`,
+            "Completa el brief con lo disponible y haz una sola pregunta siguiente si aún falta información importante."
+          ].join("\n")
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ollama refine HTTP ${response.status}`);
+  }
+
+  const payload = await response.json();
+  const parsed = safeParseJson(payload?.message?.content || payload?.response || "");
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Invalid refine JSON");
+  }
+
+  return parsed;
+}
+
+function buildHeuristicRefine(input) {
+  const rawInput = String(input.rawInput || "").trim();
+  const currentBrief = input.currentBrief || null;
+  const followUpAnswer = String(input.followUpAnswer || "").trim();
+  const briefDraft = buildHeuristicBrief(rawInput, currentBrief, followUpAnswer);
+  const missingFields = collectMissingFields(briefDraft);
   return {
-    business_name: trimmed.slice(0, 80) || "Tu negocio",
-    business_type: /tienda|producto|catalog|venta/i.test(trimmed) ? "commerce_lite" : "informative",
-    offer_summary: trimmed || "Presentación principal del negocio.",
-    target_audience: "Clientes potenciales en redes y WhatsApp",
-    tone: "Claro y directo",
-    primary_cta: "WhatsApp",
-    section_preferences: /tienda|producto|catalog|venta/i.test(trimmed)
-      ? ["hero", "catalog", "testimonials", "contact"]
-      : ["hero", "testimonials", "contact"],
-    style_preset: /premium|elegante/i.test(trimmed) ? "sunset" : /moderno|tech|digital/i.test(trimmed) ? "ocean" : "mono"
+    briefDraft,
+    confidence: 0.6,
+    completenessScore: computeCompletenessScore(briefDraft, rawInput),
+    warnings: buildWarnings(rawInput, briefDraft),
+    provider: "heuristic",
+    followUpQuestion: buildFollowUpQuestion(missingFields),
+    missingFields
   };
+}
+
+function buildHeuristicBrief(rawInput, currentBrief = null, followUpAnswer = "") {
+  const trimmed = String(rawInput || "").trim();
+  const answer = String(followUpAnswer || "").trim();
+  const combined = [trimmed, answer].filter(Boolean).join(" ").trim();
+  const lower = combined.toLowerCase();
+  const baseBrief = {
+    business_name: inferBusinessName(trimmed),
+    business_type: /tienda|producto|catalog|venta|stock|carrito/i.test(trimmed) ? "commerce_lite" : "informative",
+    offer_summary: trimmed || "Presentación principal del negocio.",
+    target_audience: inferAudience(trimmed.toLowerCase()),
+    tone: inferTone(trimmed.toLowerCase()),
+    primary_cta: "WhatsApp",
+    whatsapp_phone: extractWhatsappPhone(trimmed),
+    whatsapp_message: undefined
+  };
+  const beforeAnswer = mergeBrief(baseBrief, currentBrief || {});
+  const missingBefore = collectMissingFields(beforeAnswer);
+
+  const next = mergeBrief(
+    { ...baseBrief, business_type: /tienda|producto|catalog|venta|stock|carrito/i.test(combined) ? "commerce_lite" : "informative", target_audience: inferAudience(lower), tone: inferTone(lower), whatsapp_phone: extractWhatsappPhone(combined) },
+    currentBrief || {}
+  );
+
+  if (answer) {
+    const firstMissing = missingBefore[0];
+    if (firstMissing === "offer_summary" && !currentBrief?.offer_summary) next.offer_summary = answer.slice(0, 600);
+    if (firstMissing === "target_audience" && !currentBrief?.target_audience) next.target_audience = answer.slice(0, 180);
+    if (firstMissing === "tone" && !currentBrief?.tone) next.tone = answer.slice(0, 80);
+    if (firstMissing === "whatsapp_phone" && !currentBrief?.whatsapp_phone) next.whatsapp_phone = extractWhatsappPhone(answer);
+    if (firstMissing === "business_type" && !currentBrief?.business_type) {
+      next.business_type = /tienda|producto|catalog|venta|stock|carrito/i.test(answer) ? "commerce_lite" : "informative";
+    }
+  }
+
+  return next;
+}
+
+function mergeBrief(base, currentBrief) {
+  return {
+    business_name: currentBrief?.business_name || base.business_name,
+    business_type: currentBrief?.business_type || base.business_type,
+    offer_summary: currentBrief?.offer_summary || base.offer_summary,
+    target_audience: currentBrief?.target_audience || base.target_audience,
+    tone: currentBrief?.tone || base.tone,
+    primary_cta: currentBrief?.primary_cta || base.primary_cta,
+    whatsapp_phone: currentBrief?.whatsapp_phone || base.whatsapp_phone,
+    whatsapp_message: currentBrief?.whatsapp_message || base.whatsapp_message
+  };
+}
+
+function inferBusinessName(rawInput) {
+  const trimmed = String(rawInput || "").trim();
+  const firstSentence = trimmed.split(/[.!?\n]/)[0]?.trim() || trimmed;
+  return firstSentence.slice(0, 80) || "Tu negocio";
+}
+
+function inferAudience(lower) {
+  if (lower.includes("empresa") || lower.includes("b2b")) return "Empresas y clientes corporativos";
+  if (lower.includes("deport")) return "Personas activas y deportistas";
+  if (lower.includes("familia")) return "Familias y hogares";
+  return "Clientes potenciales en redes y WhatsApp";
+}
+
+function inferTone(lower) {
+  if (lower.includes("premium") || lower.includes("elegante")) return "Premium y sofisticado";
+  if (lower.includes("formal") || lower.includes("corporativo")) return "Profesional y confiable";
+  if (lower.includes("moderno") || lower.includes("tech") || lower.includes("digital")) return "Moderno y directo";
+  return "Cercano y claro";
+}
+
+function collectMissingFields(brief) {
+  const missing = [];
+  if (!brief.offer_summary || brief.offer_summary.trim().length < 24) missing.push("offer_summary");
+  if (!brief.target_audience || brief.target_audience.trim().length < 8) missing.push("target_audience");
+  if (!brief.tone || brief.tone.trim().length < 4) missing.push("tone");
+  return missing;
+}
+
+function buildFollowUpQuestion(missingFields) {
+  const first = missingFields[0];
+  if (!first) return null;
+  return {
+    offer_summary: "Cuéntame en una frase qué ofreces y qué te hace diferente.",
+    target_audience: "¿Para quién está pensado tu producto o servicio?",
+    tone: "¿Qué estilo quieres transmitir en la página: formal, moderno, cercano o premium?",
+    whatsapp_phone: "Si quieres activar WhatsApp, compárteme el número con indicativo de país.",
+    business_type: "¿Tu sitio será más de venta/catálogo o más informativo?"
+  }[first];
+}
+
+function buildWarnings(rawInput, brief) {
+  const warnings = [];
+  if ((brief.offer_summary || "").trim().length < 30) warnings.push("Aún falta explicar mejor qué ofreces.");
+  if ((brief.target_audience || "").trim().length < 10) warnings.push("Conviene definir mejor a quién quieres atraer.");
+  if (!containsLocationInfo(String(rawInput || "").toLowerCase())) warnings.push("Si tu negocio depende de ubicación, añade ciudad o zona.");
+  return warnings;
+}
+
+function computeCompletenessScore(brief, rawInput) {
+  let score = 0;
+  const lower = String(rawInput || "").toLowerCase();
+  if (String(rawInput || "").length >= 40) score += 15;
+  if ((brief.offer_summary || "").trim().length >= 40) score += 25;
+  if ((brief.target_audience || "").trim().length >= 8) score += 20;
+  if ((brief.tone || "").trim().length >= 4) score += 15;
+  if (containsLocationInfo(lower)) score += 10;
+  if (containsValueProposition(lower) || (brief.offer_summary || "").trim().length >= 90) score += 15;
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function containsLocationInfo(lower) {
+  return /bogotá|medellín|cali|cdmx|ciudad|barrio|colombia|méxico|perú|chile/.test(lower);
+}
+
+function containsValueProposition(lower) {
+  return /rápido|garant|calidad|a domicilio|personalizado|24\/7|únic|especial/.test(lower);
+}
+
+function extractWhatsappPhone(input) {
+  return String(input || "").match(/\+\d{8,15}/)?.[0];
+}
+
+function inferStylePreset(prompt, flags = {}) {
+  if (/premium|elegante|lujo/.test(prompt) || flags.premium) return "sunset";
+  if (/tech|digital|moderno|software|app|deport|fitness/.test(prompt) || flags.tech || flags.sport) return "ocean";
+  if (/salud|clinica|wellness|spa|medic|moda|ropa|zapato|sneaker/.test(prompt) || flags.health || flags.fashion) return "sunset";
+  return "ocean";
 }
 
 function promptAvailable(prompt) {
