@@ -95,6 +95,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
   const [rightTab, setRightTab] = useState<"content" | "style" | "position">("content");
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const canvasShellRef = useRef<HTMLDivElement | null>(null);
+  const gestureZoomBaseRef = useRef<number | null>(null);
   const [canvasWidth, setCanvasWidth] = useState<number>(CANVAS_BASE_WIDTH.desktop);
   const [canvasHostWidth, setCanvasHostWidth] = useState<number>(CANVAS_BASE_WIDTH.desktop);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
@@ -135,6 +136,15 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
   }, [canvasBaseWidth, canvasHostWidth]);
   const effectiveZoomPercent = zoomMode === "fit" ? fitZoomPercent : zoomPercent;
   const zoomScale = effectiveZoomPercent / 100;
+  const visibleSections = home?.sections.filter((section) => section.enabled) ?? [];
+  const canvasBaseHeight = useMemo(
+    () => visibleSections.reduce((sum, section) => sum + getSectionHeightPx(section, viewport, canvasBaseWidth), 0),
+    [canvasBaseWidth, viewport, visibleSections]
+  );
+  const scaledCanvasWidth = canvasBaseWidth * zoomScale;
+  const scaledCanvasHeight = canvasBaseHeight * zoomScale;
+  const canvasHorizontalPadding = 24;
+  const isCanvasOverflowingHorizontally = scaledCanvasWidth + canvasHorizontalPadding * 2 > canvasHostWidth;
 
   useEffect(() => {
     if (!home?.sections?.length) return;
@@ -171,6 +181,53 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!canvasShellRef.current) return;
+    const node = canvasShellRef.current;
+
+    const updateManualZoom = (nextPercent: number) => {
+      setZoomMode("manual");
+      setZoomPercent(clampZoomPercent(nextPercent));
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      const base = zoomMode === "fit" ? fitZoomPercent : zoomPercent;
+      const delta = -event.deltaY * 0.06;
+      updateManualZoom(base + delta);
+    };
+
+    const onGestureStart = (event: Event) => {
+      event.preventDefault();
+      gestureZoomBaseRef.current = zoomMode === "fit" ? fitZoomPercent : zoomPercent;
+    };
+
+    const onGestureChange = (event: Event) => {
+      const gestureEvent = event as Event & { scale?: number };
+      event.preventDefault();
+      const scale = gestureEvent.scale ?? 1;
+      const base = gestureZoomBaseRef.current ?? (zoomMode === "fit" ? fitZoomPercent : zoomPercent);
+      updateManualZoom(base * scale);
+    };
+
+    const onGestureEnd = () => {
+      gestureZoomBaseRef.current = null;
+    };
+
+    node.addEventListener("wheel", onWheel, { passive: false });
+    node.addEventListener("gesturestart", onGestureStart as EventListener, { passive: false });
+    node.addEventListener("gesturechange", onGestureChange as EventListener, { passive: false });
+    node.addEventListener("gestureend", onGestureEnd as EventListener);
+
+    return () => {
+      node.removeEventListener("wheel", onWheel);
+      node.removeEventListener("gesturestart", onGestureStart as EventListener);
+      node.removeEventListener("gesturechange", onGestureChange as EventListener);
+      node.removeEventListener("gestureend", onGestureEnd as EventListener);
+    };
+  }, [fitZoomPercent, zoomMode, zoomPercent]);
 
   useEffect(() => {
     setZoomMode("fit");
@@ -1161,24 +1218,40 @@ function addSection(type: SiteSectionV3["type"]) {
           </div>
           <div className="editor-canvas-shell" ref={canvasShellRef}>
             <div
-              className="editor-canvas-zoom"
+              className={`editor-canvas-viewport ${isCanvasOverflowingHorizontally ? "overflowing-x" : ""}`}
               style={{
-                width: `${canvasBaseWidth}px`,
-                transform: `scale(${zoomScale})`
+                minWidth: isCanvasOverflowingHorizontally ? `${scaledCanvasWidth + canvasHorizontalPadding * 2}px` : "100%",
+                paddingInline: `${canvasHorizontalPadding}px`
               }}
             >
               <div
-                className="editor-canvas"
-                ref={canvasRef}
+                className="editor-canvas-stage"
                 style={{
-                  width: `${canvasBaseWidth}px`,
-                  minWidth: `${canvasBaseWidth}px`,
-                  background: siteSpec.theme.background,
-                  fontFamily: siteSpec.theme.font_body
+                  width: `${scaledCanvasWidth}px`,
+                  minWidth: `${scaledCanvasWidth}px`,
+                  height: `${scaledCanvasHeight}px`,
+                  minHeight: `${scaledCanvasHeight}px`
                 }}
               >
-              {(home?.sections ?? [])
-                .filter((section) => section.enabled)
+                <div
+                  className="editor-canvas-zoom"
+                  style={{
+                    width: `${canvasBaseWidth}px`,
+                    height: `${canvasBaseHeight}px`,
+                    transform: `scale(${zoomScale})`
+                  }}
+                >
+                  <div
+                    className="editor-canvas"
+                    ref={canvasRef}
+                    style={{
+                      width: `${canvasBaseWidth}px`,
+                      minWidth: `${canvasBaseWidth}px`,
+                      background: siteSpec.theme.background,
+                      fontFamily: siteSpec.theme.font_body
+                    }}
+                  >
+              {visibleSections
                 .map((section) => {
                   const sectionWidth = canvasWidth;
                   const sectionHeight = getSectionHeightPx(section, viewport, sectionWidth);
@@ -1329,6 +1402,8 @@ function addSection(type: SiteSectionV3["type"]) {
                     </article>
                   );
                 })}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

@@ -626,15 +626,33 @@ td {
   border-radius: 1rem;
   padding: 1rem;
   min-height: calc(100vh - 140px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.editor-canvas-viewport {
+  min-width: 100%;
+  min-height: 100%;
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  overflow: auto;
+  box-sizing: border-box;
+}
+
+.editor-canvas-viewport.overflowing-x {
+  justify-content: flex-start;
+}
+
+.editor-canvas-stage {
+  position: relative;
+  flex: 0 0 auto;
 }
 
 .editor-canvas-zoom {
-  flex: 0 0 auto;
-  transform-origin: top center;
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: top left;
   will-change: transform;
 }
 
