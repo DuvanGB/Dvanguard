@@ -543,7 +543,8 @@ async function requestRefineFromModel(input) {
             "{briefDraft:{business_name,business_type,offer_summary,target_audience,tone,primary_cta,whatsapp_phone,whatsapp_message}," +
             "confidence,completenessScore,warnings,followUpQuestion,missingFields}. " +
             "No incluyas section_preferences ni style_preset. " +
-            "missingFields solo puede contener offer_summary,target_audience,tone,whatsapp_phone,business_type."
+            "missingFields solo puede contener offer_summary,target_audience,whatsapp_phone,business_type. " +
+            "tone es interno: puedes devolverlo, pero no hagas preguntas al usuario sobre estilo visual si faltan otros datos de negocio."
         },
         {
           role: "user",
@@ -593,13 +594,26 @@ function buildHeuristicBrief(rawInput, currentBrief = null, followUpAnswer = "")
   const answer = String(followUpAnswer || "").trim();
   const combined = [trimmed, answer].filter(Boolean).join(" ").trim();
   const lower = combined.toLowerCase();
+  const businessType = /tienda|producto|catalog|venta|stock|carrito/i.test(combined) ? "commerce_lite" : "informative";
+  const audience = inferAudience(lower);
+  const offerSummary = suggestOfferSummary({
+    rawInput: trimmed,
+    businessName: currentBrief?.business_name || inferBusinessName(trimmed),
+    businessType,
+    targetAudience: audience
+  });
   const baseBrief = {
     business_name: inferBusinessName(trimmed),
     business_type: /tienda|producto|catalog|venta|stock|carrito/i.test(trimmed) ? "commerce_lite" : "informative",
-    offer_summary: trimmed || "Presentación principal del negocio.",
+    offer_summary: offerSummary,
     target_audience: inferAudience(trimmed.toLowerCase()),
     tone: inferTone(trimmed.toLowerCase()),
-    primary_cta: "WhatsApp",
+    primary_cta: suggestPrimaryCta({
+      businessType,
+      rawInput: combined || trimmed,
+      offerSummary,
+      hasWhatsappPhone: Boolean(extractWhatsappPhone(trimmed))
+    }),
     whatsapp_phone: extractWhatsappPhone(trimmed),
     whatsapp_message: undefined
   };
@@ -607,7 +621,14 @@ function buildHeuristicBrief(rawInput, currentBrief = null, followUpAnswer = "")
   const missingBefore = collectMissingFields(beforeAnswer);
 
   const next = mergeBrief(
-    { ...baseBrief, business_type: /tienda|producto|catalog|venta|stock|carrito/i.test(combined) ? "commerce_lite" : "informative", target_audience: inferAudience(lower), tone: inferTone(lower), whatsapp_phone: extractWhatsappPhone(combined) },
+    {
+      ...baseBrief,
+      business_type: businessType,
+      offer_summary: currentBrief?.offer_summary || offerSummary,
+      target_audience: audience,
+      tone: inferTone(lower),
+      whatsapp_phone: extractWhatsappPhone(combined)
+    },
     currentBrief || {}
   );
 
@@ -615,11 +636,27 @@ function buildHeuristicBrief(rawInput, currentBrief = null, followUpAnswer = "")
     const firstMissing = missingBefore[0];
     if (firstMissing === "offer_summary" && !currentBrief?.offer_summary) next.offer_summary = answer.slice(0, 600);
     if (firstMissing === "target_audience" && !currentBrief?.target_audience) next.target_audience = answer.slice(0, 180);
-    if (firstMissing === "tone" && !currentBrief?.tone) next.tone = answer.slice(0, 80);
     if (firstMissing === "whatsapp_phone" && !currentBrief?.whatsapp_phone) next.whatsapp_phone = extractWhatsappPhone(answer);
     if (firstMissing === "business_type" && !currentBrief?.business_type) {
       next.business_type = /tienda|producto|catalog|venta|stock|carrito/i.test(answer) ? "commerce_lite" : "informative";
     }
+  }
+
+  if (!currentBrief?.primary_cta) {
+    next.primary_cta = suggestPrimaryCta({
+      businessType: next.business_type,
+      rawInput: combined || trimmed,
+      offerSummary: next.offer_summary,
+      hasWhatsappPhone: Boolean(next.whatsapp_phone)
+    });
+  }
+  if (!currentBrief?.whatsapp_message && next.whatsapp_phone) {
+    next.whatsapp_message = suggestWhatsappMessage({
+      businessName: next.business_name,
+      businessType: next.business_type,
+      offerSummary: next.offer_summary,
+      primaryCta: next.primary_cta
+    });
   }
 
   return next;
@@ -662,7 +699,6 @@ function collectMissingFields(brief) {
   const missing = [];
   if (!brief.offer_summary || brief.offer_summary.trim().length < 24) missing.push("offer_summary");
   if (!brief.target_audience || brief.target_audience.trim().length < 8) missing.push("target_audience");
-  if (!brief.tone || brief.tone.trim().length < 4) missing.push("tone");
   return missing;
 }
 
@@ -672,7 +708,6 @@ function buildFollowUpQuestion(missingFields) {
   return {
     offer_summary: "Cuéntame en una frase qué ofreces y qué te hace diferente.",
     target_audience: "¿Para quién está pensado tu producto o servicio?",
-    tone: "¿Qué estilo quieres transmitir en la página: formal, moderno, cercano o premium?",
     whatsapp_phone: "Si quieres activar WhatsApp, compárteme el número con indicativo de país.",
     business_type: "¿Tu sitio será más de venta/catálogo o más informativo?"
   }[first];
@@ -692,10 +727,54 @@ function computeCompletenessScore(brief, rawInput) {
   if (String(rawInput || "").length >= 40) score += 15;
   if ((brief.offer_summary || "").trim().length >= 40) score += 25;
   if ((brief.target_audience || "").trim().length >= 8) score += 20;
-  if ((brief.tone || "").trim().length >= 4) score += 15;
+  if ((brief.primary_cta || "").trim().length >= 4) score += 15;
   if (containsLocationInfo(lower)) score += 10;
   if (containsValueProposition(lower) || (brief.offer_summary || "").trim().length >= 90) score += 15;
   return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function suggestOfferSummary({ rawInput, businessName, businessType, targetAudience }) {
+  const trimmed = String(rawInput || "").trim().replace(/\s+/g, " ");
+  if (trimmed.length >= 36) {
+    return trimmed.length > 220 ? `${trimmed.slice(0, 217)}...` : trimmed;
+  }
+
+  if (businessType === "commerce_lite") {
+    return `${businessName} ofrece productos pensados para ${String(targetAudience || "clientes potenciales").toLowerCase()}, con una experiencia rápida y clara para consultar catálogo y comprar por WhatsApp.`;
+  }
+
+  return `${businessName} presenta su oferta principal para ${String(targetAudience || "clientes potenciales").toLowerCase()}, con una propuesta clara para generar confianza y facilitar el contacto.`;
+}
+
+function suggestPrimaryCta({ businessType, rawInput, offerSummary, hasWhatsappPhone }) {
+  const lower = `${rawInput || ""} ${offerSummary || ""}`.toLowerCase();
+  if (businessType === "commerce_lite") {
+    if (hasWhatsappPhone) {
+      if (/cat[aá]logo|catalog/.test(lower)) return "Pedir catálogo por WhatsApp";
+      if (/precio|cotiz|valor|presupuesto/.test(lower)) return "Cotizar por WhatsApp";
+      return "Comprar por WhatsApp";
+    }
+    if (/cat[aá]logo|catalog/.test(lower)) return "Ver catálogo";
+    return "Conocer productos";
+  }
+
+  if (hasWhatsappPhone) {
+    if (/agenda|cita|consulta|asesor/.test(lower)) return "Agendar por WhatsApp";
+    return "Hablar por WhatsApp";
+  }
+  if (/agenda|cita|consulta|asesor/.test(lower)) return "Agendar asesoría";
+  return "Solicitar información";
+}
+
+function suggestWhatsappMessage({ businessName, businessType, offerSummary, primaryCta }) {
+  const lower = `${offerSummary || ""} ${primaryCta || ""}`.toLowerCase();
+  if (businessType === "commerce_lite") {
+    if (/cotiz|precio|valor/.test(lower)) return `Hola, vi la página de ${businessName} y quiero cotizar uno de sus productos.`;
+    if (/cat[aá]logo|catalog/.test(lower)) return `Hola, vi la página de ${businessName} y quiero ver el catálogo completo.`;
+    return `Hola, vi la página de ${businessName} y quiero conocer disponibilidad y precios.`;
+  }
+  if (/agenda|cita|consulta|asesor/.test(lower)) return `Hola, vi la página de ${businessName} y quiero agendar una asesoría.`;
+  return `Hola, vi la página de ${businessName} y quiero recibir más información.`;
 }
 
 function containsLocationInfo(lower) {

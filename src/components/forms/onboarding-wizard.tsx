@@ -75,6 +75,8 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
   const [briefDraft, setBriefDraft] = useState<BusinessBriefDraft | null>(null);
   const [whatsappPhoneInput, setWhatsappPhoneInput] = useState("");
   const [whatsappMessageInput, setWhatsappMessageInput] = useState("");
+  const [ctaManuallyEdited, setCtaManuallyEdited] = useState(false);
+  const [whatsappMessageManuallyEdited, setWhatsappMessageManuallyEdited] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [completenessScore, setCompletenessScore] = useState<number | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -107,6 +109,36 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
     };
   }, []);
 
+  useEffect(() => {
+    if (!briefDraft || ctaManuallyEdited) return;
+    const suggestedCta = suggestPrimaryCtaClient({
+      businessType: briefDraft.business_type,
+      rawInput,
+      offerSummary: briefDraft.offer_summary,
+      hasWhatsappPhone: Boolean(whatsappPhoneInput.trim())
+    });
+    if (briefDraft.primary_cta !== suggestedCta) {
+      setBriefDraft((prev) => (prev ? { ...prev, primary_cta: suggestedCta } : prev));
+    }
+  }, [briefDraft, ctaManuallyEdited, rawInput, whatsappPhoneInput]);
+
+  useEffect(() => {
+    if (!briefDraft || whatsappMessageManuallyEdited) return;
+    if (!whatsappPhoneInput.trim()) {
+      if (whatsappMessageInput) setWhatsappMessageInput("");
+      return;
+    }
+    const suggestedMessage = suggestWhatsappMessageClient({
+      businessName: briefDraft.business_name,
+      businessType: briefDraft.business_type,
+      offerSummary: briefDraft.offer_summary,
+      primaryCta: briefDraft.primary_cta
+    });
+    if (whatsappMessageInput !== suggestedMessage) {
+      setWhatsappMessageInput(suggestedMessage);
+    }
+  }, [briefDraft, whatsappMessageInput, whatsappMessageManuallyEdited, whatsappPhoneInput]);
+
   function buildFinalBrief(currentBrief: BusinessBriefDraft): BusinessBriefDraft {
     return {
       ...currentBrief,
@@ -114,6 +146,22 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
       whatsapp_phone: whatsappPhoneInput.trim() || undefined,
       whatsapp_message: whatsappMessageInput.trim() || undefined
     };
+  }
+
+  function applyRefineDraft(nextDraft: BusinessBriefDraft) {
+    const siteBoundDraft = siteName?.trim() ? { ...nextDraft, business_name: siteName.trim() } : nextDraft;
+    const preservedPrimaryCta =
+      ctaManuallyEdited && briefDraft?.primary_cta?.trim() ? briefDraft.primary_cta : siteBoundDraft.primary_cta;
+    const preservedWhatsappMessage =
+      whatsappMessageManuallyEdited ? whatsappMessageInput.trim() : siteBoundDraft.whatsapp_message?.trim() || "";
+
+    setBriefDraft({
+      ...siteBoundDraft,
+      primary_cta: preservedPrimaryCta,
+      whatsapp_message: preservedWhatsappMessage || undefined
+    });
+    setWhatsappPhoneInput(siteBoundDraft.whatsapp_phone ?? "");
+    setWhatsappMessageInput(preservedWhatsappMessage);
   }
 
   async function pollJob(currentJobId: string) {
@@ -237,10 +285,9 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
         return;
       }
 
-      const nextBrief = siteName?.trim() ? { ...data.briefDraft, business_name: siteName.trim() } : data.briefDraft;
-      setBriefDraft(nextBrief);
-      setWhatsappPhoneInput(nextBrief.whatsapp_phone ?? "");
-      setWhatsappMessageInput(nextBrief.whatsapp_message ?? "");
+      setCtaManuallyEdited(false);
+      setWhatsappMessageManuallyEdited(false);
+      applyRefineDraft(data.briefDraft);
       setConfidence(data.confidence);
       setCompletenessScore(typeof data.completenessScore === "number" ? data.completenessScore : null);
       setWarnings(data.warnings ?? []);
@@ -275,10 +322,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
         return;
       }
 
-      const nextBrief = siteName?.trim() ? { ...data.briefDraft, business_name: siteName.trim() } : data.briefDraft;
-      setBriefDraft(nextBrief);
-      setWhatsappPhoneInput(nextBrief.whatsapp_phone ?? "");
-      setWhatsappMessageInput(nextBrief.whatsapp_message ?? "");
+      applyRefineDraft(data.briefDraft);
       setConfidence(data.confidence);
       setCompletenessScore(typeof data.completenessScore === "number" ? data.completenessScore : null);
       setWarnings(data.warnings ?? []);
@@ -500,15 +544,13 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
               </label>
 
               <label>
-                Tono
-                <input value={briefDraft.tone} onChange={(event) => setBriefDraft((prev) => (prev ? { ...prev, tone: event.target.value } : prev))} />
-              </label>
-
-              <label>
                 CTA principal
                 <input
                   value={briefDraft.primary_cta}
-                  onChange={(event) => setBriefDraft((prev) => (prev ? { ...prev, primary_cta: event.target.value } : prev))}
+                  onChange={(event) => {
+                    setCtaManuallyEdited(true);
+                    setBriefDraft((prev) => (prev ? { ...prev, primary_cta: event.target.value } : prev));
+                  }}
                 />
               </label>
 
@@ -525,7 +567,10 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
                 <textarea
                   rows={2}
                   value={whatsappMessageInput}
-                  onChange={(event) => setWhatsappMessageInput(event.target.value)}
+                  onChange={(event) => {
+                    setWhatsappMessageManuallyEdited(true);
+                    setWhatsappMessageInput(event.target.value);
+                  }}
                   placeholder="Hola, vi tu web y quiero más info."
                 />
               </label>
@@ -693,6 +738,46 @@ function labelForStage(stage: string | null | undefined) {
     content_polish: "Aplicando contenido y estilo",
     finalizing: "Preparando preview editable"
   }[stage ?? ""] ?? "Iniciando generación";
+}
+
+function suggestPrimaryCtaClient(input: {
+  businessType: BusinessBriefDraft["business_type"];
+  rawInput: string;
+  offerSummary: string;
+  hasWhatsappPhone: boolean;
+}) {
+  const lower = `${input.rawInput} ${input.offerSummary}`.toLowerCase();
+  if (input.businessType === "commerce_lite") {
+    if (input.hasWhatsappPhone) {
+      if (/cat[aá]logo|catalog/.test(lower)) return "Pedir catálogo por WhatsApp";
+      if (/precio|cotiz|valor|presupuesto/.test(lower)) return "Cotizar por WhatsApp";
+      return "Comprar por WhatsApp";
+    }
+    if (/cat[aá]logo|catalog/.test(lower)) return "Ver catálogo";
+    return "Conocer productos";
+  }
+  if (input.hasWhatsappPhone) {
+    if (/agenda|cita|consulta|asesor/.test(lower)) return "Agendar por WhatsApp";
+    return "Hablar por WhatsApp";
+  }
+  if (/agenda|cita|consulta|asesor/.test(lower)) return "Agendar asesoría";
+  return "Solicitar información";
+}
+
+function suggestWhatsappMessageClient(input: {
+  businessName: string;
+  businessType: BusinessBriefDraft["business_type"];
+  offerSummary: string;
+  primaryCta: string;
+}) {
+  const lower = `${input.offerSummary} ${input.primaryCta}`.toLowerCase();
+  if (input.businessType === "commerce_lite") {
+    if (/cotiz|precio|valor/.test(lower)) return `Hola, vi la página de ${input.businessName} y quiero cotizar uno de sus productos.`;
+    if (/cat[aá]logo|catalog/.test(lower)) return `Hola, vi la página de ${input.businessName} y quiero ver el catálogo completo.`;
+    return `Hola, vi la página de ${input.businessName} y quiero conocer disponibilidad y precios.`;
+  }
+  if (/agenda|cita|consulta|asesor/.test(lower)) return `Hola, vi la página de ${input.businessName} y quiero agendar una asesoría.`;
+  return `Hola, vi la página de ${input.businessName} y quiero recibir más información.`;
 }
 
 function getRecognitionCtor(): RecognitionCtor | null {

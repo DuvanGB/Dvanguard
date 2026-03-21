@@ -7,7 +7,6 @@ export const businessTypeSchema = z.enum(["informative", "commerce_lite"]);
 export const missingBriefFieldSchema = z.enum([
   "offer_summary",
   "target_audience",
-  "tone",
   "whatsapp_phone",
   "business_type"
 ]);

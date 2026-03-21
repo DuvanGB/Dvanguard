@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { AnySiteSpec } from "@/lib/site-spec-any";
 import { buildFallbackSiteSpecV3, parseSiteSpecV3 } from "@/lib/site-spec-v3";
+import { SiteHeader } from "@/components/runtime/site-header";
 import { CanvasSection, type ProductCartItem } from "@/components/runtime/sections";
 
 export type EditorViewport = "desktop" | "mobile";
@@ -15,6 +16,11 @@ type Props = {
   siteId?: string;
   subdomain?: string;
   enableCart?: boolean;
+};
+
+type HeaderLink = {
+  label: string;
+  href: string;
 };
 
 export function SiteRenderer({ spec, viewport, trackEvents = false, siteId, subdomain, enableCart = false }: Props) {
@@ -163,11 +169,6 @@ export function SiteRenderer({ spec, viewport, trackEvents = false, siteId, subd
   );
 }
 
-type HeaderLink = {
-  label: string;
-  href: string;
-};
-
 function buildSectionLinks(sections: Array<{ id: string; type: string }>): HeaderLink[] {
   const labels: Record<string, string> = {
     hero: "Inicio",
@@ -180,135 +181,6 @@ function buildSectionLinks(sections: Array<{ id: string; type: string }>): Heade
     label: labels[section.type] ?? section.type,
     href: `#${section.id}`
   }));
-}
-
-function SiteHeader({
-  variant,
-  brand,
-  links,
-  theme
-}: {
-  variant: "none" | "hamburger-side" | "hamburger-overlay" | "top-bar";
-  brand: string;
-  links: HeaderLink[];
-  theme: { primary: string; secondary: string; background: string; font_heading: string; font_body: string };
-}) {
-  const [open, setOpen] = useState(false);
-
-  const headerStyle: CSSProperties = {
-    position: "sticky",
-    top: 0,
-    zIndex: 60,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "0.75rem 1.5rem",
-    background: theme.background,
-    borderBottom: `1px solid ${theme.secondary}22`
-  };
-
-  const brandStyle: CSSProperties = {
-    fontFamily: theme.font_heading,
-    fontWeight: 700,
-    fontSize: "1.1rem",
-    color: theme.primary
-  };
-
-  if (variant === "top-bar") {
-    return (
-      <header style={headerStyle}>
-        <span style={brandStyle}>{brand}</span>
-        <nav style={{ display: "flex", gap: "1rem", fontSize: "0.95rem" }}>
-          {links.map((link) => (
-            <a key={link.href} href={link.href} style={{ color: theme.primary, textDecoration: "none", fontWeight: 600 }}>
-              {link.label}
-            </a>
-          ))}
-        </nav>
-      </header>
-    );
-  }
-
-  const toggleButton = (
-    <button
-      type="button"
-      onClick={() => setOpen((prev) => !prev)}
-      style={{
-        border: `1px solid ${theme.secondary}33`,
-        background: "transparent",
-        borderRadius: 999,
-        padding: "0.4rem 0.65rem",
-        color: theme.primary,
-        display: "grid",
-        placeItems: "center",
-        cursor: "pointer"
-      }}
-      aria-label="Abrir menú"
-    >
-      ☰
-    </button>
-  );
-
-  return (
-    <>
-      <header style={headerStyle}>
-        {toggleButton}
-        <span style={brandStyle}>{brand}</span>
-        <div style={{ width: 40 }} />
-      </header>
-      {open ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: variant === "hamburger-overlay" ? "rgba(15, 23, 42, 0.65)" : "transparent",
-            zIndex: 80
-          }}
-          onClick={() => setOpen(false)}
-        >
-          <div
-            style={{
-              position: "absolute",
-              top: 0,
-              left: variant === "hamburger-side" ? 0 : "10%",
-              right: variant === "hamburger-side" ? "auto" : "10%",
-              width: variant === "hamburger-side" ? "72%" : "80%",
-              maxWidth: 360,
-              height: "100%",
-              background: theme.background,
-              padding: "1.5rem",
-              boxShadow: "0 18px 48px rgba(15, 23, 42, 0.25)"
-            }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
-              <strong style={brandStyle}>{brand}</strong>
-              <button type="button" onClick={() => setOpen(false)} style={{ border: "none", background: "transparent", fontSize: "1.2rem", cursor: "pointer" }}>
-                ✕
-              </button>
-            </div>
-            <nav style={{ display: "grid", gap: "0.75rem" }}>
-              {links.map((link) => (
-                <a
-                  key={link.href}
-                  href={link.href}
-                  onClick={() => setOpen(false)}
-                  style={{
-                    color: theme.primary,
-                    textDecoration: "none",
-                    fontWeight: 600,
-                    padding: "0.5rem 0.25rem"
-                  }}
-                >
-                  {link.label}
-                </a>
-              ))}
-            </nav>
-          </div>
-        </div>
-      ) : null}
-    </>
-  );
 }
 
 type PublicTrackEventPayload = {

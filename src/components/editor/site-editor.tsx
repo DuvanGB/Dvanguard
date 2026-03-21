@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import { ModuleTour } from "@/components/guided/module-tour";
+import { SiteHeader, getSiteHeaderPreviewHeight } from "@/components/runtime/site-header";
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
 import { CANVAS_BASE_WIDTH, fontFamilies, normalizeSiteSpecV3 } from "@/lib/site-spec-v3";
 import type { TemplateId } from "@/lib/templates/types";
@@ -129,6 +130,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
   const blockTargetSection =
     (blockTargetSectionId && home?.sections.find((section) => section.id === blockTargetSectionId)) ?? selectedSection ?? home?.sections[0] ?? null;
   const headerVariant = siteSpec.header?.variant ?? "none";
+  const headerLinks = useMemo(() => buildHeaderLinksForEditor(siteSpec), [siteSpec]);
   const canvasBaseWidth = CANVAS_BASE_WIDTH[viewport];
   const fitZoomPercent = useMemo(() => {
     const availableWidth = Math.max(240, canvasHostWidth - 32);
@@ -138,9 +140,10 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
   const effectiveZoomPercent = zoomMode === "fit" ? fitZoomPercent : zoomPercent;
   const zoomScale = effectiveZoomPercent / 100;
   const visibleSections = home?.sections.filter((section) => section.enabled) ?? [];
+  const headerPreviewHeight = getSiteHeaderPreviewHeight(headerVariant);
   const canvasBaseHeight = useMemo(
-    () => visibleSections.reduce((sum, section) => sum + getSectionHeightPx(section, viewport, canvasBaseWidth), 0),
-    [canvasBaseWidth, viewport, visibleSections]
+    () => headerPreviewHeight + visibleSections.reduce((sum, section) => sum + getSectionHeightPx(section, viewport, canvasBaseWidth), 0),
+    [canvasBaseWidth, headerPreviewHeight, viewport, visibleSections]
   );
   const scaledCanvasWidth = canvasBaseWidth * zoomScale;
   const scaledCanvasHeight = canvasBaseHeight * zoomScale;
@@ -1272,6 +1275,15 @@ function addSection(type: SiteSectionV3["type"]) {
                       fontFamily: siteSpec.theme.font_body
                     }}
                   >
+              {headerVariant !== "none" ? (
+                <SiteHeader
+                  preview
+                  variant={headerVariant}
+                  brand={siteSpec.header?.brand ?? siteName}
+                  links={headerLinks}
+                  theme={siteSpec.theme}
+                />
+              ) : null}
               {visibleSections
                 .map((section) => {
                   const sectionWidth = canvasWidth;
