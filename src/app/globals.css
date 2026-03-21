@@ -604,7 +604,7 @@ td {
   box-sizing: border-box;
   cursor: move;
   outline: 1px dashed transparent;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .canvas-block.selected {
@@ -626,6 +626,33 @@ td {
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+
+.onboarding-generation-preview {
+  padding: 0.75rem;
+  overflow: hidden;
+}
+
+.onboarding-generation-preview-frame {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+  min-height: 420px;
+  max-height: 68vh;
+  overflow: auto;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef6ff 100%);
+  padding: 1rem;
+}
+
+.onboarding-generation-preview-canvas {
+  width: min(100%, 1120px);
+  flex: 0 0 auto;
+  border-radius: 1rem;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.14);
 }
 
 .canvas-product {

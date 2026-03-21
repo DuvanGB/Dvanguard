@@ -82,6 +82,7 @@ const SECTION_OPTIONS: Array<BusinessBriefDraft["section_preferences"][number]> 
 export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale }: Props) {
   const router = useRouter();
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
+
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [inputMode, setInputMode] = useState<OnboardingInputMode>("text");
   const [rawInput, setRawInput] = useState("");
@@ -96,12 +97,11 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
   const [warnings, setWarnings] = useState<string[]>([]);
   const [refineProvider, setRefineProvider] = useState<"llm" | "heuristic" | null>(null);
   const [recommendedTemplateId, setRecommendedTemplateId] = useState<TemplateId | null>(null);
-  const [recommendedTemplateIds, setRecommendedTemplateIds] = useState<TemplateId[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<TemplateId | null>(null);
   const [templateOptions, setTemplateOptions] = useState<TemplateCard[]>([]);
   const [loadingRefine, setLoadingRefine] = useState(false);
   const [loadingGenerate, setLoadingGenerate] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<JobStatusResponse["status"] | null>(null);
   const [generationStage, setGenerationStage] = useState<string | null>(null);
   const [generationMessage, setGenerationMessage] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<number>(0);
@@ -114,7 +114,6 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
     () => templateOptions.find((template) => template.id === recommendedTemplateId)?.name ?? null,
     [recommendedTemplateId, templateOptions]
   );
-
   useEffect(() => {
     const ctor = getRecognitionCtor();
     setVoiceSupported(Boolean(ctor));
@@ -122,24 +121,30 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
 
   useEffect(() => {
     return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
+      recognitionRef.current?.stop();
     };
   }, []);
 
   useEffect(() => {
-    if (step !== 2 || !briefDraft) return;
+    if (!briefDraft) return;
+    void loadTemplates(briefDraft.business_type, recommendedTemplateId);
+  }, [briefDraft?.business_type, recommendedTemplateId]);
 
-    void loadTemplates(briefDraft.business_type, selectedTemplateId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, briefDraft?.business_type]);
+  function buildFinalBrief(currentBrief: BusinessBriefDraft): BusinessBriefDraft {
+    return {
+      ...currentBrief,
+      business_name: currentBrief.business_name.trim() || siteName?.trim() || currentBrief.business_name,
+      whatsapp_phone: whatsappPhoneInput.trim() || undefined,
+      whatsapp_message: whatsappMessageInput.trim() || undefined
+    };
+  }
 
   async function pollJob(currentJobId: string) {
-    for (let attempt = 0; attempt < 25; attempt += 1) {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
       const response = await fetch(`/api/ai/jobs/${currentJobId}`);
       const data = (await response.json()) as JobStatusResponse;
 
+      setJobStatus(data.status);
       setGenerationStage(data.stage ?? null);
       setGenerationMessage(data.message ?? null);
       setGenerationProgress(typeof data.progressPercent === "number" ? data.progressPercent : 0);
@@ -273,6 +278,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
       const nextBrief = siteName?.trim()
         ? { ...data.briefDraft, business_name: siteName.trim() }
         : data.briefDraft;
+
       setBriefDraft(nextBrief);
       setWhatsappPhoneInput(nextBrief.whatsapp_phone ?? "");
       setWhatsappMessageInput(nextBrief.whatsapp_message ?? "");
@@ -281,7 +287,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
       setWarnings(data.warnings ?? []);
       setRefineProvider(data.provider ?? null);
       setRecommendedTemplateId(data.recommendedTemplateId);
-      setRecommendedTemplateIds(data.recommendedTemplateIds ?? []);
+      setRecommendedTemplateId(data.recommendedTemplateId);
       setStep(2);
 
       await loadTemplates(nextBrief.business_type, data.recommendedTemplateId);
@@ -293,31 +299,25 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
   }
 
   async function handleGenerate() {
-    if (!briefDraft || !selectedTemplateId) return;
+    if (!briefDraft) return;
 
     setLoadingGenerate(true);
     setError(null);
     setStep(3);
+    setJobStatus("queued");
     setGenerationProgress(6);
     setGenerationStage("brief_analysis");
     setGenerationMessage("Analizando tu negocio");
     setGenerationSnapshot(null);
     setGenerationFallbackUsed(false);
-
     try {
-      const finalBrief = {
-        ...briefDraft,
-        whatsapp_phone: whatsappPhoneInput.trim() || undefined,
-        whatsapp_message: whatsappMessageInput.trim() || undefined
-      };
       const response = await fetch("/api/onboarding/generate-v3", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           siteId,
           inputMode,
-          briefDraft: finalBrief,
-          templateId: selectedTemplateId,
+          briefDraft: buildFinalBrief(briefDraft),
           recommendedTemplateId: recommendedTemplateId ?? undefined,
           refineConfidence: confidence ?? undefined,
           warnings
@@ -325,7 +325,6 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
       });
 
       const data = (await response.json()) as GenerateResponse;
-
       if (!response.ok || !data.jobId) {
         setError(data.error ?? "No se pudo generar el sitio");
         setLoadingGenerate(false);
@@ -343,35 +342,14 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
     }
   }
 
-  async function loadTemplates(
-    siteType: BusinessBriefDraft["business_type"],
-    preferredTemplateId?: TemplateId | null
-  ) {
+  async function loadTemplates(siteType: BusinessBriefDraft["business_type"], preferredTemplateId?: TemplateId | null) {
     try {
       const templatesResponse = await fetch(`/api/templates?siteType=${siteType}`);
       const templatesData = (await templatesResponse.json()) as { items?: TemplateCard[] };
       const items = Array.isArray(templatesData.items) ? templatesData.items : [];
       setTemplateOptions(items);
-
-      if (!items.length) {
-        setSelectedTemplateId(null);
-        return;
-      }
-
-      const preferred =
-        preferredTemplateId && items.some((template) => template.id === preferredTemplateId)
-          ? preferredTemplateId
-          : null;
-
-      const currentSelected =
-        selectedTemplateId && items.some((template) => template.id === selectedTemplateId)
-          ? selectedTemplateId
-          : null;
-
-      setSelectedTemplateId(preferred ?? currentSelected ?? items[0].id);
     } catch {
       setTemplateOptions([]);
-      setSelectedTemplateId(null);
       setError("No se pudieron cargar plantillas. Reintenta.");
     }
   }
@@ -458,8 +436,22 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
           {confidence !== null ? <small>Confianza estimada: {Math.round(confidence * 100)}%</small> : null}
           {completenessScore !== null ? <small>Completitud del brief: {Math.round(completenessScore)}%</small> : null}
           {refineProvider ? (
-            <small>Proveedor refine: {refineProvider === "llm" ? "LLM (OpenAI)" : "Heurístico (fallback)"}</small>
+            <small>Proveedor refine: {refineProvider === "llm" ? "LLM" : "Heurístico (fallback)"}</small>
           ) : null}
+
+          <div className="card stack" style={{ background: "var(--surface)" }}>
+            <strong>Cómo se generará tu propuesta</strong>
+            <p style={{ margin: 0 }}>
+              La IA va a proponerte primero un layout personalizado para tu negocio. Después de verlo podrás comparar
+              alternativas por template si quieres explorar otros estilos.
+            </p>
+            {recommendedTemplateLabel && refineProvider === "llm" ? (
+              <small>Si luego quieres comparar, la IA sugiere empezar por: {recommendedTemplateLabel}.</small>
+            ) : (
+              <small>Los templates quedarán disponibles después de generar, como alternativas opcionales.</small>
+            )}
+          </div>
+
           {warnings.length ? (
             <div className="stack">
               <strong>Recomendaciones</strong>
@@ -578,59 +570,12 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
             ))}
           </div>
 
-          <div className="stack">
-            <strong>Plantilla visual</strong>
-            <small>Selecciona una plantilla base para generar el preview.</small>
-            {recommendedTemplateLabel ? (
-              <small>IA sugiere: {recommendedTemplateLabel}</small>
-            ) : (
-              <small>Sin recomendación IA disponible.</small>
-            )}
-            <div className="catalog-grid">
-              {templateOptions.map((template) => {
-                const selected = selectedTemplateId === template.id;
-                const recommended = recommendedTemplateIds.includes(template.id);
-                return (
-                  <button
-                    key={template.id}
-                    type="button"
-                    className="card"
-                    onClick={() => setSelectedTemplateId(template.id)}
-                    style={{
-                      textAlign: "left",
-                      border: selected ? "2px solid var(--brand)" : "1px solid var(--border)",
-                      cursor: "pointer",
-                      background: template.theme.background,
-                      color: template.theme.primary
-                    }}
-                  >
-                    <strong>{template.name}</strong>
-                    <p style={{ margin: "0.35rem 0" }}>{template.description}</p>
-                    <small>{template.preview_label}</small>
-                    {template.tags?.length ? (
-                      <div className="template-tags">
-                        {template.tags.map((tag) => (
-                          <span key={tag} className="template-tag">
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                    {recommended ? (
-                      <small style={{ display: "block", marginTop: "0.35rem" }}>Recomendada por IA</small>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
             <button type="button" className="btn-secondary" onClick={() => setStep(1)}>
               Volver
             </button>
-            <button type="button" className="btn-primary" onClick={handleGenerate} disabled={loadingGenerate || !selectedTemplateId}>
-              {loadingGenerate ? "Generando..." : "Generar preview"}
+            <button type="button" className="btn-primary" onClick={handleGenerate} disabled={loadingGenerate}>
+              {loadingGenerate ? "Generando..." : "Generar propuesta IA"}
             </button>
           </div>
         </section>
@@ -639,8 +584,9 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
       {step === 3 ? (
         <section className="card stack">
           <h2>Generando tu sitio</h2>
-          <p>Estamos construyendo una primera propuesta visual de tu homepage en tiempo real.</p>
+          <p>La IA está construyendo una propuesta visual principal para tu homepage.</p>
           {jobId ? <small>job_id: {jobId}</small> : null}
+
           <div className="stack" style={{ gap: "0.75rem" }}>
             <div
               style={{
@@ -665,11 +611,12 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
               {labelForStage(generationStage)} {generationProgress ? `· ${generationProgress}%` : ""}
             </small>
             {generationFallbackUsed ? (
-              <small>Modo visual actual: fallback determinista. La experiencia sigue siendo usable aunque el worker/IA no haya respondido.</small>
+              <small>Modo visual actual: fallback determinista. La propuesta sigue siendo editable y usable.</small>
             ) : (
-              <small>La propuesta se está construyendo por etapas para que no tengas una espera vacía.</small>
+              <small>La propuesta se construye por etapas para que puedas verla nacer en tiempo real.</small>
             )}
           </div>
+
           <div className="stack" style={{ gap: "0.6rem" }}>
             <strong>Timeline</strong>
             {[
@@ -680,7 +627,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
               ["finalizing", "Preparando preview editable"]
             ].map(([key, label]) => {
               const active = generationStage === key;
-              const completed = stageOrder(generationStage) > stageOrder(key);
+              const completed = stageOrder(generationStage) > stageOrder(key) || (jobStatus === "done" && generationStage === key);
               return (
                 <div
                   key={key}
@@ -704,10 +651,13 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
               );
             })}
           </div>
-          <div className="card" style={{ padding: "0.5rem", overflow: "hidden" }}>
+
+          <div className="card onboarding-generation-preview">
             {generationSnapshot ? (
-              <div style={{ transform: "scale(0.88)", transformOrigin: "top center", width: "113.6%" }}>
-                <SiteRenderer spec={generationSnapshot} viewport="desktop" enableCart={false} />
+              <div className="onboarding-generation-preview-frame">
+                <div className="onboarding-generation-preview-canvas">
+                  <SiteRenderer spec={generationSnapshot} viewport="desktop" enableCart={false} />
+                </div>
               </div>
             ) : (
               <div
@@ -723,6 +673,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
               </div>
             )}
           </div>
+
         </section>
       ) : null}
 

@@ -1156,6 +1156,7 @@ function addSection(type: SiteSectionV3["type"]) {
                         .map((block) => {
                           const rect = rectPercentToPx(getBlockRect(block, viewport), sectionWidth, sectionHeight);
                           const isSelected = selected?.sectionId === section.id && selected?.blockId === block.id;
+                          const visualHeight = block.type === "text" ? getTextBlockMinHeightPx(block, rect.w, rect.h) : rect.h;
 
                           return (
                             <div
@@ -1165,7 +1166,8 @@ function addSection(type: SiteSectionV3["type"]) {
                                 left: rect.x,
                                 top: rect.y,
                                 width: rect.w,
-                                height: rect.h,
+                                height: visualHeight,
+                                minHeight: visualHeight,
                                 zIndex: rect.z,
                                 borderRadius: block.style.radius ?? 0,
                                 color: block.style.color,
@@ -1179,7 +1181,10 @@ function addSection(type: SiteSectionV3["type"]) {
                                 fontFamily: block.style.fontFamily ?? siteSpec.theme.font_body,
                                 textAlign: block.style.textAlign as "left" | "center" | "right" | undefined,
                                 padding: block.type === "text" ? 8 : 0,
-                                overflow: isSelected ? "visible" : "hidden"
+                                overflow: "visible",
+                                whiteSpace: block.type === "text" ? "pre-wrap" : undefined,
+                                overflowWrap: block.type === "text" ? "anywhere" : undefined,
+                                lineHeight: block.type === "text" ? 1.15 : undefined
                               }}
                               onMouseDown={(event) => startDragging(event, section.id, block, "move")}
                               onClick={(event) => {
@@ -2096,6 +2101,23 @@ function getBlockRect(block: CanvasBlock, viewport: EditorViewport) {
 function getSectionHeightPx(section: SiteSectionV3, viewport: EditorViewport, width: number) {
   const ratio = viewport === "mobile" ? section.height_ratio.mobile : section.height_ratio.desktop;
   return Math.max(1, width * ratio);
+}
+
+function getTextBlockMinHeightPx(
+  block: Extract<CanvasBlock, { type: "text" }>,
+  width: number,
+  fallbackHeight: number
+) {
+  const fontSize = block.style.fontSize ?? 18;
+  const horizontalPadding = 16;
+  const usableWidth = Math.max(40, width - horizontalPadding);
+  const averageCharWidth = Math.max(7, fontSize * 0.56);
+  const charsPerLine = Math.max(6, Math.floor(usableWidth / averageCharWidth));
+  const lines = String(block.content.text || "")
+    .split("\n")
+    .reduce((total, line) => total + Math.max(1, Math.ceil(Math.max(1, line.length) / charsPerLine)), 0);
+  const computedHeight = lines * fontSize * 1.15 + 20;
+  return Math.max(fallbackHeight, computedHeight);
 }
 
 function rectFromPx(

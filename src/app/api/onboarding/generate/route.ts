@@ -16,7 +16,7 @@ const bodySchema = z.object({
   siteId: z.string().uuid(),
   inputMode: onboardingInputModeSchema,
   briefDraft: businessBriefDraftSchema,
-  templateId: z.enum(templateIds),
+  templateId: z.enum(templateIds).optional(),
   recommendedTemplateId: z.enum(templateIds).optional(),
   refineConfidence: z.number().min(0).max(1).optional(),
   warnings: z.array(z.string()).max(20).optional()
@@ -45,9 +45,11 @@ export async function POST(request: NextRequest) {
   }
 
   const { siteId, inputMode, briefDraft, templateId, recommendedTemplateId, refineConfidence, warnings } = parsed.data;
-  const selectedTemplate = getTemplateById(templateId);
-  if (!selectedTemplate || selectedTemplate.site_type !== briefDraft.business_type) {
-    return NextResponse.json({ error: "Template no válida para el tipo de sitio seleccionado." }, { status: 400 });
+  if (templateId) {
+    const selectedTemplate = getTemplateById(templateId);
+    if (!selectedTemplate || selectedTemplate.site_type !== briefDraft.business_type) {
+      return NextResponse.json({ error: "Template no válida para el tipo de sitio seleccionado." }, { status: 400 });
+    }
   }
 
   const { data: site } = await supabase
@@ -66,19 +68,21 @@ export async function POST(request: NextRequest) {
   const admin = getSupabaseAdminClient();
   const prompt = buildPromptFromBrief(briefDraft, { templateId });
 
-  try {
-    await recordPlatformEvent(admin, {
-      eventType: "template.selected",
-      userId: user.id,
-      siteId,
-      payload: {
-        templateId,
-        recommendedTemplateId: recommendedTemplateId ?? null,
-        selectedRecommended: recommendedTemplateId ? recommendedTemplateId === templateId : null
-      }
-    });
-  } catch {
-    // best effort
+  if (templateId) {
+    try {
+      await recordPlatformEvent(admin, {
+        eventType: "template.selected",
+        userId: user.id,
+        siteId,
+        payload: {
+          templateId,
+          recommendedTemplateId: recommendedTemplateId ?? null,
+          selectedRecommended: recommendedTemplateId ? recommendedTemplateId === templateId : null
+        }
+      });
+    } catch {
+      // best effort
+    }
   }
 
   const result = await startSiteGeneration({

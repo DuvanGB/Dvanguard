@@ -5,8 +5,10 @@ import { incrementAiGenerationUsage } from "@/lib/billing/usage";
 import { generateSiteSpecFromPrompt } from "@/lib/ai/generate-site-spec";
 import {
   applyDesignPatchToSpec,
+  buildHeuristicLayoutProposal,
   buildHeuristicDesignPatch,
   buildVisualSeedSpec,
+  compileLayoutProposalToDesignPatch,
   type DesignPatch,
   type VisualGenerationProgressPayload,
   type VisualGenerationStage
@@ -42,6 +44,7 @@ type ApplyVisualProgressInput = {
   stage: VisualGenerationStage;
   progressPercent: number;
   message: string;
+  layoutProposal?: VisualGenerationProgressPayload["layoutProposal"];
   designPatch?: DesignPatch;
   source?: "worker" | "fallback";
   fallbackUsed?: boolean;
@@ -183,7 +186,14 @@ export async function applyVisualGenerationProgress(input: ApplyVisualProgressIn
     templateId: jobInput.meta?.template_id ?? undefined,
     briefDraft: jobInput.briefDraft ?? undefined
   });
-  const snapshot = applyDesignPatchToSpec(seedSpec, input.designPatch);
+  const effectivePatch =
+    input.layoutProposal ? compileLayoutProposalToDesignPatch(input.layoutProposal) : input.designPatch;
+  const snapshot = applyDesignPatchToSpec(seedSpec, effectivePatch);
+  const sectionCompositionChoices =
+    input.layoutProposal?.section_compositions.map((section) => ({
+      sectionType: section.type,
+      variant: section.variant
+    })) ?? null;
   const baseOutput = {
     ...((job.output_json as Record<string, unknown> | null) ?? {}),
     stage: input.stage,
@@ -192,7 +202,11 @@ export async function applyVisualGenerationProgress(input: ApplyVisualProgressIn
     snapshot,
     fallbackUsed: input.fallbackUsed ?? false,
     source: input.source ?? "worker",
-    designPatch: input.designPatch ?? null
+    compositionSource: input.source ?? "worker",
+    sectionCompositionChoices,
+    fallbackReason: input.source === "fallback" ? "worker_unavailable_or_model_error" : null,
+    designPatch: effectivePatch ?? null,
+    layoutProposal: input.layoutProposal ?? null
   };
 
   if (input.completed) {
@@ -263,11 +277,11 @@ export async function runLocalVisualGenerationFallback(input: {
   }
 
   const jobInput = ((job.input_json as JobInputJson | null) ?? {}) as JobInputJson;
-  const designPatch = buildHeuristicDesignPatch({
+  const layoutProposal = buildHeuristicLayoutProposal({
     prompt: jobInput.prompt ?? "",
-    templateId: jobInput.meta?.template_id ?? undefined,
     briefDraft: jobInput.briefDraft ?? undefined
   });
+  const designPatch = compileLayoutProposalToDesignPatch(layoutProposal);
 
   const stages: Array<Omit<VisualGenerationProgressPayload, "source" | "fallbackUsed" | "completed"> & { completed?: boolean }> = [
     {
@@ -279,21 +293,21 @@ export async function runLocalVisualGenerationFallback(input: {
       stage: "visual_direction",
       progressPercent: 34,
       message: "Definiendo dirección visual",
-      designPatch: {
-        visualDirection: designPatch.visualDirection,
-        templateFamily: designPatch.templateFamily,
-        themePatch: designPatch.themePatch,
-        sectionHeightPatch: designPatch.sectionHeightPatch
+      layoutProposal: {
+        ...layoutProposal,
+        section_order: ["hero"],
+        section_compositions: layoutProposal.section_compositions.filter((section) => section.type === "hero")
       }
     },
     {
       stage: "layout_seed",
       progressPercent: 62,
       message: "Armando layout inicial",
-      designPatch: {
-        ...designPatch,
-        blockPatches: (designPatch.blockPatches ?? []).filter((patch) =>
-          ["headline", "subheadline", "hero-image", "hero-bg", "hero-overlay"].some((value) => patch.matchId.includes(value))
+      layoutProposal: {
+        ...layoutProposal,
+        section_order: layoutProposal.section_order.filter((type) => type === "hero" || type === "catalog"),
+        section_compositions: layoutProposal.section_compositions.filter(
+          (section) => section.type === "hero" || section.type === "catalog"
         )
       }
     },
@@ -301,13 +315,13 @@ export async function runLocalVisualGenerationFallback(input: {
       stage: "content_polish",
       progressPercent: 84,
       message: "Aplicando contenido y estilo",
-      designPatch
+      layoutProposal
     },
     {
       stage: "finalizing",
       progressPercent: 100,
       message: "Preparando preview editable",
-      designPatch,
+      layoutProposal,
       completed: true
     }
   ];
@@ -319,6 +333,7 @@ export async function runLocalVisualGenerationFallback(input: {
       stage: stage.stage,
       progressPercent: stage.progressPercent,
       message: stage.message,
+      layoutProposal: stage.layoutProposal,
       designPatch: stage.designPatch,
       source: "fallback",
       fallbackUsed: true,

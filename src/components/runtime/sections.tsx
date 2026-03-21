@@ -132,7 +132,19 @@ function CanvasBlockRenderer({
   if (block.type === "text") {
     if (!block.content || typeof block.content.text !== "string") return null;
     return (
-      <div style={{ ...style, padding: 8 }} onClick={() => onSelectBlock?.(sectionId, block.id)}>
+      <div
+        style={{
+          ...style,
+          minHeight: style.height,
+          height: "auto",
+          overflow: "visible",
+          padding: 8,
+          whiteSpace: "pre-wrap",
+          overflowWrap: "anywhere",
+          lineHeight: 1.15
+        }}
+        onClick={() => onSelectBlock?.(sectionId, block.id)}
+      >
         {block.content.text}
       </div>
     );
