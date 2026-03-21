@@ -17,6 +17,7 @@ type Props = {
 
 type EditorSaveState = "idle" | "saving" | "saved" | "error";
 type EditorViewport = "desktop" | "mobile";
+type EditorZoomMode = "fit" | "manual";
 type DragMode = "move" | "resize";
 
 type SelectedBlock = {
@@ -79,6 +80,8 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
   const [siteSpec, setSiteSpec] = useState<SiteSpecV3>(normalized.spec);
   const [wasMigrated] = useState(() => initialMigrated ?? normalized.migrated);
   const [viewport, setViewport] = useState<EditorViewport>("desktop");
+  const [zoomMode, setZoomMode] = useState<EditorZoomMode>("fit");
+  const [zoomPercent, setZoomPercent] = useState(100);
   const [selected, setSelected] = useState<SelectedBlock | null>(null);
   const [saveState, setSaveState] = useState<EditorSaveState>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
@@ -91,7 +94,9 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
   const [leftTab, setLeftTab] = useState<"templates" | "sections" | "layers">("templates");
   const [rightTab, setRightTab] = useState<"content" | "style" | "position">("content");
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const canvasShellRef = useRef<HTMLDivElement | null>(null);
   const [canvasWidth, setCanvasWidth] = useState<number>(CANVAS_BASE_WIDTH.desktop);
+  const [canvasHostWidth, setCanvasHostWidth] = useState<number>(CANVAS_BASE_WIDTH.desktop);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
 
   const [assets, setAssets] = useState<SiteAsset[]>([]);
@@ -122,6 +127,14 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
   const blockTargetSection =
     (blockTargetSectionId && home?.sections.find((section) => section.id === blockTargetSectionId)) ?? selectedSection ?? home?.sections[0] ?? null;
   const headerVariant = siteSpec.header?.variant ?? "none";
+  const canvasBaseWidth = CANVAS_BASE_WIDTH[viewport];
+  const fitZoomPercent = useMemo(() => {
+    const availableWidth = Math.max(240, canvasHostWidth - 32);
+    const next = (availableWidth / canvasBaseWidth) * 100;
+    return clampZoomPercent(next);
+  }, [canvasBaseWidth, canvasHostWidth]);
+  const effectiveZoomPercent = zoomMode === "fit" ? fitZoomPercent : zoomPercent;
+  const zoomScale = effectiveZoomPercent / 100;
 
   useEffect(() => {
     if (!home?.sections?.length) return;
@@ -146,6 +159,22 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!canvasShellRef.current) return;
+    const node = canvasShellRef.current;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setCanvasHostWidth(entry.contentRect.width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    setZoomMode("fit");
+  }, [viewport]);
 
   useEffect(() => {
     if (!wasMigrated) return;
@@ -205,7 +234,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
     const onMouseMove = (event: MouseEvent) => {
       const sectionDrag = sectionDragRef.current;
       if (sectionDrag) {
-        const deltaY = event.clientY - sectionDrag.startY;
+        const deltaY = (event.clientY - sectionDrag.startY) / zoomScale;
         const nextHeight = Math.max(200, sectionDrag.initialHeight + deltaY);
         const nextRatio = clampRatio(nextHeight / sectionDrag.sectionWidth);
         updateSection(sectionDrag.sectionId, (section) => ({
@@ -224,8 +253,8 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
       const section = home?.sections.find((item) => item.id === drag.sectionId);
       if (!section) return;
 
-      const deltaX = event.clientX - drag.startX;
-      const deltaY = event.clientY - drag.startY;
+      const deltaX = (event.clientX - drag.startX) / zoomScale;
+      const deltaY = (event.clientY - drag.startY) / zoomScale;
       const sectionWidth = drag.sectionWidth;
       const sectionHeight = drag.sectionHeight;
 
@@ -266,7 +295,7 @@ export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMi
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, [home?.sections, viewport]);
+  }, [home?.sections, viewport, zoomScale]);
 
   function setHomeSections(updater: (sections: SiteSectionV3[]) => SiteSectionV3[]) {
     if (!home) return;
@@ -401,6 +430,20 @@ function addSection(type: SiteSectionV3["type"]) {
     setSelected({ sectionId, blockId: nextBlock.id });
     setSelectedSectionId(sectionId);
     setBlockTargetSectionId(sectionId);
+  }
+
+  function zoomIn() {
+    setZoomMode("manual");
+    setZoomPercent((current) => clampZoomPercent((zoomMode === "fit" ? fitZoomPercent : current) + 10));
+  }
+
+  function zoomOut() {
+    setZoomMode("manual");
+    setZoomPercent((current) => clampZoomPercent((zoomMode === "fit" ? fitZoomPercent : current) - 10));
+  }
+
+  function resetZoom() {
+    setZoomMode("fit");
   }
 
   function removeLastBlockOfType(sectionId: string, type: CanvasBlock["type"]) {
@@ -1099,16 +1142,41 @@ function addSection(type: SiteSectionV3["type"]) {
         </aside>
 
         <section className="editor-canvas-area">
-          <div className="editor-canvas-shell">
+          <div className="editor-canvas-zoom-dock" aria-label="Controles de zoom del canvas">
+            <button type="button" className="editor-canvas-zoom-icon" onClick={zoomOut} aria-label="Alejar preview">
+              −
+            </button>
+            <div className="editor-canvas-zoom-pill">
+              <span className="editor-canvas-zoom-glyph" aria-hidden="true">
+                🔍
+              </span>
+              <span className="editor-canvas-zoom-value">{Math.round(effectiveZoomPercent)}%</span>
+            </div>
+            <button type="button" className="editor-canvas-zoom-icon" onClick={zoomIn} aria-label="Acercar preview">
+              +
+            </button>
+            <button type="button" className="editor-canvas-zoom-reset" onClick={resetZoom}>
+              Ajustar
+            </button>
+          </div>
+          <div className="editor-canvas-shell" ref={canvasShellRef}>
             <div
-              className="editor-canvas"
-              ref={canvasRef}
+              className="editor-canvas-zoom"
               style={{
-                width: "100%",
-                background: siteSpec.theme.background,
-                fontFamily: siteSpec.theme.font_body
+                width: `${canvasBaseWidth}px`,
+                transform: `scale(${zoomScale})`
               }}
             >
+              <div
+                className="editor-canvas"
+                ref={canvasRef}
+                style={{
+                  width: `${canvasBaseWidth}px`,
+                  minWidth: `${canvasBaseWidth}px`,
+                  background: siteSpec.theme.background,
+                  fontFamily: siteSpec.theme.font_body
+                }}
+              >
               {(home?.sections ?? [])
                 .filter((section) => section.enabled)
                 .map((section) => {
@@ -1139,8 +1207,8 @@ function addSection(type: SiteSectionV3["type"]) {
                         if (!draggingBlockType) return;
                         event.preventDefault();
                         const rect = event.currentTarget.getBoundingClientRect();
-                        const x = event.clientX - rect.left;
-                        const y = event.clientY - rect.top;
+                        const x = (event.clientX - rect.left) / zoomScale;
+                        const y = (event.clientY - rect.top) / zoomScale;
                         addBlockAtPosition(section.id, draggingBlockType, x, y, sectionWidth, sectionHeight);
                         setDraggingBlockType(null);
                         setCanvasDropSectionId(null);
@@ -1261,6 +1329,7 @@ function addSection(type: SiteSectionV3["type"]) {
                     </article>
                   );
                 })}
+              </div>
             </div>
           </div>
         </section>
@@ -2181,6 +2250,10 @@ function ratioFromPx(value: number, viewport: EditorViewport) {
 
 function clampRatio(value: number) {
   return Math.max(0.2, Math.min(3, round(value, 4)));
+}
+
+function clampZoomPercent(value: number) {
+  return Math.max(50, Math.min(150, Math.round(value)));
 }
 
 function round(value: number, decimals = 3) {
