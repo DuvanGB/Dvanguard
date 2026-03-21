@@ -243,6 +243,7 @@ td {
   gap: 1rem;
   padding: 1rem 1.25rem 1.5rem;
   align-items: start;
+  min-height: 0;
 }
 
 .editor-rail,
@@ -541,11 +542,13 @@ td {
 }
 
 .editor-canvas-area {
+  height: calc(100vh - 120px);
   min-height: calc(100vh - 120px);
   display: grid;
   align-content: start;
   position: relative;
   z-index: 10;
+  min-width: 0;
 }
 
 .editor-canvas-zoom-dock {
@@ -625,8 +628,10 @@ td {
   background: #e2e8f0;
   border-radius: 1rem;
   padding: 1rem;
-  min-height: calc(100vh - 140px);
-  overflow: auto;
+  height: 100%;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: auto;
   overscroll-behavior: contain;
 }
 
