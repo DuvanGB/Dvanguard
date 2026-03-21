@@ -1261,9 +1261,6 @@ function addSection(type: SiteSectionV3["type"]) {
         </section>
 
         <aside className="editor-inspector">
-          <div className="editor-inspector-header">
-            <strong>Inspector</strong>
-          </div>
 
           <div className="editor-tabs">
             <button type="button" className={rightTab === "content" ? "tab active" : "tab"} onClick={() => setRightTab("content")}>

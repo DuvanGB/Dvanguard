@@ -8,6 +8,7 @@
     "dev:no-db": "next dev",
     "build": "next build",
     "start": "next start",
+    "worker:dev": "node worker/server.mjs",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "db:init": "supabase init",

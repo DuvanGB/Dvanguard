@@ -1,11 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { executeSiteGenerationJob } from "@/lib/ai/process-site-generation";
-import { getUsageSnapshot, incrementAiGenerationUsage } from "@/lib/billing/usage";
+import { buildVisualSeedSpec } from "@/lib/ai/visual-generation";
+import { runLocalVisualGenerationFallback } from "@/lib/ai/process-site-generation";
+import { triggerVisualGenerationWorker } from "@/lib/ai/worker-client";
+import { getUsageSnapshot } from "@/lib/billing/usage";
 import { logError, logInfo } from "@/lib/logger";
 import type { BusinessBriefDraft } from "@/lib/onboarding/types";
 import { recordPlatformEvent } from "@/lib/platform-events";
 import type { TemplateId } from "@/lib/templates/types";
+import { env } from "@/lib/env";
 
 type StartGenerationInput = {
   supabase: SupabaseClient;
@@ -23,14 +26,11 @@ type StartGenerationInput = {
 type StartGenerationResult =
   | {
       ok: true;
-      status: 200;
+      status: 202;
       data: {
         jobId: string;
-        status: "done";
-        versionId?: string;
-        source?: string;
-        latencyMs?: number;
-        fallbackReason?: string | null;
+        status: "queued";
+        jobType: "visual_home_generation";
       };
     }
   | {
@@ -87,14 +87,20 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
     .select("id", { count: "exact", head: true })
     .eq("site_id", siteId)
     .eq("created_by", userId)
-    .eq("job_type", "site_generation");
+    .in("job_type", ["site_generation", "visual_home_generation"]);
+
+  const seedSpec = buildVisualSeedSpec({
+    prompt,
+    templateId: input.templateId,
+    briefDraft: input.briefDraft
+  });
 
   const { data: job, error: jobError } = await supabase
     .from("ai_jobs")
     .insert({
       site_id: siteId,
       created_by: userId,
-      job_type: "site_generation",
+      job_type: "visual_home_generation",
       input_json: {
         prompt,
         briefDraft: input.briefDraft ?? null,
@@ -105,7 +111,15 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
           warnings_count: input.warningsCount ?? 0
         }
       },
-      status: "queued"
+      status: "queued",
+      output_json: {
+        stage: "brief_analysis",
+        progressPercent: 8,
+        message: "Analizando tu negocio",
+        snapshot: seedSpec,
+        fallbackUsed: false,
+        source: "worker"
+      }
     })
     .select("id")
     .maybeSingle();
@@ -114,66 +128,41 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
     return { ok: false, status: 400, data: { error: jobError?.message ?? "Failed to create AI job" } };
   }
 
-  await supabase.from("ai_jobs").update({ status: "processing", started_at: new Date().toISOString() }).eq("id", job.id);
-
-  const result = await executeSiteGenerationJob({
-    supabase,
+  const workerTrigger = await triggerVisualGenerationWorker({
+    jobId: job.id,
     siteId,
     prompt,
-    jobId: job.id,
-    eventType: "site.generated",
     templateId: input.templateId,
     briefDraft: input.briefDraft,
-    extraEventPayload: {
-      inputMode: input.inputMode,
-      templateId: input.templateId ?? null,
-      refineConfidence: input.refineConfidence ?? null,
-      warningsCount: input.warningsCount ?? 0
-    }
+    callbackBaseUrl: env.appUrl
   });
 
-  if (!result.ok) {
-    logError("ai_generation_failed", { jobId: job.id, siteId, error: result.error });
-    return { ok: false, status: 500, data: { jobId: job.id, status: "failed", error: result.error } };
-  }
-
-  await incrementAiGenerationUsage(admin, userId);
-
-  try {
-    await recordPlatformEvent(admin, {
-      eventType: (previousJobsCount ?? 0) === 0 ? "site.generation.first_attempt_done" : "site.generation.regenerated",
-      userId,
+  if (!workerTrigger.ok) {
+    logInfo("ai_generation_worker_fallback", {
+      jobId: job.id,
       siteId,
-      payload: {
-        jobId: job.id,
-        inputMode: input.inputMode,
-        templateId: input.templateId ?? null,
-        refineConfidence: input.refineConfidence ?? null,
-        warningsCount: input.warningsCount ?? 0
-      }
+      reason: workerTrigger.reason
     });
-  } catch {
-    // best effort event logging
-  }
 
-  logInfo("ai_generation_done", {
-    jobId: job.id,
-    siteId,
-    source: result.source,
-    latencyMs: result.latencyMs,
-    fallbackReason: result.fallbackReason
-  });
+    void runLocalVisualGenerationFallback({
+      supabase: admin,
+      jobId: job.id
+    }).catch((error) => {
+      logError("ai_generation_local_fallback_failed", {
+        jobId: job.id,
+        siteId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
+  }
 
   return {
     ok: true,
-    status: 200,
+    status: 202,
     data: {
       jobId: job.id,
-      status: "done",
-      versionId: result.versionId,
-      source: result.source,
-      latencyMs: result.latencyMs,
-      fallbackReason: result.fallbackReason
+      status: "queued",
+      jobType: "visual_home_generation"
     }
   };
 }

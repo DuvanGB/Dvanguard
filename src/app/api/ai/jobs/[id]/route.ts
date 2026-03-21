@@ -24,6 +24,13 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   return NextResponse.json({
     jobId: job.id,
     status: job.status,
+    stage: (job.output_json as { stage?: string } | null)?.stage ?? null,
+    progressPercent: (job.output_json as { progressPercent?: number } | null)?.progressPercent ?? null,
+    message: (job.output_json as { message?: string } | null)?.message ?? null,
+    snapshot: (job.output_json as { snapshot?: unknown } | null)?.snapshot ?? null,
+    fallbackUsed: (job.output_json as { fallbackUsed?: boolean } | null)?.fallbackUsed ?? false,
+    source: (job.output_json as { source?: string } | null)?.source ?? null,
+    versionId: (job.output_json as { versionId?: string } | null)?.versionId ?? null,
     output: job.output_json,
     error: job.error
   });

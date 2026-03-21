@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
+import { SiteRenderer } from "@/components/runtime/site-renderer";
 import type { BusinessBriefDraft, OnboardingInputMode } from "@/lib/onboarding/types";
+import type { SiteSpecV3 } from "@/lib/site-spec-v3";
 import type { TemplateId } from "@/lib/templates/types";
 
 type RefineResponse = {
@@ -22,7 +24,17 @@ type RefineResponse = {
 type GenerateResponse = {
   jobId: string;
   status: "queued" | "processing" | "done" | "failed";
-  versionId?: string;
+  jobType?: "visual_home_generation";
+  error?: string;
+};
+
+type JobStatusResponse = {
+  status: "queued" | "processing" | "done" | "failed";
+  stage?: string | null;
+  progressPercent?: number | null;
+  message?: string | null;
+  snapshot?: SiteSpecV3 | null;
+  fallbackUsed?: boolean;
   error?: string;
 };
 
@@ -90,6 +102,11 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
   const [loadingRefine, setLoadingRefine] = useState(false);
   const [loadingGenerate, setLoadingGenerate] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [generationStage, setGenerationStage] = useState<string | null>(null);
+  const [generationMessage, setGenerationMessage] = useState<string | null>(null);
+  const [generationProgress, setGenerationProgress] = useState<number>(0);
+  const [generationSnapshot, setGenerationSnapshot] = useState<SiteSpecV3 | null>(null);
+  const [generationFallbackUsed, setGenerationFallbackUsed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const canRefine = useMemo(() => rawInput.trim().length >= 10 && rawInput.length <= maxInputChars, [rawInput, maxInputChars]);
@@ -121,7 +138,13 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
   async function pollJob(currentJobId: string) {
     for (let attempt = 0; attempt < 25; attempt += 1) {
       const response = await fetch(`/api/ai/jobs/${currentJobId}`);
-      const data = (await response.json()) as { status: string; error?: string };
+      const data = (await response.json()) as JobStatusResponse;
+
+      setGenerationStage(data.stage ?? null);
+      setGenerationMessage(data.message ?? null);
+      setGenerationProgress(typeof data.progressPercent === "number" ? data.progressPercent : 0);
+      setGenerationSnapshot(data.snapshot ?? null);
+      setGenerationFallbackUsed(Boolean(data.fallbackUsed));
 
       if (data.status === "done") {
         router.push(`/sites/${siteId}`);
@@ -275,6 +298,11 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
     setLoadingGenerate(true);
     setError(null);
     setStep(3);
+    setGenerationProgress(6);
+    setGenerationStage("brief_analysis");
+    setGenerationMessage("Analizando tu negocio");
+    setGenerationSnapshot(null);
+    setGenerationFallbackUsed(false);
 
     try {
       const finalBrief = {
@@ -306,11 +334,6 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
       }
 
       setJobId(data.jobId);
-      if (data.status === "done") {
-        router.push(`/sites/${siteId}`);
-        return;
-      }
-
       await pollJob(data.jobId);
       setLoadingGenerate(false);
     } catch {
@@ -616,15 +639,116 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
       {step === 3 ? (
         <section className="card stack">
           <h2>Generando tu sitio</h2>
-          <p>Estamos creando la versión inicial de tu web.</p>
+          <p>Estamos construyendo una primera propuesta visual de tu homepage en tiempo real.</p>
           {jobId ? <small>job_id: {jobId}</small> : null}
-          {loadingGenerate ? <small>Esto puede tardar hasta 20 segundos.</small> : null}
+          <div className="stack" style={{ gap: "0.75rem" }}>
+            <div
+              style={{
+                width: "100%",
+                height: "0.7rem",
+                borderRadius: "999px",
+                background: "var(--surface)"
+              }}
+            >
+              <div
+                style={{
+                  width: `${Math.max(6, generationProgress)}%`,
+                  height: "100%",
+                  borderRadius: "999px",
+                  background: "linear-gradient(90deg, var(--brand), #38bdf8)",
+                  transition: "width 0.35s ease"
+                }}
+              />
+            </div>
+            <strong>{generationMessage ?? "Preparando generación visual..."}</strong>
+            <small>
+              {labelForStage(generationStage)} {generationProgress ? `· ${generationProgress}%` : ""}
+            </small>
+            {generationFallbackUsed ? (
+              <small>Modo visual actual: fallback determinista. La experiencia sigue siendo usable aunque el worker/IA no haya respondido.</small>
+            ) : (
+              <small>La propuesta se está construyendo por etapas para que no tengas una espera vacía.</small>
+            )}
+          </div>
+          <div className="stack" style={{ gap: "0.6rem" }}>
+            <strong>Timeline</strong>
+            {[
+              ["brief_analysis", "Analizando tu negocio"],
+              ["visual_direction", "Definiendo dirección visual"],
+              ["layout_seed", "Armando layout inicial"],
+              ["content_polish", "Aplicando contenido y estilo"],
+              ["finalizing", "Preparando preview editable"]
+            ].map(([key, label]) => {
+              const active = generationStage === key;
+              const completed = stageOrder(generationStage) > stageOrder(key);
+              return (
+                <div
+                  key={key}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.65rem",
+                    opacity: active || completed ? 1 : 0.55
+                  }}
+                >
+                  <span
+                    style={{
+                      width: "0.8rem",
+                      height: "0.8rem",
+                      borderRadius: "999px",
+                      background: completed ? "var(--brand)" : active ? "#38bdf8" : "var(--border)"
+                    }}
+                  />
+                  <span>{label}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="card" style={{ padding: "0.5rem", overflow: "hidden" }}>
+            {generationSnapshot ? (
+              <div style={{ transform: "scale(0.88)", transformOrigin: "top center", width: "113.6%" }}>
+                <SiteRenderer spec={generationSnapshot} viewport="desktop" enableCart={false} />
+              </div>
+            ) : (
+              <div
+                style={{
+                  minHeight: "420px",
+                  display: "grid",
+                  placeItems: "center",
+                  background: "linear-gradient(180deg, #f8fafc 0%, #eef6ff 100%)",
+                  borderRadius: "1rem"
+                }}
+              >
+                <p style={{ margin: 0 }}>Preparando el primer snapshot visual...</p>
+              </div>
+            )}
+          </div>
         </section>
       ) : null}
 
       {error ? <p>{error}</p> : null}
     </div>
   );
+}
+
+function stageOrder(stage: string | null | undefined) {
+  return {
+    brief_analysis: 1,
+    visual_direction: 2,
+    layout_seed: 3,
+    content_polish: 4,
+    finalizing: 5
+  }[stage ?? ""] ?? 0;
+}
+
+function labelForStage(stage: string | null | undefined) {
+  return {
+    brief_analysis: "Analizando tu negocio",
+    visual_direction: "Definiendo dirección visual",
+    layout_seed: "Armando layout inicial",
+    content_polish: "Aplicando contenido y estilo",
+    finalizing: "Preparando preview editable"
+  }[stage ?? ""] ?? "Iniciando generación";
 }
 
 function getRecognitionCtor(): RecognitionCtor | null {

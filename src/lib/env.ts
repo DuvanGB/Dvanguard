@@ -25,6 +25,10 @@ export const env = {
   aiBaseUrl: process.env.AI_BASE_URL ?? "",
   aiApiKey: process.env.AI_API_KEY ?? "",
   aiModel: process.env.AI_MODEL ?? "",
+  aiWorkerBaseUrl: process.env.AI_WORKER_BASE_URL ?? "",
+  aiWorkerSharedSecret: process.env.AI_WORKER_SHARED_SECRET ?? "",
+  aiWorkerModel: process.env.AI_WORKER_MODEL ?? "qwen2.5:7b-instruct",
+  aiGenerationPollMs: parsePositiveInt(process.env.AI_GENERATION_POLL_MS, 1200),
   onboardingRefineProvider: process.env.ONBOARDING_REFINE_PROVIDER ?? "llm",
   voiceLocale: process.env.VOICE_LOCALE ?? "es-CO",
   onboardingMaxInputChars: parsePositiveInt(process.env.ONBOARDING_MAX_INPUT_CHARS, 3000)
