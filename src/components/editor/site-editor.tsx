@@ -153,8 +153,10 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<"none" | "rail" | "inspector">("none");
   const [isMobileEditor, setIsMobileEditor] = useState(false);
+  const [mobileTopbarExpanded, setMobileTopbarExpanded] = useState(false);
   const versionsMenuRef = useRef<HTMLDivElement | null>(null);
   const moreMenuRef = useRef<HTMLDivElement | null>(null);
+  const topbarRef = useRef<HTMLElement | null>(null);
 
   const currentHash = useMemo(() => hashSpec(siteSpec), [siteSpec]);
   const isDirty = currentHash !== lastPersistedHash;
@@ -257,6 +259,7 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
       setIsMobileEditor(next);
       if (!next) {
         setMobilePanel("none");
+        setMobileTopbarExpanded(false);
       }
     };
     sync();
@@ -273,6 +276,9 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
       if (moreMenuRef.current && !moreMenuRef.current.contains(target)) {
         setMoreMenuOpen(false);
       }
+      if (topbarRef.current && !topbarRef.current.contains(target)) {
+        setMobileTopbarExpanded(false);
+      }
     }
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
@@ -282,6 +288,9 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
     if (!isMobileEditor) return;
     setMoreMenuOpen(false);
     setVersionsOpen(false);
+    if (mobilePanel !== "none") {
+      setMobileTopbarExpanded(false);
+    }
   }, [mobilePanel, isMobileEditor]);
 
   useEffect(() => {
@@ -1061,16 +1070,6 @@ function addSection(type: SiteSectionV3["type"]) {
     }));
   }
 
-  const saveStatus =
-    saveState === "saving"
-      ? "Guardando..."
-      : saveState === "saved" && savedAgoLabel
-        ? `Guardado ${savedAgoLabel}`
-        : saveState === "error"
-          ? "Error al guardar"
-          : !isDirty
-            ? "Sin cambios"
-            : "Pendiente";
   const canUndo = historyPast.length > 0;
   const canRedo = historyFuture.length > 0;
   const currentVersionBadge = versions.find((item) => item.isCurrent) ?? null;
@@ -1081,17 +1080,132 @@ function addSection(type: SiteSectionV3["type"]) {
   const isFontFamily = (value: string): value is (typeof fontFamilies)[number] =>
     (fontFamilies as readonly string[]).includes(value);
 
+  function renderHistoryActions() {
+    return (
+      <div className="editor-history-actions" role="group" aria-label="Deshacer y rehacer">
+        <button
+          type="button"
+          className="editor-icon-button"
+          onClick={undoLastChange}
+          disabled={!canUndo}
+          title="Deshacer (Ctrl/Cmd + Z)"
+          aria-label="Deshacer"
+        >
+          <UndoIcon />
+        </button>
+        <button
+          type="button"
+          className="editor-icon-button"
+          onClick={redoLastChange}
+          disabled={!canRedo}
+          title="Rehacer (Ctrl/Cmd + Shift + Z)"
+          aria-label="Rehacer"
+        >
+          <RedoIcon />
+        </button>
+        <button
+          type="button"
+          className="editor-icon-button"
+          onClick={() => void saveCheckpoint()}
+          title="Guardar checkpoint"
+          aria-label="Guardar checkpoint"
+        >
+          <SaveIcon />
+        </button>
+      </div>
+    );
+  }
+
+  function renderViewportSwitch() {
+    return (
+      <div className="editor-viewport-switch" role="group" aria-label="Vista del sitio">
+        <button
+          type="button"
+          className={viewport === "desktop" ? "editor-viewport-option active" : "editor-viewport-option"}
+          onClick={() => setViewport("desktop")}
+          aria-pressed={viewport === "desktop"}
+        >
+          <DesktopPreviewIcon />
+          <span>Desktop</span>
+        </button>
+        <button
+          type="button"
+          className={viewport === "mobile" ? "editor-viewport-option active" : "editor-viewport-option"}
+          onClick={() => setViewport("mobile")}
+          aria-pressed={viewport === "mobile"}
+        >
+          <MobilePreviewIcon />
+          <span>Mobile</span>
+        </button>
+      </div>
+    );
+  }
+
+  function renderMoreMenu() {
+    return (
+      <div className="editor-overflow-menu" ref={moreMenuRef}>
+        <button
+          type="button"
+          className="editor-icon-button editor-overflow-trigger"
+          onClick={() => {
+            setMoreMenuOpen((current) => !current);
+            setVersionsOpen(false);
+          }}
+          aria-expanded={moreMenuOpen}
+          aria-label="Más acciones"
+          title="Más acciones"
+        >
+          <PlusIcon />
+        </button>
+        {moreMenuOpen ? (
+          <div className="editor-overflow-popover">
+            <ModuleTour
+              module="editor"
+              title="Cómo editar tu sitio"
+              description="Este editor te permite ajustar el layout, el contenido y la publicación de tu página."
+              compact
+              steps={[
+                {
+                  title: "Selecciona y mueve bloques",
+                  body: "Haz clic sobre cualquier bloque para editarlo y arrástralo dentro de la sección para reubicarlo."
+                },
+                {
+                  title: "Usa el panel izquierdo y el inspector",
+                  body: "Desde secciones y capas agregas contenido; desde el inspector cambias texto, estilo, posición y navegación."
+                },
+                {
+                  title: "Guarda, revisa y publica",
+                  body: "El editor hace autosave, pero también puedes guardar checkpoints y publicar cuando la web ya esté lista."
+                }
+              ]}
+            />
+            <Link href="/dashboard" className="btn-secondary" onClick={() => setMoreMenuOpen(false)}>
+              Dashboard
+            </Link>
+            {isPublished ? (
+              <a href={publicSiteUrl} target="_blank" rel="noreferrer" className="btn-secondary" onClick={() => setMoreMenuOpen(false)}>
+                Abrir sitio
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="editor-shell">
-      <header className="editor-topbar">
+      <header
+        ref={topbarRef}
+        className={`editor-topbar ${isMobileEditor ? "editor-topbar-mobile" : ""} ${mobileTopbarExpanded ? "is-expanded" : ""}`}
+      >
         <div className="editor-topbar-left">
           <div className="editor-brand">DVanguard</div>
           <div className="editor-meta">
             <strong>{siteName}</strong>
             <span>Editor visual</span>
           </div>
-          <div className="editor-topbar-left-tools" aria-label="Historial del editor">
-            <div className="editor-version-menu" ref={versionsMenuRef}>
+          <div className="editor-version-menu" ref={versionsMenuRef}>
               <button
                 type="button"
                 className="btn-secondary editor-version-trigger"
@@ -1100,7 +1214,7 @@ function addSection(type: SiteSectionV3["type"]) {
                   setMoreMenuOpen(false);
                 }}
               >
-                Versiones{currentVersionBadge ? ` · v${currentVersionBadge.version}` : ""}
+                {currentVersionBadge ? ` v${currentVersionBadge.version}` : ""}
               </button>
               {versionsOpen ? (
                 <div className="editor-version-popover">
@@ -1128,107 +1242,50 @@ function addSection(type: SiteSectionV3["type"]) {
                 </div>
               ) : null}
             </div>
-            <div className="editor-history-actions" role="group" aria-label="Deshacer y rehacer">
-              <button
-                type="button"
-                className="editor-icon-button"
-                onClick={undoLastChange}
-                disabled={!canUndo}
-                title="Deshacer (Ctrl/Cmd + Z)"
-                aria-label="Deshacer"
-              >
-                <UndoIcon />
-              </button>
-              <button
-                type="button"
-                className="editor-icon-button"
-                onClick={redoLastChange}
-                disabled={!canRedo}
-                title="Rehacer (Ctrl/Cmd + Shift + Z)"
-                aria-label="Rehacer"
-              >
-                <RedoIcon />
-              </button>
-              <button
-                type="button"
-                className="editor-icon-button"
-                onClick={() => void saveCheckpoint()}
-                title="Guardar checkpoint"
-                aria-label="Guardar checkpoint"
-              >
-                <SaveIcon />
+          <div className="editor-topbar-left-tools" aria-label="Historial del editor">
+            {renderHistoryActions()}
+          </div>
+        </div>
+        {isMobileEditor ? (
+          <button
+            type="button"
+            className={`editor-topbar-expander ${mobileTopbarExpanded ? "is-expanded" : ""}`}
+            onClick={() => {
+              setMobilePanel("none");
+              setMobileTopbarExpanded((current) => !current);
+              setMoreMenuOpen(false);
+              setVersionsOpen(false);
+            }}
+            aria-expanded={mobileTopbarExpanded}
+            aria-label={mobileTopbarExpanded ? "Ocultar acciones del editor" : "Mostrar acciones del editor"}
+          >
+            <ChevronDownIcon />
+          </button>
+        ) : (
+          <>
+            <div className="editor-topbar-center">{renderViewportSwitch()}</div>
+            <div className="editor-topbar-actions">
+              {renderMoreMenu()}
+              <button className="btn-primary" type="button" onClick={() => void publish()} disabled={publishing}>
+                {publishing ? "Publicando..." : "Publicar"}
               </button>
             </div>
-          </div>
-        </div>
-        <div className="editor-topbar-center">
-          <span className={`editor-status ${saveState}`}>
-            {lastSavedSource === "canvas_manual_checkpoint"
-              ? "Checkpoint"
-              : lastSavedSource === "canvas_auto_save"
-                ? "Autosave"
-                : "Editor"}{" "}
-            · {saveStatus}
-          </span>
-          <div className="editor-toggle">
-            <button type="button" className={viewport === "desktop" ? "btn-primary" : "btn-secondary"} onClick={() => setViewport("desktop")}>
-              Desktop
-            </button>
-            <button type="button" className={viewport === "mobile" ? "btn-primary" : "btn-secondary"} onClick={() => setViewport("mobile")}>
-              Mobile
-            </button>
-          </div>
-        </div>
-        <div className="editor-topbar-actions">
-          <div className="editor-overflow-menu" ref={moreMenuRef}>
-            <button
-              type="button"
-              className="btn-secondary editor-overflow-trigger"
-              onClick={() => {
-                setMoreMenuOpen((current) => !current);
-                setVersionsOpen(false);
-              }}
-              aria-expanded={moreMenuOpen}
-            >
-              Más
-            </button>
-            {moreMenuOpen ? (
-              <div className="editor-overflow-popover">
-                <ModuleTour
-                  module="editor"
-                  title="Cómo editar tu sitio"
-                  description="Este editor te permite ajustar el layout, el contenido y la publicación de tu página."
-                  compact
-                  steps={[
-                    {
-                      title: "Selecciona y mueve bloques",
-                      body: "Haz clic sobre cualquier bloque para editarlo y arrástralo dentro de la sección para reubicarlo."
-                    },
-                    {
-                      title: "Usa el panel izquierdo y el inspector",
-                      body: "Desde secciones y capas agregas contenido; desde el inspector cambias texto, estilo, posición y navegación."
-                    },
-                    {
-                      title: "Guarda, revisa y publica",
-                      body: "El editor hace autosave, pero también puedes guardar checkpoints y publicar cuando la web ya esté lista."
-                    }
-                  ]}
-                />
-                <Link href="/dashboard" className="btn-secondary" onClick={() => setMoreMenuOpen(false)}>
-                  Dashboard
-                </Link>
-                {isPublished ? (
-                  <a href={publicSiteUrl} target="_blank" rel="noreferrer" className="btn-secondary" onClick={() => setMoreMenuOpen(false)}>
-                    Abrir sitio
-                  </a>
-                ) : null}
+          </>
+        )}
+        {isMobileEditor && mobileTopbarExpanded ? (
+          <div className="editor-topbar-mobile-panel">
+            <div className="editor-topbar-mobile-panel-row">
+              {renderHistoryActions()}
+              {renderViewportSwitch()}
+              <div className="editor-topbar-mobile-actions">
+                {renderMoreMenu()}
+                <button className="btn-primary" type="button" onClick={() => void publish()} disabled={publishing}>
+                  {publishing ? "Publicando..." : "Publicar"}
+                </button>
               </div>
-            ) : null}
+            </div>
           </div>
-          <button className="btn-primary" type="button" onClick={() => void publish()} disabled={publishing}>
-            {publishing ? "Publicando..." : "Publicar"}
-          </button>
-        </div>
+        ) : null}
       </header>
 
       {message ? <div className="editor-alert">{message}</div> : null}
@@ -3033,6 +3090,32 @@ function CloseIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="m7 7 10 10M17 7 7 17" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="m6 9 6 6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function DesktopPreviewIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3.5" y="5" width="17" height="11.5" rx="2.2" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M9 19h6M12 16.5V19" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MobilePreviewIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="7.25" y="3.5" width="9.5" height="17" rx="2.2" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="12" cy="17.5" r="0.9" fill="currentColor" />
     </svg>
   );
 }
