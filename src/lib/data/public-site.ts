@@ -1,5 +1,14 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { parseAnySiteSpec, type AnySiteSpec } from "@/lib/site-spec-any";
+import { stripPort } from "@/lib/site-domains";
+
+export type PublishedSiteRecord = {
+  id: string;
+  name: string;
+  subdomain: string;
+  status: string;
+  current_version_id: string | null;
+};
 
 export type PublicSitePayload = {
   id: string;
@@ -8,24 +17,75 @@ export type PublicSitePayload = {
   siteSpec: AnySiteSpec;
 };
 
-export async function getPublishedSiteBySubdomain(subdomain: string): Promise<PublicSitePayload | null> {
+export async function getPublishedSiteRecordById(siteId: string): Promise<PublishedSiteRecord | null> {
   const admin = getSupabaseAdminClient();
+  const { data: site, error } = await admin
+    .from("sites")
+    .select("id, name, subdomain, status, current_version_id")
+    .eq("id", siteId)
+    .eq("status", "published")
+    .maybeSingle();
 
-  const { data: site, error: siteError } = await admin
+  if (error) {
+    throw new Error(`Failed to query published site by id: ${error.message}`);
+  }
+
+  return site;
+}
+
+export async function getPublishedSiteRecordBySubdomain(subdomain: string): Promise<PublishedSiteRecord | null> {
+  const admin = getSupabaseAdminClient();
+  const { data: site, error } = await admin
     .from("sites")
     .select("id, name, subdomain, status, current_version_id")
     .eq("subdomain", subdomain)
     .eq("status", "published")
     .maybeSingle();
 
-  if (siteError) {
-    throw new Error(`Failed to query published site: ${siteError.message}`);
+  if (error) {
+    throw new Error(`Failed to query published site by subdomain: ${error.message}`);
   }
 
-  if (!site) {
+  return site;
+}
+
+export async function getPublishedSiteRecordByHostname(hostname: string): Promise<PublishedSiteRecord | null> {
+  const normalizedHost = stripPort(hostname);
+  if (!normalizedHost) return null;
+
+  const admin = getSupabaseAdminClient();
+  const { data: domain, error } = await admin
+    .from("site_domains")
+    .select("site_id")
+    .eq("hostname", normalizedHost)
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to query published site by hostname: ${error.message}`);
+  }
+
+  if (!domain?.site_id) {
     return null;
   }
 
+  return getPublishedSiteRecordById(domain.site_id);
+}
+
+export async function getPublishedSiteBySubdomain(subdomain: string): Promise<PublicSitePayload | null> {
+  const site = await getPublishedSiteRecordBySubdomain(subdomain);
+  if (!site) return null;
+  return getPublicSitePayload(site);
+}
+
+export async function getPublishedSiteByHostname(hostname: string): Promise<PublicSitePayload | null> {
+  const site = await getPublishedSiteRecordByHostname(hostname);
+  if (!site) return null;
+  return getPublicSitePayload(site);
+}
+
+async function getPublicSitePayload(site: PublishedSiteRecord): Promise<PublicSitePayload | null> {
+  const admin = getSupabaseAdminClient();
   const { data: activePublication } = await admin
     .from("site_publications")
     .select("version_id")

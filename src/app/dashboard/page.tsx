@@ -4,10 +4,10 @@ import { ProRequestButton } from "@/components/account/pro-request-button";
 import { PublishSiteButton } from "@/components/dashboard/publish-site-button";
 import { CreateSiteForm } from "@/components/forms/create-site-form";
 import { ModuleTour } from "@/components/guided/module-tour";
+import { SiteDomainManager } from "@/components/sites/site-domain-manager";
 import { requireUser } from "@/lib/auth";
 import { getUsageSnapshot } from "@/lib/billing/usage";
 import { getOwnerSiteAnalytics } from "@/lib/data/dashboard/analytics";
-import { env } from "@/lib/env";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export default async function DashboardPage() {
@@ -176,20 +176,27 @@ export default async function DashboardPage() {
                     ))}
                   </ul>
 
-                  <div className="dashboard-site-actions">
-                    <Link className="btn-secondary" href={`/sites/${site.site_id}`}>
-                      Editar
+                    <div className="dashboard-site-actions">
+                      <Link className="btn-secondary" href={`/sites/${site.site_id}`}>
+                        Editar
                     </Link>
                     <Link className="btn-secondary" href={`/onboarding?siteId=${site.site_id}`}>
                       Regenerar IA
                     </Link>
-                    <PublishSiteButton siteId={site.site_id} />
-                    {site.status === "published" ? (
-                      <a className="btn-secondary" href={buildPublicSiteUrl(site.subdomain)} target="_blank" rel="noreferrer">
-                        Abrir sitio
-                      </a>
-                    ) : null}
-                  </div>
+                      <PublishSiteButton siteId={site.site_id} />
+                      {site.status === "published" ? (
+                        <a className="btn-secondary" href={site.public_url} target="_blank" rel="noreferrer">
+                          Abrir sitio
+                        </a>
+                      ) : null}
+                    </div>
+
+                  <SiteDomainManager
+                    siteId={site.site_id}
+                    fallbackUrl={site.path_url}
+                    initialDomains={site.domains}
+                    compact
+                  />
                 </article>
               ))}
             </div>
@@ -203,11 +210,4 @@ export default async function DashboardPage() {
       </div>
     </main>
   );
-}
-
-function buildPublicSiteUrl(subdomain: string) {
-  if (env.rootDomain === "localhost") {
-    return `http://${subdomain}.localhost:3000`;
-  }
-  return `https://${subdomain}.${env.rootDomain}`;
 }

@@ -1,4 +1,6 @@
+import { listSiteDomainsBySiteIds } from "@/lib/data/site-domains";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { pickPrimaryDomain } from "@/lib/site-domains";
 import { parsePagination } from "@/lib/data/admin/common";
 
 type Params = {
@@ -52,12 +54,17 @@ export async function listAdminSites(params: Params) {
   }
 
   const ownerIds = Array.from(new Set(sites.map((site) => site.owner_id)));
-  const { data: profiles } = await admin.from("profiles").select("id, email").in("id", ownerIds);
+  const siteIds = sites.map((site) => site.id);
+  const [{ data: profiles }, domainsBySiteId] = await Promise.all([
+    admin.from("profiles").select("id, email").in("id", ownerIds),
+    listSiteDomainsBySiteIds(siteIds)
+  ]);
   const emailByOwner = new Map((profiles ?? []).map((profile) => [profile.id, profile.email]));
 
   const items = sites.map((site) => ({
     ...site,
-    owner_email: emailByOwner.get(site.owner_id) ?? null
+    owner_email: emailByOwner.get(site.owner_id) ?? null,
+    primary_domain: pickPrimaryDomain(domainsBySiteId.get(site.id) ?? [])?.hostname ?? null
   }));
 
   return { items, total: count ?? 0, page, pageSize };

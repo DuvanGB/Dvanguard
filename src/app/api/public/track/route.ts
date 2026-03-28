@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import { getRequestClientKey } from "@/lib/http";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { getPublishedSiteRecordByHostname, getPublishedSiteRecordById, getPublishedSiteRecordBySubdomain } from "@/lib/data/public-site";
+import { stripPort } from "@/lib/site-domains";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { getSubdomainFromHost } from "@/lib/tenant";
 
@@ -33,19 +35,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
   }
 
-  const hostSubdomain = getSubdomainFromHost(request.headers.get("host"));
+  const host = stripPort(request.headers.get("host"));
+  const hostSubdomain = getSubdomainFromHost(host);
   const effectiveSubdomain = parsed.data.subdomain ?? hostSubdomain;
-  if (!effectiveSubdomain) {
-    return NextResponse.json({ error: "Subdomain not found" }, { status: 400 });
-  }
 
   const admin = getSupabaseAdminClient();
-  const { data: site } = await admin
-    .from("sites")
-    .select("id, subdomain, status")
-    .eq("subdomain", effectiveSubdomain)
-    .eq("status", "published")
-    .maybeSingle();
+  const site =
+    (parsed.data.siteId ? await getPublishedSiteRecordById(parsed.data.siteId) : null) ??
+    (host ? await getPublishedSiteRecordByHostname(host) : null) ??
+    (effectiveSubdomain ? await getPublishedSiteRecordBySubdomain(effectiveSubdomain) : null);
 
   if (!site) {
     return NextResponse.json({ error: "Published site not found" }, { status: 404 });
@@ -67,6 +65,7 @@ export async function POST(request: NextRequest) {
     client_id: parsed.data.clientId ?? null,
     meta_json: {
       ...(parsed.data.meta ?? {}),
+      host,
       ip,
       userAgent
     }

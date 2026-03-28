@@ -1,3 +1,6 @@
+import { buildEffectivePublicUrl, getPathModePublicUrl } from "@/lib/public-url";
+import { listSiteDomainsBySiteIds } from "@/lib/data/site-domains";
+import type { SiteDomainRecord } from "@/lib/site-domains";
 import { parseRange } from "@/lib/data/admin/common";
 import { parseAnySiteSpec } from "@/lib/site-spec-any";
 import type { AnySiteSpec } from "@/lib/site-spec-any";
@@ -13,6 +16,9 @@ export type SiteAnalyticsSnapshot = {
   site_id: string;
   name: string;
   subdomain: string;
+  public_url: string;
+  path_url: string;
+  domains: SiteDomainRecord[];
   status: "draft" | "published" | "archived";
   site_type: "informative" | "commerce_lite";
   created_at: string;
@@ -78,7 +84,7 @@ export async function getOwnerSiteAnalytics(input: {
     .map((site) => site.current_version_id)
     .filter((value): value is string => typeof value === "string" && value.length > 0);
 
-  const [{ data: events }, { data: versions }] = await Promise.all([
+  const [{ data: events }, { data: versions }, domainsBySiteId] = await Promise.all([
     admin
       .from("site_analytics_events")
       .select("site_id, event_type")
@@ -86,7 +92,8 @@ export async function getOwnerSiteAnalytics(input: {
       .gte("occurred_at", fromIso),
     versionIds.length
       ? admin.from("site_versions").select("id, site_spec_json").in("id", versionIds)
-      : Promise.resolve({ data: [], error: null })
+      : Promise.resolve({ data: [], error: null }),
+    listSiteDomainsBySiteIds(siteIds)
   ]);
 
   const versionById = new Map((versions ?? []).map((version) => [version.id, version.site_spec_json]));
@@ -117,6 +124,12 @@ export async function getOwnerSiteAnalytics(input: {
       site_id: site.id,
       name: site.name,
       subdomain: site.subdomain,
+      public_url: buildEffectivePublicUrl({
+        subdomain: site.subdomain,
+        domains: domainsBySiteId.get(site.id) ?? []
+      }),
+      path_url: getPathModePublicUrl(site.subdomain),
+      domains: domainsBySiteId.get(site.id) ?? [],
       status: normalizeSiteStatus(site.status),
       site_type: normalizeSiteType(site.site_type),
       created_at: site.created_at,

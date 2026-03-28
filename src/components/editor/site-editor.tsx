@@ -5,14 +5,19 @@ import Link from "next/link";
 
 import { ModuleTour } from "@/components/guided/module-tour";
 import { SiteHeader, getSiteHeaderPreviewHeight } from "@/components/runtime/site-header";
+import { SiteDomainManager } from "@/components/sites/site-domain-manager";
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
 import { CANVAS_BASE_WIDTH, fontFamilies, normalizeSiteSpecV3 } from "@/lib/site-spec-v3";
+import type { SiteDomainRecord } from "@/lib/site-domains";
 import type { TemplateId } from "@/lib/templates/types";
 
 type Props = {
   siteId: string;
   siteName: string;
   subdomain: string;
+  publicUrl: string;
+  pathModeUrl: string;
+  initialDomains: SiteDomainRecord[];
   initialSpec: SiteSpecV3;
   initialMigrated?: boolean;
 };
@@ -77,7 +82,7 @@ const MIN_BLOCK_SIZE = {
 const SECTION_LIBRARY: Array<SiteSectionV3["type"]> = ["hero", "catalog", "testimonials", "contact"];
 const BLOCK_LIBRARY: Array<CanvasBlock["type"]> = ["text", "image", "button", "product", "shape", "container"];
 
-export function SiteEditor({ siteId, siteName, subdomain, initialSpec, initialMigrated }: Props) {
+export function SiteEditor({ siteId, siteName, subdomain, publicUrl, pathModeUrl, initialDomains, initialSpec, initialMigrated }: Props) {
   const normalized = useMemo(() => normalizeSiteSpecV3(initialSpec) ?? { spec: initialSpec, migrated: false }, [initialSpec]);
   const [siteSpec, setSiteSpec] = useState<SiteSpecV3>(normalized.spec);
   const [wasMigrated] = useState(() => initialMigrated ?? normalized.migrated);
@@ -841,7 +846,7 @@ function addSection(type: SiteSectionV3["type"]) {
           <div className="editor-brand">DVanguard</div>
           <div className="editor-meta">
             <strong>{siteName}</strong>
-            <span>/{subdomain}</span>
+            <span>{publicUrl}</span>
           </div>
         </div>
         <div className="editor-topbar-center">
@@ -1746,7 +1751,10 @@ function addSection(type: SiteSectionV3["type"]) {
                       ) : null}
                   </div>
                 ) : (
-                  <p className="muted">Selecciona un bloque en el canvas para editar su contenido.</p>
+                  <div className="stack">
+                    <p className="muted">Selecciona un bloque en el canvas para editar su contenido.</p>
+                    <SiteDomainManager siteId={siteId} fallbackUrl={pathModeUrl} initialDomains={initialDomains} compact />
+                  </div>
                 )}
               </div>
             ) : null}

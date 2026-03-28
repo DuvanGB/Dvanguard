@@ -201,6 +201,11 @@ Configura estos secrets en GitHub:
 - `POST /api/public/track`
 - `GET /api/dashboard/analytics?siteId=&range=7d|30d`
 - `GET /api/admin/traffic-metrics?range=7d|30d`
+- `GET /api/sites/:id/domains`
+- `POST /api/sites/:id/domains`
+- `POST /api/sites/:id/domains/:domainId/verify`
+- `PATCH /api/sites/:id/domains/:domainId/primary`
+- `DELETE /api/sites/:id/domains/:domainId`
 
 ## Desarrollo local
 
@@ -217,6 +222,13 @@ Flujo recomendado:
 2. Crea un sitio en `/dashboard`.
 3. Ve a `/onboarding?siteId=<id>` y genera una versión con IA.
 4. Edita y publica en `/sites/<id>`.
+
+## Publicación pública
+
+- El modo canónico actual es `path mode`: `/public-sites/<slug>`.
+- Ejemplo local: `http://localhost:3000/public-sites/mi-sitio`
+- Ejemplo Vercel: `https://dvanguard.vercel.app/public-sites/mi-sitio`
+- Si un cliente conecta dominio propio y queda activo, la URL pública efectiva pasa a ser ese dominio, manteniendo path mode como fallback.
 
 ## Conversión SaaS (fase 3)
 

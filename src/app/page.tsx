@@ -2,7 +2,8 @@ import Link from "next/link";
 import { headers } from "next/headers";
 
 import { SiteRenderer } from "@/components/runtime/site-renderer";
-import { getPublishedSiteBySubdomain } from "@/lib/data/public-site";
+import { getPublishedSiteByHostname, getPublishedSiteBySubdomain } from "@/lib/data/public-site";
+import { stripPort } from "@/lib/site-domains";
 import { getSubdomainFromHost } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,24 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const headerStore = await headers();
   const host = headerStore.get("host");
+  const normalizedHost = stripPort(host);
   const subdomain = getSubdomainFromHost(host);
+
+  if (normalizedHost && !subdomain) {
+    try {
+      const payload = await getPublishedSiteByHostname(normalizedHost);
+      if (payload) {
+        return <SiteRenderer spec={payload.siteSpec} trackEvents siteId={payload.id} subdomain={payload.subdomain} enableCart />;
+      }
+    } catch {
+      return (
+        <main className="container stack" style={{ paddingTop: "3rem" }}>
+          <h1>Error de configuración</h1>
+          <p>Revisa el dominio conectado, `SUPABASE_SERVICE_ROLE_KEY` y el estado de publicación del sitio.</p>
+        </main>
+      );
+    }
+  }
 
   if (subdomain) {
     try {
@@ -56,7 +74,7 @@ export default async function HomePage() {
           <div className="marketing-proof-row">
             <span>Entrada por texto y voz</span>
             <span>Editor visual en tiempo real</span>
-            <span>Publicación con subdominio</span>
+            <span>Publicación inmediata por ruta</span>
           </div>
         </div>
 
@@ -96,7 +114,7 @@ export default async function HomePage() {
         <article className="marketing-step-card">
           <span>03</span>
           <h3>Edita y publica</h3>
-          <p>Ajusta secciones, textos e imágenes en preview realtime y publica en subdominio propio.</p>
+          <p>Ajusta secciones, textos e imágenes en preview realtime y publica al instante. Si quieres, luego conectas tu dominio.</p>
         </article>
       </section>
 

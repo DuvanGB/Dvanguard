@@ -1,13 +1,23 @@
 import { notFound } from "next/navigation";
 
 import { SiteRenderer } from "@/components/runtime/site-renderer";
-import { getPublishedSiteBySubdomain } from "@/lib/data/public-site";
+import { getPublishedSiteByHostname, getPublishedSiteBySubdomain } from "@/lib/data/public-site";
 
 export const dynamic = "force-dynamic";
 
-export default async function PublicSitePage({ params }: { params: Promise<{ subdomain: string }> }) {
+export default async function PublicSitePage({
+  params,
+  searchParams
+}: {
+  params: Promise<{ subdomain: string }>;
+  searchParams: Promise<{ host?: string }>;
+}) {
   const { subdomain } = await params;
-  const payload = await getPublishedSiteBySubdomain(subdomain);
+  const query = await searchParams;
+  const payload =
+    subdomain === "__host__" && query.host
+      ? await getPublishedSiteByHostname(query.host)
+      : await getPublishedSiteBySubdomain(subdomain);
 
   if (!payload) {
     notFound();

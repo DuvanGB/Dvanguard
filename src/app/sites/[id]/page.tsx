@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 
 import { SiteEditor } from "@/components/editor/site-editor";
 import { requireUser } from "@/lib/auth";
+import { listSiteDomainsForSite } from "@/lib/data/site-domains";
+import { buildEffectivePublicUrl, getPathModePublicUrl } from "@/lib/public-url";
 import { buildSiteSpecV3FromBrief, normalizeSiteSpecV3, type SiteSpecV3 } from "@/lib/site-spec-v3";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
@@ -20,6 +22,7 @@ export default async function SiteEditorPage({ params }: { params: Promise<{ id:
   }
 
   const admin = getSupabaseAdminClient();
+  const initialDomains = await listSiteDomainsForSite(site.id);
   let initialSpec: SiteSpecV3 = buildSiteSpecV3FromBrief({
     siteType: site.site_type,
     businessName: site.name
@@ -46,6 +49,9 @@ export default async function SiteEditorPage({ params }: { params: Promise<{ id:
         siteId={site.id}
         siteName={site.name}
         subdomain={site.subdomain}
+        publicUrl={buildEffectivePublicUrl({ subdomain: site.subdomain, domains: initialDomains })}
+        pathModeUrl={getPathModePublicUrl(site.subdomain)}
+        initialDomains={initialDomains}
         initialSpec={initialSpec}
         initialMigrated={initialMigrated}
       />

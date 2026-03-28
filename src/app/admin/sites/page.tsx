@@ -68,6 +68,7 @@ export default async function AdminSitesPage({
             <tr>
               <th>Nombre</th>
               <th>Subdominio</th>
+              <th>Dominio principal</th>
               <th>Owner</th>
               <th>Estado</th>
               <th>Tipo</th>
@@ -80,6 +81,7 @@ export default async function AdminSitesPage({
               <tr key={item.id}>
                 <td>{item.name}</td>
                 <td>{item.subdomain}</td>
+                <td>{item.primary_domain ?? "-"}</td>
                 <td>{item.owner_email ?? "-"}</td>
                 <td>{item.status}</td>
                 <td>{item.site_type}</td>
