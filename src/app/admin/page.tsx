@@ -164,7 +164,7 @@ export default async function AdminHomePage() {
             <span className="admin-badge">Aprobadas: {metrics.proRequestsApproved}</span>
             <span className="admin-badge">Rechazadas: {metrics.proRequestsRejected}</span>
           </div>
-          <p>Activa planes Pro manualmente mientras se valida pricing antes de Stripe.</p>
+          <p>El flujo manual sigue disponible como fallback de soporte mientras Stripe se vuelve el camino principal.</p>
         </article>
 
         <article className="admin-panel admin-panel-wide stack">

@@ -33,6 +33,11 @@ export const env = {
   onboardingRefineProvider: process.env.ONBOARDING_REFINE_PROVIDER ?? "llm",
   voiceLocale: process.env.VOICE_LOCALE ?? "es-CO",
   onboardingMaxInputChars: parsePositiveInt(process.env.ONBOARDING_MAX_INPUT_CHARS, 3000),
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+  stripePublishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "",
+  stripePriceProMonthly: process.env.STRIPE_PRICE_PRO_MONTHLY ?? "",
+  stripePriceProYearly: process.env.STRIPE_PRICE_PRO_YEARLY ?? "",
   vercelProjectId: process.env.VERCEL_PROJECT_ID ?? "",
   vercelTeamId: process.env.VERCEL_TEAM_ID ?? process.env.VERCEL_ORG_ID ?? "",
   vercelToken: process.env.VERCEL_TOKEN ?? ""

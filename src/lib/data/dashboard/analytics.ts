@@ -1,4 +1,5 @@
 import { buildEffectivePublicUrl, getPathModePublicUrl } from "@/lib/public-url";
+import { applyBillingAccessRules } from "@/lib/billing/subscription";
 import { listSiteDomainsBySiteIds } from "@/lib/data/site-domains";
 import type { SiteDomainRecord } from "@/lib/site-domains";
 import { parseRange } from "@/lib/data/admin/common";
@@ -49,6 +50,7 @@ export async function getOwnerSiteAnalytics(input: {
   siteId?: string | null;
 }): Promise<OwnerAnalyticsResult> {
   const admin = getSupabaseAdminClient();
+  await applyBillingAccessRules(admin, input.ownerId);
   const range = parseRange(input.range);
   const fromIso = range.from.toISOString();
 

@@ -16,10 +16,12 @@ export default function SignInPage() {
     setMessage(null);
 
     const supabase = getSupabaseBrowserClient();
+    const next = new URLSearchParams(window.location.search).get("next");
+    const safeNext = next && next.startsWith("/") ? next : "/dashboard";
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}`
       }
     });
 

@@ -1,4 +1,5 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { applyBillingAccessRules } from "@/lib/billing/subscription";
 import { parseAnySiteSpec, type AnySiteSpec } from "@/lib/site-spec-any";
 import { stripPort } from "@/lib/site-domains";
 import { purgeExpiredDeletedSites } from "@/lib/sites-trash";
@@ -9,6 +10,7 @@ export type PublishedSiteRecord = {
   subdomain: string;
   status: string;
   current_version_id: string | null;
+  owner_id: string;
 };
 
 export type PublicSitePayload = {
@@ -23,7 +25,7 @@ export async function getPublishedSiteRecordById(siteId: string): Promise<Publis
   await purgeExpiredDeletedSites(admin);
   const { data: site, error } = await admin
     .from("sites")
-    .select("id, name, subdomain, status, current_version_id")
+    .select("id, name, subdomain, status, current_version_id, owner_id")
     .eq("id", siteId)
     .eq("status", "published")
     .is("deleted_at", null)
@@ -33,7 +35,21 @@ export async function getPublishedSiteRecordById(siteId: string): Promise<Publis
     throw new Error(`Failed to query published site by id: ${error.message}`);
   }
 
-  return site;
+  if (site?.owner_id) {
+    await applyBillingAccessRules(admin, site.owner_id);
+  }
+
+  if (!site) return null;
+
+  const { data: refreshed } = await admin
+    .from("sites")
+    .select("id, name, subdomain, status, current_version_id, owner_id")
+    .eq("id", siteId)
+    .eq("status", "published")
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  return refreshed;
 }
 
 export async function getPublishedSiteRecordBySubdomain(subdomain: string): Promise<PublishedSiteRecord | null> {
@@ -41,7 +57,7 @@ export async function getPublishedSiteRecordBySubdomain(subdomain: string): Prom
   await purgeExpiredDeletedSites(admin);
   const { data: site, error } = await admin
     .from("sites")
-    .select("id, name, subdomain, status, current_version_id")
+    .select("id, name, subdomain, status, current_version_id, owner_id")
     .eq("subdomain", subdomain)
     .eq("status", "published")
     .is("deleted_at", null)
@@ -51,7 +67,21 @@ export async function getPublishedSiteRecordBySubdomain(subdomain: string): Prom
     throw new Error(`Failed to query published site by subdomain: ${error.message}`);
   }
 
-  return site;
+  if (site?.owner_id) {
+    await applyBillingAccessRules(admin, site.owner_id);
+  }
+
+  if (!site) return null;
+
+  const { data: refreshed } = await admin
+    .from("sites")
+    .select("id, name, subdomain, status, current_version_id, owner_id")
+    .eq("subdomain", subdomain)
+    .eq("status", "published")
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  return refreshed;
 }
 
 export async function getPublishedSiteRecordByHostname(hostname: string): Promise<PublishedSiteRecord | null> {

@@ -47,6 +47,8 @@ export default async function AdminUsersPage({
             <tr>
               <th>Email</th>
               <th>Plan</th>
+              <th>Stripe</th>
+              <th>Ciclo</th>
               <th>Alta</th>
               <th>Total sitios</th>
               <th>Publicados</th>
@@ -59,6 +61,11 @@ export default async function AdminUsersPage({
               <tr key={item.id}>
                 <td>{item.email}</td>
                 <td>{item.plan_code}</td>
+                <td>{item.billing_status ?? "-"}</td>
+                <td>
+                  {item.billing_interval ?? "-"}
+                  {item.billing_cancel_at_period_end ? " (cancelación fin de periodo)" : ""}
+                </td>
                 <td>{new Date(item.created_at).toLocaleString()}</td>
                 <td>{item.total_sites}</td>
                 <td>{item.published_sites}</td>

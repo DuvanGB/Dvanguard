@@ -1,6 +1,5 @@
 import Link from "next/link";
 
-import { ProRequestButton } from "@/components/account/pro-request-button";
 import { DeleteSiteButton } from "@/components/dashboard/delete-site-button";
 import { SitePublicationToggle } from "@/components/dashboard/site-publication-toggle";
 import { CreateSiteForm } from "@/components/forms/create-site-form";
@@ -13,20 +12,13 @@ import { listTrashedSitesForOwner, purgeExpiredDeletedSites } from "@/lib/sites-
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export default async function DashboardPage() {
-  const { user, supabase } = await requireUser();
+  const { user } = await requireUser();
   const admin = getSupabaseAdminClient();
 
   await purgeExpiredDeletedSites(admin, user.id);
 
-  const [usageResponse, { data: pendingProRequest }, analytics, trashedSites] = await Promise.all([
+  const [usageResponse, analytics, trashedSites] = await Promise.all([
     getUsageSnapshot(admin, user.id),
-    supabase
-      .from("pro_requests")
-      .select("id, status, created_at")
-      .eq("user_id", user.id)
-      .eq("status", "pending")
-      .order("created_at", { ascending: false })
-      .limit(1),
     getOwnerSiteAnalytics({
       ownerId: user.id,
       range: "7d"
@@ -35,7 +27,6 @@ export default async function DashboardPage() {
   ]);
 
   const usage = usageResponse;
-  const pendingRequest = pendingProRequest?.[0] ?? null;
   const sites = analytics.sites;
 
   const blockedByLimit = usage.plan === "free" && (usage.ai_generations_remaining <= 0 || usage.published_sites_remaining <= 0);
@@ -54,6 +45,9 @@ export default async function DashboardPage() {
               </Link>
               <Link href="/onboarding" className="btn-primary">
                 Regenerar con IA
+              </Link>
+              <Link href="/billing" className="btn-secondary">
+                Billing
               </Link>
               <Link href="/trash" className="btn-secondary">
                 Papelera{trashedSites.length ? ` (${trashedSites.length})` : ""}
@@ -124,14 +118,40 @@ export default async function DashboardPage() {
           <section className="dashboard-upgrade-banner">
             <div className="stack">
               <h2>Has alcanzado el límite de tu plan Gratis</h2>
-              <p>Solicita Pro para ampliar cupos de IA y cantidad de sitios publicados activos.</p>
+              <p>Activa o gestiona Pro desde billing para ampliar cupos de IA y sitios publicados activos.</p>
             </div>
             <div>
-              {pendingRequest ? (
-                <small>Ya tienes una solicitud Pro pendiente desde {new Date(pendingRequest.created_at).toLocaleString()}.</small>
-              ) : (
-                <ProRequestButton />
-              )}
+              <Link href="/billing" className="btn-primary">
+                Ir a billing
+              </Link>
+            </div>
+          </section>
+        ) : null}
+
+        {usage.access_state === "grace_period" && usage.grace_until ? (
+          <section className="dashboard-upgrade-banner">
+            <div className="stack">
+              <h2>Tu cuenta está en gracia por billing</h2>
+              <p>Conservas temporalmente tus sitios publicados hasta el {new Date(usage.grace_until).toLocaleDateString()} mientras regularizas tu suscripción.</p>
+            </div>
+            <div>
+              <Link href="/billing" className="btn-primary">
+                Revisar billing
+              </Link>
+            </div>
+          </section>
+        ) : null}
+
+        {usage.access_state === "enforcement_applied" ? (
+          <section className="dashboard-upgrade-banner">
+            <div className="stack">
+              <h2>Aplicamos el ajuste al límite Free</h2>
+              <p>Mantuvimos publicado solo tu sitio con más visitas recientes. Puedes volver a Pro o elegir qué sitio publicar.</p>
+            </div>
+            <div>
+              <Link href="/billing" className="btn-primary">
+                Gestionar suscripción
+              </Link>
             </div>
           </section>
         ) : null}

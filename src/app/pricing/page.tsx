@@ -1,6 +1,13 @@
 import Link from "next/link";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
 
-export default function PricingPage() {
+export default async function PricingPage() {
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+  const billingHref = user ? "/billing" : "/signin?next=/billing";
+
   return (
     <main className="container stack" style={{ paddingTop: "2.5rem" }}>
       <header className="stack">
@@ -26,21 +33,20 @@ export default function PricingPage() {
           <h2>Pro</h2>
           <p>Para crecer con más volumen.</p>
           <ul>
+            <li>Plan mensual o anual</li>
             <li>Más sitios publicados activos</li>
             <li>Más generaciones IA / mes</li>
-            <li>Prioridad de soporte</li>
+            <li>Gestión de suscripción y facturas</li>
           </ul>
-          <Link className="btn-primary" href="/dashboard">
-            Solicitar Pro
+          <Link className="btn-primary" href={billingHref}>
+            Suscribirme
           </Link>
         </article>
       </section>
 
       <section className="card stack">
         <h2>Preguntas frecuentes</h2>
-        <p>
-          El plan Pro se activa manualmente por ahora. Próximamente activaremos checkout automático para suscripciones.
-        </p>
+        <p>El plan Pro se gestiona con Stripe, incluyendo suscripción, facturas y actualización de tarjeta dentro de DVanguard.</p>
       </section>
     </main>
   );
