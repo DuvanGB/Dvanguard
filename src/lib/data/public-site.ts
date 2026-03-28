@@ -1,6 +1,7 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { parseAnySiteSpec, type AnySiteSpec } from "@/lib/site-spec-any";
 import { stripPort } from "@/lib/site-domains";
+import { purgeExpiredDeletedSites } from "@/lib/sites-trash";
 
 export type PublishedSiteRecord = {
   id: string;
@@ -19,11 +20,13 @@ export type PublicSitePayload = {
 
 export async function getPublishedSiteRecordById(siteId: string): Promise<PublishedSiteRecord | null> {
   const admin = getSupabaseAdminClient();
+  await purgeExpiredDeletedSites(admin);
   const { data: site, error } = await admin
     .from("sites")
     .select("id, name, subdomain, status, current_version_id")
     .eq("id", siteId)
     .eq("status", "published")
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (error) {
@@ -35,11 +38,13 @@ export async function getPublishedSiteRecordById(siteId: string): Promise<Publis
 
 export async function getPublishedSiteRecordBySubdomain(subdomain: string): Promise<PublishedSiteRecord | null> {
   const admin = getSupabaseAdminClient();
+  await purgeExpiredDeletedSites(admin);
   const { data: site, error } = await admin
     .from("sites")
     .select("id, name, subdomain, status, current_version_id")
     .eq("subdomain", subdomain)
     .eq("status", "published")
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (error) {
@@ -54,6 +59,7 @@ export async function getPublishedSiteRecordByHostname(hostname: string): Promis
   if (!normalizedHost) return null;
 
   const admin = getSupabaseAdminClient();
+  await purgeExpiredDeletedSites(admin);
   const { data: domain, error } = await admin
     .from("site_domains")
     .select("site_id")

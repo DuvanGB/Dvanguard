@@ -24,6 +24,7 @@ export default async function OnboardingPage({
     const { data: sites } = await supabase
       .from("sites")
       .select("id, name, subdomain, status, site_type, created_at")
+      .is("deleted_at", null)
       .order("created_at", { ascending: false });
 
     const siteList = (sites ?? []) as OnboardingSiteListItem[];
@@ -85,6 +86,7 @@ export default async function OnboardingPage({
     .select("id, name")
     .eq("id", siteId)
     .eq("owner_id", user.id)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (!site) {

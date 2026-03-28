@@ -19,7 +19,7 @@ export async function getUsageSnapshot(admin: SupabaseClient, userId: string): P
       .eq("user_id", userId)
       .eq("period", period)
       .maybeSingle(),
-    admin.from("sites").select("id", { count: "exact", head: true }).eq("owner_id", userId).eq("status", "published")
+    admin.from("sites").select("id", { count: "exact", head: true }).eq("owner_id", userId).eq("status", "published").is("deleted_at", null)
   ]);
 
   const aiUsed = monthly?.ai_generations_count ?? 0;

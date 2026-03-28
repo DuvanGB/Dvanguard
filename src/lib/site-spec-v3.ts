@@ -556,14 +556,17 @@ export function applyEditableThemePatch(
 export function parseSiteSpecV3(input: unknown) {
   const parsed = siteSpecV3Schema.safeParse(input);
   if (parsed.success) {
-    return parsed;
+    return {
+      success: true as const,
+      data: stabilizeSiteSpecForMobile(parsed.data)
+    };
   }
 
   const percentLegacyParsed = percentLegacySiteSpecV3Schema.safeParse(input);
   if (percentLegacyParsed.success) {
     return {
       success: true as const,
-      data: upgradePercentLegacySpec(percentLegacyParsed.data)
+      data: stabilizeSiteSpecForMobile(upgradePercentLegacySpec(percentLegacyParsed.data))
     };
   }
 
@@ -574,22 +577,22 @@ export function parseSiteSpecV3(input: unknown) {
 
   return {
     success: true as const,
-    data: convertLegacySpecToPercent(legacyParsed.data)
+    data: stabilizeSiteSpecForMobile(convertLegacySpecToPercent(legacyParsed.data))
   };
 }
 
 export function normalizeSiteSpecV3(input: unknown) {
   const parsed = siteSpecV3Schema.safeParse(input);
   if (parsed.success) {
-    return { spec: parsed.data, migrated: false };
+    return { spec: stabilizeSiteSpecForMobile(parsed.data), migrated: false };
   }
   const percentLegacyParsed = percentLegacySiteSpecV3Schema.safeParse(input);
   if (percentLegacyParsed.success) {
-    return { spec: upgradePercentLegacySpec(percentLegacyParsed.data), migrated: true };
+    return { spec: stabilizeSiteSpecForMobile(upgradePercentLegacySpec(percentLegacyParsed.data)), migrated: true };
   }
   const legacyParsed = legacySiteSpecV3Schema.safeParse(input);
   if (legacyParsed.success) {
-    return { spec: convertLegacySpecToPercent(legacyParsed.data), migrated: true };
+    return { spec: stabilizeSiteSpecForMobile(convertLegacySpecToPercent(legacyParsed.data)), migrated: true };
   }
   return null;
 }
@@ -669,6 +672,16 @@ function rectPxToPercent(rect: { x: number; y: number; w: number; h: number; z: 
     y: clampPercent((rect.y / height) * 100),
     w: clampPercent((rect.w / width) * 100),
     h: clampPercent((rect.h / height) * 100),
+    z: rect.z
+  };
+}
+
+function rectPercentToPx(rect: CanvasLayoutRect, width: number, height: number) {
+  return {
+    x: (rect.x / 100) * width,
+    y: (rect.y / 100) * height,
+    w: (rect.w / 100) * width,
+    h: (rect.h / 100) * height,
     z: rect.z
   };
 }
@@ -1022,7 +1035,7 @@ export function buildSiteSpecV3FromBrief(input: {
     }
   };
 
-  return spec;
+  return stabilizeSiteSpecForMobile(spec);
 }
 
 export function buildFallbackSiteSpecV3(
@@ -1052,6 +1065,253 @@ function normalizeWhatsappPhone(value?: string) {
   const normalized = trimmed.startsWith("+") ? trimmed : `+${trimmed}`;
   if (!/^\+\d{8,15}$/.test(normalized)) return undefined;
   return normalized.replace(/\D/g, "");
+}
+
+export function stabilizeSiteSpecForMobile(spec: SiteSpecV3): SiteSpecV3 {
+  const next = structuredClone(spec);
+  next.pages = next.pages.map((page) => ({
+    ...page,
+    sections: page.sections.map((section) => stabilizeSectionForMobile(section))
+  }));
+  return next;
+}
+
+function stabilizeSectionForMobile(section: SiteSectionV3): SiteSectionV3 {
+  const width = CANVAS_BASE_WIDTH.mobile;
+  const padding = getMobileSectionPadding(section.type);
+  const baseHeight = Math.max(width * section.height_ratio.mobile, getMinimumSectionHeight(section.type));
+  const visibleBlocks = section.blocks.filter((block) => block.visible);
+  const decorativeBlocks = visibleBlocks.filter(isDecorativeMobileBlock);
+  const flowBlocks = visibleBlocks
+    .filter((block) => !isDecorativeMobileBlock(block))
+    .sort((left, right) => {
+      const leftRect = left.layout.mobile ?? left.layout.desktop;
+      const rightRect = right.layout.mobile ?? right.layout.desktop;
+      if (leftRect.y !== rightRect.y) return leftRect.y - rightRect.y;
+      return leftRect.z - rightRect.z;
+    });
+
+  const adjustedLayouts = new Map<string, CanvasLayoutRect>();
+  let cursorY = getMobileSectionTop(section.type);
+
+  for (const block of flowBlocks) {
+    const sourceRect = block.layout.mobile ?? block.layout.desktop;
+    const current = rectPercentToPx(sourceRect, width, baseHeight);
+    const widthPx = getMobileBlockWidthPx(section.type, block, width, padding, current.w);
+    const heightPx = getMobileBlockHeightPx(block, widthPx, current.h);
+    const xPx = getMobileBlockX(section.type, block, width, padding, widthPx);
+
+    adjustedLayouts.set(
+      block.id,
+      rectPxToPercent(
+        {
+          x: xPx,
+          y: cursorY,
+          w: widthPx,
+          h: heightPx,
+          z: sourceRect.z
+        },
+        width,
+        baseHeight
+      )
+    );
+
+    cursorY += heightPx + getMobileBlockGap(section.type, block.type);
+  }
+
+  const sectionHeight = Math.max(baseHeight, cursorY + padding);
+
+  const blocks = section.blocks.map((block) => {
+    const sourceRect = block.layout.mobile ?? block.layout.desktop;
+
+    if (adjustedLayouts.has(block.id)) {
+      return {
+        ...block,
+        layout: {
+          ...block.layout,
+          mobile: reprojectPercentRect(adjustedLayouts.get(block.id)!, baseHeight, sectionHeight)
+        }
+      };
+    }
+
+    const pxRect = rectPercentToPx(sourceRect, width, baseHeight);
+    let nextPxRect = pxRect;
+
+    if (isFullscreenDecorativeBlock(block)) {
+      nextPxRect = {
+        x: 0,
+        y: 0,
+        w: width,
+        h: sectionHeight,
+        z: sourceRect.z
+      };
+    } else {
+      nextPxRect = clampPxRect(
+        {
+          ...pxRect,
+          x: Math.max(0, Math.min(pxRect.x, width - pxRect.w)),
+          y: Math.max(0, Math.min(pxRect.y, sectionHeight - pxRect.h))
+        },
+        width,
+        sectionHeight
+      );
+    }
+
+    return {
+      ...block,
+      layout: {
+        ...block.layout,
+        mobile: rectPxToPercent(nextPxRect, width, sectionHeight)
+      }
+    };
+  });
+
+  return {
+    ...section,
+    height_ratio: {
+      ...section.height_ratio,
+      mobile: clampRatio(sectionHeight / width)
+    },
+    blocks
+  };
+}
+
+function getMobileSectionPadding(type: SiteSectionV3["type"]) {
+  if (type === "hero") return 24;
+  return 20;
+}
+
+function getMinimumSectionHeight(type: SiteSectionV3["type"]) {
+  if (type === "hero") return 500;
+  if (type === "catalog") return 540;
+  if (type === "testimonials") return 440;
+  return 360;
+}
+
+function getMobileSectionTop(type: SiteSectionV3["type"]) {
+  if (type === "hero") return 44;
+  if (type === "catalog") return 34;
+  if (type === "testimonials") return 30;
+  return 28;
+}
+
+function getMobileBlockGap(sectionType: SiteSectionV3["type"], blockType: CanvasBlock["type"]) {
+  if (sectionType === "hero" && blockType === "button") return 22;
+  if (blockType === "product") return 20;
+  return 16;
+}
+
+function isDecorativeMobileBlock(block: CanvasBlock) {
+  return block.type === "shape" || isFullscreenDecorativeBlock(block);
+}
+
+function isFullscreenDecorativeBlock(block: CanvasBlock) {
+  return /(?:^|-)hero-(?:bg|overlay)(?:-|$)|(?:^|-)bg(?:-|$)|(?:^|-)overlay(?:-|$)/i.test(block.id);
+}
+
+function getMobileBlockWidthPx(
+  sectionType: SiteSectionV3["type"],
+  block: CanvasBlock,
+  sectionWidth: number,
+  padding: number,
+  currentWidth: number
+) {
+  const fullWidth = Math.max(180, sectionWidth - padding * 2);
+
+  if (block.type === "product" || block.type === "container") {
+    return fullWidth;
+  }
+
+  if (block.type === "button") {
+    return Math.min(fullWidth, Math.max(190, currentWidth));
+  }
+
+  if (block.type === "image") {
+    if (sectionType === "hero") {
+      return fullWidth;
+    }
+    return Math.min(fullWidth, Math.max(220, currentWidth));
+  }
+
+  if (block.type === "text") {
+    if (sectionType === "hero") {
+      return Math.min(fullWidth, Math.max(260, currentWidth));
+    }
+    return fullWidth;
+  }
+
+  return Math.min(fullWidth, Math.max(200, currentWidth));
+}
+
+function getMobileBlockX(
+  sectionType: SiteSectionV3["type"],
+  block: CanvasBlock,
+  sectionWidth: number,
+  padding: number,
+  widthPx: number
+) {
+  const centered = Math.max(padding, (sectionWidth - widthPx) / 2);
+  if (block.type === "text" || block.type === "button") {
+    return sectionType === "hero" ? padding : centered;
+  }
+  return centered;
+}
+
+function getMobileBlockHeightPx(block: CanvasBlock, widthPx: number, fallbackHeightPx: number) {
+  if (block.type === "text") {
+    return getMobileTextHeightPx(block.content.text, block.style.fontSize, widthPx, fallbackHeightPx);
+  }
+
+  if (block.type === "button") {
+    return Math.max(48, fallbackHeightPx);
+  }
+
+  if (block.type === "image") {
+    return Math.max(180, fallbackHeightPx);
+  }
+
+  if (block.type === "product") {
+    return Math.max(300, fallbackHeightPx);
+  }
+
+  if (block.type === "container") {
+    return Math.max(180, fallbackHeightPx);
+  }
+
+  return Math.max(60, fallbackHeightPx);
+}
+
+function getMobileTextHeightPx(text: string, fontSize = 18, widthPx: number, fallbackHeightPx: number) {
+  const usableWidth = Math.max(96, widthPx - 16);
+  const avgCharWidth = Math.max(7, fontSize * 0.54);
+  const charsPerLine = Math.max(8, Math.floor(usableWidth / avgCharWidth));
+  const lineCount = String(text || "")
+    .split("\n")
+    .reduce((total, line) => total + Math.max(1, Math.ceil(Math.max(1, line.length) / charsPerLine)), 0);
+  return Math.max(fallbackHeightPx, lineCount * fontSize * 1.18 + 26);
+}
+
+function reprojectPercentRect(rect: CanvasLayoutRect, fromHeight: number, toHeight: number): CanvasLayoutRect {
+  const pxRect = rectPercentToPx(rect, CANVAS_BASE_WIDTH.mobile, fromHeight);
+  return rectPxToPercent(pxRect, CANVAS_BASE_WIDTH.mobile, toHeight);
+}
+
+function clampPxRect(
+  rect: { x: number; y: number; w: number; h: number; z: number },
+  maxWidth: number,
+  maxHeight: number
+) {
+  return {
+    ...rect,
+    x: Math.max(0, Math.min(rect.x, Math.max(0, maxWidth - rect.w))),
+    y: Math.max(0, Math.min(rect.y, Math.max(0, maxHeight - rect.h))),
+    w: Math.max(48, Math.min(rect.w, maxWidth)),
+    h: Math.max(32, Math.min(rect.h, maxHeight))
+  };
+}
+
+function clampRatio(value: number) {
+  return Math.max(0.2, Math.min(3, round(value, 4)));
 }
 
 function buildSection(input: {

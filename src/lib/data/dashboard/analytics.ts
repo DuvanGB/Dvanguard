@@ -56,6 +56,7 @@ export async function getOwnerSiteAnalytics(input: {
     .from("sites")
     .select("id, name, subdomain, status, site_type, created_at, current_version_id")
     .eq("owner_id", input.ownerId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   if (input.siteId) {

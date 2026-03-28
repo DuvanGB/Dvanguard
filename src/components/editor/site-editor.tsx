@@ -5,21 +5,17 @@ import Link from "next/link";
 
 import { ModuleTour } from "@/components/guided/module-tour";
 import { SiteHeader, getSiteHeaderPreviewHeight } from "@/components/runtime/site-header";
-import { SiteDomainManager } from "@/components/sites/site-domain-manager";
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
-import { CANVAS_BASE_WIDTH, applyEditableThemePatch, deriveVisualThemeFromLegacy, fontFamilies, getEditableThemeSnapshot, normalizeSiteSpecV3 } from "@/lib/site-spec-v3";
+import { CANVAS_BASE_WIDTH, applyEditableThemePatch, deriveVisualThemeFromLegacy, fontFamilies, getEditableThemeSnapshot, normalizeSiteSpecV3, stabilizeSiteSpecForMobile } from "@/lib/site-spec-v3";
 import { resolveFontStack } from "@/lib/design-fonts";
 import { getBodyFontFamily } from "@/lib/site-theme";
-import type { SiteDomainRecord } from "@/lib/site-domains";
 import type { TemplateDefinition, TemplateId } from "@/lib/templates/types";
 
 type Props = {
   siteId: string;
   siteName: string;
-  subdomain: string;
-  publicUrl: string;
-  pathModeUrl: string;
-  initialDomains: SiteDomainRecord[];
+  publicSiteUrl: string;
+  initialPublished: boolean;
   initialSpec: SiteSpecV3;
   initialMigrated?: boolean;
 };
@@ -84,7 +80,7 @@ const MIN_BLOCK_SIZE = {
 const SECTION_LIBRARY: Array<SiteSectionV3["type"]> = ["hero", "catalog", "testimonials", "contact"];
 const BLOCK_LIBRARY: Array<CanvasBlock["type"]> = ["text", "image", "button", "product", "shape", "container"];
 
-export function SiteEditor({ siteId, siteName, subdomain, publicUrl, pathModeUrl, initialDomains, initialSpec, initialMigrated }: Props) {
+export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, initialSpec, initialMigrated }: Props) {
   const normalized = useMemo(() => normalizeSiteSpecV3(initialSpec) ?? { spec: initialSpec, migrated: false }, [initialSpec]);
   const [siteSpec, setSiteSpec] = useState<SiteSpecV3>(normalized.spec);
   const [wasMigrated] = useState(() => initialMigrated ?? normalized.migrated);
@@ -97,6 +93,7 @@ export function SiteEditor({ siteId, siteName, subdomain, publicUrl, pathModeUrl
   const [lastPersistedHash, setLastPersistedHash] = useState(() => hashSpec(normalized.spec));
   const [message, setMessage] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const [isPublished, setIsPublished] = useState(initialPublished);
   const dragStateRef = useRef<DragState | null>(null);
   const sectionDragRef = useRef<SectionDragState | null>(null);
   const migrationRunRef = useRef(false);
@@ -698,6 +695,7 @@ function addSection(type: SiteSectionV3["type"]) {
     setLastPersistedHash(persisted.hash);
     setLastSavedAt(Date.now());
     setSaveState("saved");
+    setIsPublished(true);
     setMessage("Sitio publicado correctamente");
     setPublishing(false);
   }
@@ -849,7 +847,7 @@ function addSection(type: SiteSectionV3["type"]) {
           <div className="editor-brand">DVanguard</div>
           <div className="editor-meta">
             <strong>{siteName}</strong>
-            <span>{publicUrl}</span>
+            <span>Editor visual</span>
           </div>
         </div>
         <div className="editor-topbar-center">
@@ -887,6 +885,11 @@ function addSection(type: SiteSectionV3["type"]) {
           <Link href="/dashboard" className="btn-secondary">
             Dashboard
           </Link>
+          {isPublished ? (
+            <a href={publicSiteUrl} target="_blank" rel="noreferrer" className="btn-secondary">
+              Abrir sitio
+            </a>
+          ) : null}
           <button className="btn-secondary" type="button" onClick={() => void saveCheckpoint()}>
             Guardar
           </button>
@@ -1757,7 +1760,6 @@ function addSection(type: SiteSectionV3["type"]) {
                 ) : (
                   <div className="stack">
                     <p className="muted">Selecciona un bloque en el canvas para editar su contenido.</p>
-                    <SiteDomainManager siteId={siteId} fallbackUrl={pathModeUrl} initialDomains={initialDomains} compact />
                   </div>
                 )}
               </div>
@@ -2289,7 +2291,27 @@ function getBlockRect(block: CanvasBlock, viewport: EditorViewport) {
 
 function getSectionHeightPx(section: SiteSectionV3, viewport: EditorViewport, width: number) {
   const ratio = viewport === "mobile" ? section.height_ratio.mobile : section.height_ratio.desktop;
-  return Math.max(1, width * ratio);
+  const baseHeight = Math.max(1, width * ratio);
+  if (viewport !== "mobile") {
+    return baseHeight;
+  }
+
+  const contentBottom = section.blocks
+    .filter((block) => block.visible)
+    .reduce((maxBottom, block) => {
+      const rect = rectPercentToPx(getBlockRect(block, viewport), width, baseHeight);
+      const visualHeight =
+        block.type === "text"
+          ? getTextBlockMinHeightPx(block, rect.w, rect.h)
+          : block.type === "product"
+            ? Math.max(rect.h, 300)
+            : block.type === "image"
+              ? Math.max(rect.h, 180)
+              : rect.h;
+      return Math.max(maxBottom, rect.y + visualHeight + 24);
+    }, 0);
+
+  return Math.max(baseHeight, contentBottom);
 }
 
 function getTextBlockMinHeightPx(
@@ -2428,7 +2450,7 @@ function sanitizeSpecForSave(spec: SiteSpecV3): SiteSpecV3 {
       }
     }
   }
-  return next;
+  return stabilizeSiteSpecForMobile(next);
 }
 
 function buildHeaderLinksForEditor(spec: SiteSpecV3) {

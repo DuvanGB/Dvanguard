@@ -37,7 +37,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const source = parsedBody.data.source ?? "manual";
   const contentHash = hashSpec(normalizedSpec);
 
-  const { data: site } = await supabase.from("sites").select("id").eq("id", id).eq("owner_id", user.id).maybeSingle();
+  const { data: site } = await supabase.from("sites").select("id").eq("id", id).eq("owner_id", user.id).is("deleted_at", null).maybeSingle();
   if (!site) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }

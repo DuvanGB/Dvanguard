@@ -8,7 +8,8 @@ import { recordPlatformEvent } from "@/lib/platform-events";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 const bodySchema = z.object({
-  versionId: z.string().uuid().optional()
+  versionId: z.string().uuid().optional(),
+  enabled: z.boolean().optional()
 });
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -29,16 +30,30 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const { data: site } = await supabase
     .from("sites")
-    .select("id, current_version_id, status")
+    .select("id, current_version_id, status, deleted_at")
     .eq("id", id)
     .eq("owner_id", user.id)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (!site) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
 
+  const enabled = parsedBody.data.enabled ?? true;
   const versionId = parsedBody.data.versionId ?? site.current_version_id;
+
+  if (!enabled) {
+    await supabase.from("site_publications").update({ is_active: false }).eq("site_id", id);
+    await supabase.from("sites").update({ status: "draft" }).eq("id", id);
+    await supabase.from("events").insert({
+      site_id: id,
+      event_type: "site.unpublished",
+      payload_json: {}
+    });
+
+    return NextResponse.json({ unpublished: true });
+  }
 
   if (!versionId) {
     return NextResponse.json({ error: "No version available for publish" }, { status: 400 });

@@ -7,18 +7,16 @@ import { pickPrimaryDomain } from "@/lib/site-domains";
 
 type Props = {
   siteId: string;
-  fallbackUrl: string;
   initialDomains: SiteDomainRecord[];
   compact?: boolean;
 };
 
-export function SiteDomainManager({ siteId, fallbackUrl, initialDomains, compact = false }: Props) {
+export function SiteDomainManager({ siteId, initialDomains, compact = false }: Props) {
   const [domains, setDomains] = useState(initialDomains);
   const [hostname, setHostname] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const activeDomain = useMemo(() => pickPrimaryDomain(domains), [domains]);
-  const effectiveUrl = activeDomain ? `https://${activeDomain.hostname}` : fallbackUrl;
 
   async function refreshDomains() {
     const response = await fetch(`/api/sites/${siteId}/domains`, { cache: "no-store" });
@@ -110,18 +108,11 @@ export function SiteDomainManager({ siteId, fallbackUrl, initialDomains, compact
 
   return (
     <div className="stack" style={{ gap: compact ? "0.5rem" : "0.75rem" }}>
-      <div className="stack" style={{ gap: "0.25rem" }}>
-        <strong>URL pública</strong>
-        <a href={effectiveUrl} target="_blank" rel="noreferrer" style={{ wordBreak: "break-all" }}>
-          {effectiveUrl}
-        </a>
-        <small className="muted">
-          {activeDomain ? "Dominio propio conectado" : "Publicado por ruta. Puedes conectar tu dominio cuando quieras."}
-        </small>
-      </div>
-
       <div className="stack" style={{ gap: "0.45rem" }}>
         <strong>Dominio propio</strong>
+        <small className="muted">
+          {activeDomain ? "Dominio propio conectado y activo." : "Puedes conectar tu dominio cuando quieras desde aquí."}
+        </small>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <input
             value={hostname}

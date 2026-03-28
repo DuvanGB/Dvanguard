@@ -47,6 +47,7 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
     .select("id, owner_id")
     .eq("id", siteId)
     .eq("owner_id", userId)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (!site) {

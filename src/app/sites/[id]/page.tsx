@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { SiteEditor } from "@/components/editor/site-editor";
 import { requireUser } from "@/lib/auth";
 import { listSiteDomainsForSite } from "@/lib/data/site-domains";
-import { buildEffectivePublicUrl, getPathModePublicUrl } from "@/lib/public-url";
+import { buildEffectivePublicUrl } from "@/lib/public-url";
 import { buildSiteSpecV3FromBrief, normalizeSiteSpecV3, type SiteSpecV3 } from "@/lib/site-spec-v3";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
@@ -13,8 +13,9 @@ export default async function SiteEditorPage({ params }: { params: Promise<{ id:
 
   const { data: site } = await supabase
     .from("sites")
-    .select("id, name, subdomain, site_type, current_version_id")
+    .select("id, name, subdomain, site_type, status, current_version_id, deleted_at")
     .eq("id", id)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (!site) {
@@ -48,10 +49,8 @@ export default async function SiteEditorPage({ params }: { params: Promise<{ id:
       <SiteEditor
         siteId={site.id}
         siteName={site.name}
-        subdomain={site.subdomain}
-        publicUrl={buildEffectivePublicUrl({ subdomain: site.subdomain, domains: initialDomains })}
-        pathModeUrl={getPathModePublicUrl(site.subdomain)}
-        initialDomains={initialDomains}
+        publicSiteUrl={buildEffectivePublicUrl({ subdomain: site.subdomain, domains: initialDomains })}
+        initialPublished={site.status === "published"}
         initialSpec={initialSpec}
         initialMigrated={initialMigrated}
       />

@@ -15,6 +15,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     .select("id")
     .eq("id", id)
     .eq("owner_id", user.id)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (!site) {

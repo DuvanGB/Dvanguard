@@ -1,20 +1,24 @@
 import Link from "next/link";
 
 import { ProRequestButton } from "@/components/account/pro-request-button";
-import { PublishSiteButton } from "@/components/dashboard/publish-site-button";
+import { DeleteSiteButton } from "@/components/dashboard/delete-site-button";
+import { SitePublicationToggle } from "@/components/dashboard/site-publication-toggle";
 import { CreateSiteForm } from "@/components/forms/create-site-form";
 import { ModuleTour } from "@/components/guided/module-tour";
 import { SiteDomainManager } from "@/components/sites/site-domain-manager";
 import { requireUser } from "@/lib/auth";
 import { getUsageSnapshot } from "@/lib/billing/usage";
 import { getOwnerSiteAnalytics } from "@/lib/data/dashboard/analytics";
+import { listTrashedSitesForOwner, purgeExpiredDeletedSites } from "@/lib/sites-trash";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export default async function DashboardPage() {
   const { user, supabase } = await requireUser();
   const admin = getSupabaseAdminClient();
 
-  const [usageResponse, { data: pendingProRequest }, analytics] = await Promise.all([
+  await purgeExpiredDeletedSites(admin, user.id);
+
+  const [usageResponse, { data: pendingProRequest }, analytics, trashedSites] = await Promise.all([
     getUsageSnapshot(admin, user.id),
     supabase
       .from("pro_requests")
@@ -26,7 +30,8 @@ export default async function DashboardPage() {
     getOwnerSiteAnalytics({
       ownerId: user.id,
       range: "7d"
-    })
+    }),
+    listTrashedSitesForOwner(admin, user.id)
   ]);
 
   const usage = usageResponse;
@@ -49,6 +54,9 @@ export default async function DashboardPage() {
               </Link>
               <Link href="/onboarding" className="btn-primary">
                 Regenerar con IA
+              </Link>
+              <Link href="/trash" className="btn-secondary">
+                Papelera{trashedSites.length ? ` (${trashedSites.length})` : ""}
               </Link>
               <ModuleTour
                 module="dashboard"
@@ -150,11 +158,14 @@ export default async function DashboardPage() {
                       <strong>{site.name}</strong>
                       <small>{site.subdomain}</small>
                     </div>
-                    <div className="dashboard-site-badges">
-                      <span className="dashboard-badge">{site.site_type}</span>
-                      <span className={`dashboard-badge ${site.status === "published" ? "dashboard-badge-ok" : ""}`}>
-                        {site.status}
-                      </span>
+                    <div className="dashboard-site-head-right">
+                      <div className="dashboard-site-badges">
+                        <span className="dashboard-badge">{site.site_type}</span>
+                        <span className={`dashboard-badge ${site.status === "published" ? "dashboard-badge-ok" : ""}`}>
+                          {site.status}
+                        </span>
+                      </div>
+                      <SitePublicationToggle siteId={site.site_id} published={site.status === "published"} compact />
                     </div>
                   </header>
 
@@ -179,24 +190,19 @@ export default async function DashboardPage() {
                     <div className="dashboard-site-actions">
                       <Link className="btn-secondary" href={`/sites/${site.site_id}`}>
                         Editar
-                    </Link>
-                    <Link className="btn-secondary" href={`/onboarding?siteId=${site.site_id}`}>
-                      Regenerar IA
-                    </Link>
-                      <PublishSiteButton siteId={site.site_id} />
+                      </Link>
+                      <Link className="btn-secondary" href={`/onboarding?siteId=${site.site_id}`}>
+                        Regenerar IA
+                      </Link>
                       {site.status === "published" ? (
                         <a className="btn-secondary" href={site.public_url} target="_blank" rel="noreferrer">
                           Abrir sitio
                         </a>
                       ) : null}
+                      <DeleteSiteButton siteId={site.site_id} siteName={site.name} />
                     </div>
 
-                  <SiteDomainManager
-                    siteId={site.site_id}
-                    fallbackUrl={site.path_url}
-                    initialDomains={site.domains}
-                    compact
-                  />
+                  <SiteDomainManager siteId={site.site_id} initialDomains={site.domains} compact />
                 </article>
               ))}
             </div>

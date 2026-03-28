@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
     .select("id, name")
     .eq("id", siteId)
     .eq("owner_id", user.id)
+    .is("deleted_at", null)
     .maybeSingle();
   if (!site) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
