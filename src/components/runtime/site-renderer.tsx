@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { AnySiteSpec } from "@/lib/site-spec-any";
 import { buildFallbackSiteSpecV3, parseSiteSpecV3 } from "@/lib/site-spec-v3";
+import { getBodyFontFamily } from "@/lib/site-theme";
 import { SiteHeader } from "@/components/runtime/site-header";
 import { CanvasSection, type ProductCartItem } from "@/components/runtime/sections";
 
@@ -115,10 +116,10 @@ export function SiteRenderer({ spec, viewport, trackEvents = false, siteId, subd
   return (
     <main
       style={{
-        background: normalized.theme.background,
-        color: normalized.theme.primary,
+        background: normalized.theme.palette.background,
+        color: normalized.theme.palette.text_primary,
         minHeight: "100vh",
-        fontFamily: normalized.theme.font_body,
+        fontFamily: getBodyFontFamily(normalized.theme),
         width: rendererWidth,
         maxWidth: "100%",
         margin: 0,
@@ -137,10 +138,11 @@ export function SiteRenderer({ spec, viewport, trackEvents = false, siteId, subd
       ) : null}
       {(homepage?.sections ?? [])
         .filter((section) => section.enabled)
-        .map((section) => (
+        .map((section, index) => (
           <CanvasSection
             key={section.id}
             section={section}
+            sectionIndex={index}
             viewport={activeViewport}
             theme={normalized.theme}
             whatsappLink={whatsappLink}

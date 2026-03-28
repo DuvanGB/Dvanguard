@@ -1,21 +1,24 @@
 import { useMemo } from "react";
 import type { MouseEvent } from "react";
 
-import type { CanvasBlock, SiteSectionV3 } from "@/lib/site-spec-v3";
-
-type Theme = {
-  primary: string;
-  secondary: string;
-  background: string;
-  font_heading: string;
-  font_body: string;
-  radius: "sm" | "md" | "lg";
-};
+import type { CanvasBlock, SiteSectionV3, SiteThemeV31 } from "@/lib/site-spec-v3";
+import {
+  getBlockRadius,
+  getButtonAppearance,
+  getCardSurface,
+  getFontFamilyForBlock,
+  getHeadingFontFamily,
+  getLetterSpacingValue,
+  getSectionAppearance,
+  getSectionPadding,
+  getTextScale
+} from "@/lib/site-theme";
 
 export type SectionRenderProps = {
   section: SiteSectionV3;
+  sectionIndex?: number;
   viewport: "desktop" | "mobile";
-  theme: Theme;
+  theme: SiteThemeV31;
   whatsappLink?: string;
   onAddToCart?: (item: ProductCartItem) => void;
   onTrackCtaClick?: (sectionId: string) => void;
@@ -36,6 +39,7 @@ export type ProductCartItem = {
 
 export function CanvasSection({
   section,
+  sectionIndex = 0,
   viewport,
   theme,
   whatsappLink,
@@ -48,6 +52,7 @@ export function CanvasSection({
 }: SectionRenderProps) {
   const visibleBlocks = useMemo(() => section.blocks.filter((block) => block.visible), [section.blocks]);
   const sectionRatio = viewport === "mobile" ? section.height_ratio.mobile : section.height_ratio.desktop;
+  const appearance = getSectionAppearance(theme, section, sectionIndex);
 
   return (
     <section
@@ -57,7 +62,8 @@ export function CanvasSection({
         position: "relative",
         width: "100%",
         aspectRatio: `${1}/${sectionRatio}`,
-        borderBottom: `1px solid ${theme.secondary}25`,
+        background: appearance.background,
+        borderBottom: `1px solid ${appearance.borderColor}`,
         overflow: "hidden"
       }}
     >
@@ -68,6 +74,7 @@ export function CanvasSection({
             key={block.id}
             block={block}
             sectionId={section.id}
+            theme={theme}
             viewport={viewport}
             whatsappLink={whatsappLink}
             onAddToCart={onAddToCart}
@@ -85,6 +92,7 @@ export function CanvasSection({
 function CanvasBlockRenderer({
   block,
   sectionId,
+  theme,
   viewport,
   whatsappLink,
   onAddToCart,
@@ -96,6 +104,7 @@ function CanvasBlockRenderer({
 }: {
   block: CanvasBlock;
   sectionId: string;
+  theme: SiteThemeV31;
   viewport: "desktop" | "mobile";
   whatsappLink?: string;
   onAddToCart?: (item: ProductCartItem) => void;
@@ -106,6 +115,11 @@ function CanvasBlockRenderer({
   editable?: boolean;
 }) {
   const rect = getBlockLayout(block, viewport);
+  const cardSurface = getCardSurface(theme);
+  const buttonAppearance = getButtonAppearance(theme);
+  const basePadding = getSectionPadding(theme);
+  const textScale = getTextScale(theme);
+  const fontFamily = getFontFamilyForBlock(theme, block);
   const style = {
     position: "absolute" as const,
     left: `${rect.x}%`,
@@ -113,17 +127,18 @@ function CanvasBlockRenderer({
     width: `${rect.w}%`,
     height: `${rect.h}%`,
     zIndex: rect.z,
-    borderRadius: block.style?.radius ?? 0,
-    color: block.style?.color,
+    borderRadius: getBlockRadius(theme, block.style?.radius ?? 0),
+    color: block.style?.color ?? theme.palette.text_primary,
     background: block.style?.bgColor,
     borderStyle: block.style?.borderWidth ? "solid" : undefined,
     borderWidth: block.style?.borderWidth,
     borderColor: block.style?.borderColor,
     opacity: block.style?.opacity,
-    fontSize: block.style?.fontSize,
-    fontWeight: block.style?.fontWeight,
-    fontFamily: block.style?.fontFamily,
+    fontSize: block.style?.fontSize ? block.style.fontSize * textScale : undefined,
+    fontWeight: block.style?.fontWeight ?? theme.typography.heading_weight,
+    fontFamily,
     textAlign: block.style?.textAlign as "left" | "center" | "right" | undefined,
+    letterSpacing: getLetterSpacingValue(theme),
     boxSizing: "border-box" as const,
     outline: editable && isSelected ? "2px solid #0ea5e9" : "none",
     cursor: editable ? "pointer" : "default"
@@ -138,10 +153,10 @@ function CanvasBlockRenderer({
           minHeight: style.height,
           height: "auto",
           overflow: "visible",
-          padding: 8,
+          padding: basePadding,
           whiteSpace: "pre-wrap",
           overflowWrap: "anywhere",
-          lineHeight: 1.15
+          lineHeight: theme.typography.scale === "editorial" ? 1.05 : 1.15
         }}
         onClick={() => onSelectBlock?.(sectionId, block.id)}
       >
@@ -187,14 +202,14 @@ function CanvasBlockRenderer({
 
     if (!href) {
       return (
-        <button type="button" style={{ ...style, border: "none" }} onClick={handleClick}>
+        <button type="button" style={{ ...style, ...buttonAppearance }} onClick={handleClick}>
           {block.content.label}
         </button>
       );
     }
 
     return (
-      <a href={href} target="_blank" rel="noreferrer" style={{ ...style, textDecoration: "none", display: "grid", placeItems: "center" }} onClick={handleClick}>
+      <a href={href} target="_blank" rel="noreferrer" style={{ ...style, ...buttonAppearance, textDecoration: "none", display: "grid", placeItems: "center" }} onClick={handleClick}>
         {block.content.label}
       </a>
     );
@@ -224,25 +239,29 @@ function CanvasBlockRenderer({
       <div
         style={{
           ...style,
-          padding: 12,
+          ...cardSurface,
+          padding: basePadding,
           display: "flex",
           flexDirection: "column",
-          gap: 8
+          gap: 8,
+          borderStyle: "solid",
+          borderWidth: block.style.borderWidth ?? 1,
+          borderColor: block.style.borderColor ?? cardSurface.borderColor
         }}
         onClick={() => onSelectBlock?.(sectionId, block.id)}
       >
-        <div style={{ flex: "0 0 auto", borderRadius: block.style.radius ?? 12, overflow: "hidden" }}>
+        <div style={{ flex: "0 0 auto", borderRadius: getBlockRadius(theme, block.style.radius ?? 12), overflow: "hidden" }}>
           <img
             src={block.content.image_url || "https://placehold.co/640x420?text=Producto"}
             alt={block.content.name}
             style={{ width: "100%", height: 160, objectFit: "cover" }}
           />
         </div>
-        <strong style={{ fontSize: 18 }}>{block.content.name}</strong>
-        {block.content.description ? <span style={{ fontSize: 14, color: "#475569" }}>{block.content.description}</span> : null}
+        <strong style={{ fontSize: 18 * textScale, fontFamily: getHeadingFontFamily(theme) }}>{block.content.name}</strong>
+        {block.content.description ? <span style={{ fontSize: 14, color: theme.palette.text_muted }}>{block.content.description}</span> : null}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
           <span style={{ fontWeight: 700 }}>{priceLabel}</span>
-          <button type="button" onClick={handleAdd} style={{ padding: "0.45rem 0.8rem", borderRadius: 999, border: "none", background: "#0c4a6e", color: "#fff" }}>
+          <button type="button" onClick={handleAdd} style={{ ...buttonAppearance, cursor: editable ? "pointer" : "pointer" }}>
             Agregar
           </button>
         </div>

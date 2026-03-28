@@ -1,11 +1,15 @@
 import { z } from "zod";
 
 import {
-  fontFamilies,
   type CanvasBlock,
   type CanvasLayoutRect,
   type SiteSectionV3,
   type SiteSpecV3,
+  applyEditableThemePatch,
+  deriveVisualThemeFromLegacy,
+  getEditableThemeSnapshot,
+  isSupportedFontFamily,
+  normalizeFontFamilyToken,
   parseSiteSpecV3
 } from "@/lib/site-spec-v3";
 import type { BusinessBriefDraft } from "@/lib/onboarding/types";
@@ -36,13 +40,43 @@ const sectionHeightRatioSchema = z.object({
   mobile: z.number().min(0.2).max(3)
 });
 
-const themePatchSchema = z.object({
-  primary: z.string().optional(),
-  secondary: z.string().optional(),
+const palettePatchSchema = z.object({
   background: z.string().optional(),
-  font_heading: z.string().optional(),
-  font_body: z.string().optional(),
-  radius: z.enum(["sm", "md", "lg"]).optional()
+  surface: z.string().optional(),
+  border: z.string().optional(),
+  primary: z.string().optional(),
+  accent: z.string().optional(),
+  text_primary: z.string().optional(),
+  text_muted: z.string().optional()
+});
+
+const typographyPatchSchema = z.object({
+  heading_font: z.string().optional(),
+  body_font: z.string().optional(),
+  scale: z.enum(["compact", "balanced", "editorial"]).optional(),
+  heading_weight: z.number().int().min(300).max(900).optional(),
+  letter_spacing: z.enum(["tight", "normal", "wide"]).optional()
+});
+
+const styleTokensPatchSchema = z.object({
+  spacing_scale: z.enum(["tight", "comfortable", "spacious"]).optional(),
+  border_style: z.enum(["none", "subtle", "strong"]).optional(),
+  section_rhythm: z.enum(["flat", "alternating", "layered"]).optional(),
+  hero_treatment: z.enum(["fullbleed-dark", "fullbleed-light", "split-asymmetric", "centered-cinematic", "editorial-overlap"]).optional(),
+  image_treatment: z.enum(["raw", "rounded-sm", "rounded-lg", "masked-organic"]).optional()
+});
+
+const ctaPatchSchema = z.object({
+  variant: z.enum(["filled", "ghost", "pill", "underline"]).optional(),
+  size: z.enum(["sm", "md", "lg"]).optional(),
+  uppercase: z.boolean().optional()
+});
+
+const themePatchSchema = z.object({
+  palette: palettePatchSchema.partial().optional(),
+  typography: typographyPatchSchema.partial().optional(),
+  style_tokens: styleTokensPatchSchema.partial().optional(),
+  cta: ctaPatchSchema.partial().optional()
 });
 
 const blockCompositionSchema = z.object({
@@ -201,10 +235,7 @@ export function applyDesignPatchToSpec(seedSpec: SiteSpecV3, patch?: DesignPatch
 
   const next = structuredClone(seedSpec);
   if (patch.themePatch) {
-    next.theme = {
-      ...next.theme,
-      ...normalizeThemePatch(patch.themePatch)
-    };
+    next.theme = normalizeThemePatch(patch.themePatch, next.theme);
   }
 
   if (patch.visualDirection?.headerVariant) {
@@ -312,19 +343,25 @@ export function buildHeuristicLayoutProposal(input: {
     [brief?.business_name ?? "", brief?.offer_summary ?? "", brief?.tone ?? "", brief?.target_audience ?? "", prompt].join("|")
   );
   const siteType = brief?.business_type ?? inferSiteType(prompt);
-  const stylePreset = inferStylePreset([brief?.tone ?? "", brief?.offer_summary ?? "", prompt].join(" "));
   const premium = /premium|lujo|exclusiv|editorial|atelier|streetwear/i.test(prompt);
   const fashion = /moda|ropa|zapato|sneaker|boutique|fashion/i.test(prompt);
   const sport = /deport|fitness|gym|gimnas|running/i.test(prompt);
   const tech = /tech|software|digital|app|saas|tecnolog/i.test(prompt);
   const health = /salud|clinica|wellness|spa|medic/i.test(prompt);
+  const industryProfile = inferIndustryProfile([brief?.tone ?? "", brief?.offer_summary ?? "", prompt].join(" "), {
+    premium,
+    tech,
+    health,
+    fashion,
+    sport
+  });
   const sectionOrder =
     siteType === "commerce_lite"
       ? (["hero", "catalog", "testimonials", "contact"] as SiteSectionV3["type"][])
       : (["hero", "testimonials", "contact"] as SiteSectionV3["type"][]);
   const normalizedSectionOrder = enforceDefaultSectionOrder(sectionOrder);
 
-  const themeDirection = themeFromStyle(stylePreset, { premium, tech, health, fashion, sport });
+  const themeDirection = themeFromStyle(industryProfile);
   const hero = pickBuilder(
     siteType === "commerce_lite"
       ? fashion || premium
@@ -431,7 +468,7 @@ function buildNeutralProposalSeed(input: {
   const businessName = brief?.business_name?.trim() || input.prompt.slice(0, 80) || "Tu negocio";
   const offerSummary = brief?.offer_summary?.trim() || "Presentación principal del negocio.";
   const targetAudience = brief?.target_audience?.trim() || "Clientes potenciales en redes y WhatsApp";
-  const theme = themeFromStyle(inferStylePreset([brief?.tone ?? "", offerSummary, input.prompt].join(" ")), {});
+  const theme = themeFromStyle(inferIndustryProfile([brief?.tone ?? "", offerSummary, input.prompt].join(" "), {}));
   const sectionOrder =
     siteType === "commerce_lite"
       ? (["hero", "catalog", "testimonials", "contact"] as SiteSectionV3["type"][])
@@ -448,7 +485,7 @@ function buildNeutralProposalSeed(input: {
   }));
 
   return {
-    schema_version: "3.0",
+    schema_version: "3.1",
     site_type: siteType,
     locale: "es-LATAM",
     template: {
@@ -647,7 +684,7 @@ function heroSplitTech(brief: BusinessBriefDraft | undefined, theme: Partial<Sit
       compose("headline", true, rect(8, 16, 46, 16, 3), rect(8, 14, 84, 16, 3), {
         fontSize: 54,
         fontWeight: 700,
-        color: theme.primary ?? "#082f49"
+        color: themeTextPrimary(theme)
       }, { text: brief?.business_name }),
       compose("subheadline", true, rect(8, 36, 42, 12, 3), rect(8, 32, 84, 12, 3), { fontSize: 18, color: "#334155" }, { text: buildHeroSubtitle(brief) }),
       compose("hero-image", true, rect(58, 16, 30, 52, 2), rect(12, 58, 76, 22, 2), { radius: 22 }, { fit: "cover" })
@@ -667,7 +704,7 @@ function heroStackedSoft(brief: BusinessBriefDraft | undefined, theme: Partial<S
         fontSize: 52,
         fontWeight: 700,
         textAlign: "center",
-        color: theme.primary ?? "#0f172a"
+        color: themeTextPrimary(theme)
       }, { text: brief?.business_name }),
       compose("subheadline", true, rect(20, 32, 60, 12, 3), rect(8, 30, 84, 12, 3), {
         fontSize: 18,
@@ -704,7 +741,7 @@ function heroFullBleedBrand(brief: BusinessBriefDraft | undefined, theme: Partia
     height_ratio: { desktop: 0.88, mobile: 1.36 },
     blocks: [
       compose("hero-bg", true, rect(0, 0, 100, 100, 1), rect(0, 0, 100, 100, 1), undefined, { fit: "cover" }),
-      compose("hero-overlay", true, rect(0, 0, 100, 100, 2), rect(0, 0, 100, 100, 2), { bgColor: theme.primary ?? "#0f172a", opacity: 0.28 }),
+      compose("hero-overlay", true, rect(0, 0, 100, 100, 2), rect(0, 0, 100, 100, 2), { bgColor: themePrimary(theme), opacity: 0.28 }),
       compose("headline", true, rect(7, 18, 46, 18, 3), rect(8, 14, 84, 16, 3), { fontSize: 60, fontWeight: 700, color: "#ffffff" }, {
         text: brief?.business_name
       }),
@@ -722,7 +759,7 @@ function heroCompactSale(brief: BusinessBriefDraft | undefined, theme: Partial<S
     variant: "centered",
     height_ratio: { desktop: 0.56, mobile: 1.02 },
     blocks: [
-      compose("headline", true, rect(10, 16, 42, 14, 3), rect(8, 12, 84, 16, 3), { fontSize: 50, fontWeight: 700, color: theme.primary ?? "#0f172a" }, {
+      compose("headline", true, rect(10, 16, 42, 14, 3), rect(8, 12, 84, 16, 3), { fontSize: 50, fontWeight: 700, color: themeTextPrimary(theme) }, {
         text: brief?.business_name
       }),
       compose("subheadline", true, rect(10, 34, 38, 10, 3), rect(8, 30, 84, 12, 3), { fontSize: 17, color: "#475569" }, {
@@ -743,7 +780,7 @@ function heroCenteredClean(brief: BusinessBriefDraft | undefined, theme: Partial
         fontSize: 50,
         fontWeight: 700,
         textAlign: "center",
-        color: theme.primary ?? "#0f172a"
+        color: themeTextPrimary(theme)
       }, { text: brief?.business_name }),
       compose("subheadline", true, rect(18, 34, 64, 10, 3), rect(8, 32, 84, 12, 3), {
         fontSize: 17,
@@ -762,7 +799,7 @@ function heroImageLead(brief: BusinessBriefDraft | undefined, theme: Partial<Sit
     height_ratio: { desktop: 0.64, mobile: 1.14 },
     blocks: [
       compose("hero-image", true, rect(8, 14, 38, 58, 1), rect(12, 54, 76, 24, 1), { radius: 20 }, { fit: "cover" }),
-      compose("headline", true, rect(52, 18, 36, 14, 3), rect(8, 14, 84, 16, 3), { fontSize: 46, fontWeight: 700, color: theme.primary ?? "#0f172a" }, {
+      compose("headline", true, rect(52, 18, 36, 14, 3), rect(8, 14, 84, 16, 3), { fontSize: 46, fontWeight: 700, color: themeTextPrimary(theme) }, {
         text: brief?.business_name
       }),
       compose("subheadline", true, rect(52, 36, 32, 12, 3), rect(8, 32, 84, 12, 3), { fontSize: 17, color: "#475569" }, {
@@ -778,7 +815,7 @@ function catalogGridCommerce(theme: Partial<SiteSpecV3["theme"]>): SectionCompos
     variant: "grid",
     height_ratio: { desktop: 0.68, mobile: 1.75 },
     blocks: [
-      compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 38, fontWeight: 700, color: theme.primary ?? "#0f172a" }),
+      compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 38, fontWeight: 700, color: themeTextPrimary(theme) }),
       compose("product-1", true, rect(8, 22, 26, 62, 1), rect(8, 18, 84, 22, 1)),
       compose("product-2", true, rect(38, 22, 26, 62, 1), rect(8, 44, 84, 22, 1)),
       compose("product-3", true, rect(68, 22, 26, 62, 1), rect(8, 70, 84, 22, 1))
@@ -792,7 +829,7 @@ function catalogMosaicCommerce(theme: Partial<SiteSpecV3["theme"]>): SectionComp
     variant: "grid",
     height_ratio: { desktop: 0.72, mobile: 1.86 },
     blocks: [
-      compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 38, fontWeight: 700, color: theme.primary ?? "#0f172a" }),
+      compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 38, fontWeight: 700, color: themeTextPrimary(theme) }),
       compose("product-1", true, rect(8, 22, 38, 62, 1), rect(8, 18, 84, 22, 1)),
       compose("product-2", true, rect(50, 22, 42, 28, 1), rect(8, 44, 84, 22, 1)),
       compose("product-3", true, rect(50, 54, 42, 30, 1), rect(8, 70, 84, 22, 1))
@@ -806,7 +843,7 @@ function catalogFeaturedCommerce(theme: Partial<SiteSpecV3["theme"]>): SectionCo
     variant: "list",
     height_ratio: { desktop: 0.76, mobile: 1.82 },
     blocks: [
-      compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 40, fontWeight: 700, color: theme.primary ?? "#0f172a" }),
+      compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 40, fontWeight: 700, color: themeTextPrimary(theme) }),
       compose("product-1", true, rect(8, 22, 56, 62, 1), rect(8, 18, 84, 22, 1)),
       compose("product-2", true, rect(68, 22, 24, 28, 1), rect(8, 44, 84, 22, 1)),
       compose("product-3", true, rect(68, 54, 24, 30, 1), rect(8, 70, 84, 22, 1))
@@ -820,7 +857,7 @@ function catalogFeaturedTopCommerce(theme: Partial<SiteSpecV3["theme"]>): Sectio
     variant: "list",
     height_ratio: { desktop: 0.74, mobile: 1.8 },
     blocks: [
-      compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 40, fontWeight: 700, color: theme.primary ?? "#0f172a" }),
+      compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 40, fontWeight: 700, color: themeTextPrimary(theme) }),
       compose("product-1", true, rect(8, 22, 84, 30, 1), rect(8, 18, 84, 22, 1)),
       compose("product-2", true, rect(8, 58, 40, 24, 1), rect(8, 46, 84, 22, 1)),
       compose("product-3", true, rect(52, 58, 40, 24, 1), rect(8, 72, 84, 22, 1))
@@ -834,7 +871,7 @@ function catalogCardsInformative(theme: Partial<SiteSpecV3["theme"]>): SectionCo
     variant: "cards",
     height_ratio: { desktop: 0.6, mobile: 1.38 },
     blocks: [
-      compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: theme.primary ?? "#0f172a" }),
+      compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: themeTextPrimary(theme) }),
       compose("card-1", true, rect(8, 22, 26, 56, 1), rect(8, 18, 84, 24, 1)),
       compose("image-1", true, rect(10, 24, 22, 20, 2), rect(12, 20, 76, 10, 2), { radius: 14 }, { fit: "cover" }),
       compose("name-1", true, rect(10, 48, 18, 6, 3), rect(12, 32, 70, 5, 3), { fontSize: 20, fontWeight: 700 }),
@@ -857,7 +894,7 @@ function catalogStripInformative(theme: Partial<SiteSpecV3["theme"]>): SectionCo
     variant: "list",
     height_ratio: { desktop: 0.5, mobile: 1.26 },
     blocks: [
-      compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: theme.primary ?? "#0f172a" }),
+      compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: themeTextPrimary(theme) }),
       compose("card-1", true, rect(8, 24, 84, 14, 1), rect(8, 18, 84, 18, 1)),
       compose("name-1", true, rect(12, 28, 30, 4, 2), rect(12, 22, 70, 5, 2), { fontSize: 18, fontWeight: 700 }),
       compose("desc-1", true, rect(12, 33, 54, 4, 2), rect(12, 28, 70, 5, 2), { fontSize: 14, color: "#475569" }),
@@ -877,7 +914,7 @@ function catalogServiceFocusInformative(theme: Partial<SiteSpecV3["theme"]>): Se
     variant: "cards",
     height_ratio: { desktop: 0.56, mobile: 1.3 },
     blocks: [
-      compose("title", true, rect(8, 8, 54, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: theme.primary ?? "#0f172a" }),
+      compose("title", true, rect(8, 8, 54, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: themeTextPrimary(theme) }),
       compose("card-1", true, rect(8, 24, 40, 52, 1), rect(8, 18, 84, 22, 1)),
       compose("name-1", true, rect(12, 30, 28, 6, 2), rect(12, 22, 70, 5, 2), { fontSize: 22, fontWeight: 700 }),
       compose("desc-1", true, rect(12, 40, 24, 12, 2), rect(12, 30, 70, 8, 2), { fontSize: 14, color: "#475569" }),
@@ -925,7 +962,7 @@ function testimonialsBand(theme: Partial<SiteSpecV3["theme"]>): SectionCompositi
     variant: "minimal",
     height_ratio: { desktop: 0.24, mobile: 0.72 },
     blocks: [
-      compose("title", true, rect(8, 12, 38, 10, 2), rect(8, 8, 84, 10, 2), { fontSize: 30, fontWeight: 700, color: theme.primary ?? "#f8fafc" }),
+      compose("title", true, rect(8, 12, 38, 10, 2), rect(8, 8, 84, 10, 2), { fontSize: 30, fontWeight: 700, color: themeTextPrimary(theme) }),
       compose("quote-1", true, rect(8, 38, 84, 10, 2), rect(8, 34, 84, 14, 2), { fontSize: 19, color: "#52525b" })
     ]
   };
@@ -977,7 +1014,7 @@ function contactBand(theme: Partial<SiteSpecV3["theme"]>): SectionComposition {
     variant: "compact",
     height_ratio: { desktop: 0.2, mobile: 0.62 },
     blocks: [
-      compose("title", true, rect(8, 24, 22, 10, 2), rect(8, 14, 84, 10, 2), { fontSize: 30, fontWeight: 700, color: theme.primary ?? "#f8fafc" }),
+      compose("title", true, rect(8, 24, 22, 10, 2), rect(8, 14, 84, 10, 2), { fontSize: 30, fontWeight: 700, color: themeTextPrimary(theme) }),
       compose("description", true, rect(34, 24, 34, 10, 2), rect(8, 30, 84, 10, 2), { fontSize: 17, color: "#a1a1aa" }),
       compose("contact-cta", true, rect(72, 22, 18, 14, 3), rect(8, 46, 52, 12, 3), undefined, { label: "Escribir" })
     ]
@@ -990,61 +1027,212 @@ function contactCardCta(theme: Partial<SiteSpecV3["theme"]>): SectionComposition
     variant: "highlight",
     height_ratio: { desktop: 0.26, mobile: 0.78 },
     blocks: [
-      compose("title", true, rect(10, 20, 26, 10, 2), rect(8, 12, 84, 10, 2), { fontSize: 32, fontWeight: 700, color: theme.primary ?? "#0f172a" }),
+      compose("title", true, rect(10, 20, 26, 10, 2), rect(8, 12, 84, 10, 2), { fontSize: 32, fontWeight: 700, color: themeTextPrimary(theme) }),
       compose("description", true, rect(10, 36, 34, 10, 2), rect(8, 28, 84, 10, 2), { fontSize: 16, color: "#475569" }),
       compose("contact-cta", true, rect(10, 54, 22, 12, 3), rect(8, 48, 50, 12, 3), undefined, { label: "Contactar" })
     ]
   };
 }
 
-function themeFromStyle(
-  stylePreset: "ocean" | "sunset" | "mono",
-  flags: { premium?: boolean; tech?: boolean; health?: boolean; fashion?: boolean; sport?: boolean }
-): SiteSpecV3["theme"] {
-  if (stylePreset === "mono") {
-    return {
-      primary: "#f8fafc",
-      secondary: "#f97316",
-      background: "#09090b",
-      font_heading: "Space Grotesk",
-      font_body: "Manrope",
-      radius: "sm"
-    };
+function themeFromStyle(profile: IndustryProfile): SiteSpecV3["theme"] {
+  switch (profile) {
+    case "restaurant":
+      return {
+        palette: {
+          background: "#130f0c",
+          surface: "#211913",
+          border: "#5c4326",
+          primary: "#f5efe6",
+          accent: "#d89b3d",
+          text_primary: "#fff8ef",
+          text_muted: "#cfbeaa"
+        },
+        typography: {
+          heading_font: "Playfair Display",
+          body_font: "Lato",
+          scale: "editorial",
+          heading_weight: 700,
+          letter_spacing: "normal"
+        },
+        style_tokens: {
+          spacing_scale: "spacious",
+          border_style: "subtle",
+          section_rhythm: "layered",
+          hero_treatment: "fullbleed-dark",
+          image_treatment: "rounded-lg"
+        },
+        cta: { variant: "pill", size: "md", uppercase: false }
+      };
+    case "fashion":
+      return {
+        palette: {
+          background: "#f7f2eb",
+          surface: "#fffdf9",
+          border: "#dcc9b1",
+          primary: "#2a2019",
+          accent: "#b99149",
+          text_primary: "#21160f",
+          text_muted: "#7a6759"
+        },
+        typography: {
+          heading_font: "Cormorant Garamond",
+          body_font: "Mulish",
+          scale: "editorial",
+          heading_weight: 300,
+          letter_spacing: "tight"
+        },
+        style_tokens: {
+          spacing_scale: "spacious",
+          border_style: "subtle",
+          section_rhythm: "alternating",
+          hero_treatment: "editorial-overlap",
+          image_treatment: "rounded-lg"
+        },
+        cta: { variant: "underline", size: "md", uppercase: false }
+      };
+    case "tech":
+      return {
+        palette: {
+          background: "#0a1020",
+          surface: "#11192e",
+          border: "#273357",
+          primary: "#eef2ff",
+          accent: "#8b5cf6",
+          text_primary: "#f5f7ff",
+          text_muted: "#b9c0dc"
+        },
+        typography: {
+          heading_font: "Syne",
+          body_font: "Manrope",
+          scale: "balanced",
+          heading_weight: 800,
+          letter_spacing: "tight"
+        },
+        style_tokens: {
+          spacing_scale: "comfortable",
+          border_style: "subtle",
+          section_rhythm: "layered",
+          hero_treatment: "split-asymmetric",
+          image_treatment: "rounded-sm"
+        },
+        cta: { variant: "filled", size: "md", uppercase: false }
+      };
+    case "health":
+      return {
+        palette: {
+          background: "#eff8f3",
+          surface: "#ffffff",
+          border: "#bfd8c8",
+          primary: "#1f4736",
+          accent: "#5fa88a",
+          text_primary: "#17382b",
+          text_muted: "#61806f"
+        },
+        typography: {
+          heading_font: "DM Serif Display",
+          body_font: "DM Sans",
+          scale: "balanced",
+          heading_weight: 400,
+          letter_spacing: "normal"
+        },
+        style_tokens: {
+          spacing_scale: "comfortable",
+          border_style: "subtle",
+          section_rhythm: "alternating",
+          hero_treatment: "fullbleed-light",
+          image_treatment: "rounded-lg"
+        },
+        cta: { variant: "ghost", size: "md", uppercase: false }
+      };
+    case "sport":
+      return {
+        palette: {
+          background: "#090909",
+          surface: "#151515",
+          border: "#2b2b2b",
+          primary: "#f8f8f8",
+          accent: "#facc15",
+          text_primary: "#ffffff",
+          text_muted: "#d4d4d4"
+        },
+        typography: {
+          heading_font: "Bebas Neue",
+          body_font: "Inter",
+          scale: "compact",
+          heading_weight: 400,
+          letter_spacing: "wide"
+        },
+        style_tokens: {
+          spacing_scale: "tight",
+          border_style: "strong",
+          section_rhythm: "layered",
+          hero_treatment: "centered-cinematic",
+          image_treatment: "raw"
+        },
+        cta: { variant: "pill", size: "lg", uppercase: true }
+      };
+    default:
+      return {
+        palette: {
+          background: "#f8fbff",
+          surface: "#ffffff",
+          border: "#d7e3f4",
+          primary: "#243b6b",
+          accent: "#4f46e5",
+          text_primary: "#18253f",
+          text_muted: "#6a7893"
+        },
+        typography: {
+          heading_font: "Outfit",
+          body_font: "DM Sans",
+          scale: "balanced",
+          heading_weight: 700,
+          letter_spacing: "normal"
+        },
+        style_tokens: {
+          spacing_scale: "comfortable",
+          border_style: "subtle",
+          section_rhythm: "alternating",
+          hero_treatment: "split-asymmetric",
+          image_treatment: "rounded-sm"
+        },
+        cta: { variant: "filled", size: "md", uppercase: false }
+      };
   }
-  if (stylePreset === "sunset" || flags.health || flags.fashion) {
-    return {
-      primary: "#0f172a",
-      secondary: "#ea580c",
-      background: "#fff7ed",
-      font_heading: "Montserrat",
-      font_body: "Open Sans",
-      radius: "md"
-    };
-  }
-  return {
-    primary: "#082f49",
-    secondary: "#0ea5e9",
-    background: "#f4fbff",
-    font_heading: "Space Grotesk",
-    font_body: "Manrope",
-    radius: "md"
-  };
 }
 
-function normalizeThemePatch(patch: NonNullable<DesignPatch["themePatch"]>) {
-  const next: Partial<SiteSpecV3["theme"]> = {
-    primary: patch.primary,
-    secondary: patch.secondary,
-    background: patch.background,
-    radius: patch.radius
-  };
-  if (patch.font_heading && fontFamilies.includes(patch.font_heading as (typeof fontFamilies)[number])) {
-    next.font_heading = patch.font_heading as SiteSpecV3["theme"]["font_heading"];
+function normalizeThemePatch(patch: NonNullable<DesignPatch["themePatch"]>, currentTheme: SiteSpecV3["theme"]) {
+  const next = structuredClone(currentTheme);
+  if (patch.palette) {
+    next.palette = { ...next.palette, ...patch.palette };
   }
-  if (patch.font_body && fontFamilies.includes(patch.font_body as (typeof fontFamilies)[number])) {
-    next.font_body = patch.font_body as SiteSpecV3["theme"]["font_body"];
+  if (patch.typography) {
+    next.typography = {
+      ...next.typography,
+      ...patch.typography,
+      heading_font: normalizeFontFamilyToken(patch.typography.heading_font ?? next.typography.heading_font, "heading"),
+      body_font: normalizeFontFamilyToken(patch.typography.body_font ?? next.typography.body_font, "body")
+    };
+  }
+  if (patch.style_tokens) {
+    next.style_tokens = { ...next.style_tokens, ...patch.style_tokens };
+  }
+  if (patch.cta) {
+    next.cta = { ...next.cta, ...patch.cta };
   }
   return next;
+}
+
+function themePrimary(theme: Partial<SiteSpecV3["theme"]>) {
+  return theme.palette?.primary ?? "#243b6b";
+}
+
+function themeTextPrimary(theme: Partial<SiteSpecV3["theme"]>) {
+  return theme.palette?.text_primary ?? "#18253f";
+}
+
+function themeTextMuted(theme: Partial<SiteSpecV3["theme"]>) {
+  return theme.palette?.text_muted ?? "#6a7893";
 }
 
 function normalizeBlockStylePatch(
@@ -1061,7 +1249,7 @@ function normalizeBlockStylePatch(
     opacity: patch.opacity,
     textAlign: patch.textAlign
   };
-  if (patch.fontFamily && fontFamilies.includes(patch.fontFamily as (typeof fontFamilies)[number])) {
+  if (patch.fontFamily && isSupportedFontFamily(patch.fontFamily)) {
     next.fontFamily = patch.fontFamily as CanvasBlock["style"]["fontFamily"];
   }
   return next;
@@ -1217,11 +1405,18 @@ function inferSiteType(prompt: string): SiteSpecV3["site_type"] {
   return /tienda|catalog|catálogo|producto|vender|venta|stock/i.test(prompt) ? "commerce_lite" : "informative";
 }
 
-function inferStylePreset(prompt: string): "ocean" | "sunset" | "mono" {
-  if (/premium|elegante|lujo/i.test(prompt)) return "sunset";
-  if (/tech|digital|moderno|software|app|deport|fitness/i.test(prompt)) return "ocean";
-  if (/salud|clinica|wellness|spa|medic|moda|ropa|zapato|sneaker/i.test(prompt)) return "sunset";
-  return "ocean";
+type IndustryProfile = "restaurant" | "fashion" | "tech" | "health" | "sport" | "modern";
+
+function inferIndustryProfile(
+  prompt: string,
+  flags: { premium?: boolean; tech?: boolean; health?: boolean; fashion?: boolean; sport?: boolean }
+): IndustryProfile {
+  if (/restaurante|comida|food|cafe|cafeter|bar|pizza|burger/i.test(prompt)) return "restaurant";
+  if (flags.fashion || flags.premium || /moda|ropa|atelier|boutique|lujo|premium|joyer/i.test(prompt)) return "fashion";
+  if (flags.tech || /tech|software|digital|app|saas|startup|plataforma/i.test(prompt)) return "tech";
+  if (flags.health || /salud|clinica|wellness|spa|medic|nutric|terapia/i.test(prompt)) return "health";
+  if (flags.sport || /deport|fitness|gym|gimnas|running|crossfit/i.test(prompt)) return "sport";
+  return "modern";
 }
 
 function buildHeroSubtitle(brief?: BusinessBriefDraft) {

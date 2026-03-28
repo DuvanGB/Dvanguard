@@ -8,7 +8,7 @@ export function parseAnySiteSpec(input: unknown) {
     return {
       success: true as const,
       data: parsed.data,
-      sourceVersion: "3.0" as const,
+      sourceVersion: parsed.data.schema_version,
       migrated: false as const
     };
   }

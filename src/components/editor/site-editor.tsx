@@ -7,9 +7,11 @@ import { ModuleTour } from "@/components/guided/module-tour";
 import { SiteHeader, getSiteHeaderPreviewHeight } from "@/components/runtime/site-header";
 import { SiteDomainManager } from "@/components/sites/site-domain-manager";
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
-import { CANVAS_BASE_WIDTH, fontFamilies, normalizeSiteSpecV3 } from "@/lib/site-spec-v3";
+import { CANVAS_BASE_WIDTH, applyEditableThemePatch, deriveVisualThemeFromLegacy, fontFamilies, getEditableThemeSnapshot, normalizeSiteSpecV3 } from "@/lib/site-spec-v3";
+import { resolveFontStack } from "@/lib/design-fonts";
+import { getBodyFontFamily } from "@/lib/site-theme";
 import type { SiteDomainRecord } from "@/lib/site-domains";
-import type { TemplateId } from "@/lib/templates/types";
+import type { TemplateDefinition, TemplateId } from "@/lib/templates/types";
 
 type Props = {
   siteId: string;
@@ -70,7 +72,7 @@ type TemplateCard = {
   family: SiteSpecV3["template"]["family"];
   site_type: "informative" | "commerce_lite";
   preview_label: string;
-  theme: SiteSpecV3["theme"];
+  theme: TemplateDefinition["theme"];
   variants: Record<SiteSectionV3["type"], SiteSectionV3["variant"]>;
 };
 
@@ -812,7 +814,7 @@ function addSection(type: SiteSectionV3["type"]) {
     setSiteSpec((prev) => ({
       ...prev,
       template: { id: template.id, family: template.family },
-      theme: template.theme,
+      theme: deriveVisualThemeFromLegacy(template.theme),
       pages: prev.pages.map((page) => ({
         ...page,
         sections: page.sections.map((section) => {
@@ -836,6 +838,7 @@ function addSection(type: SiteSectionV3["type"]) {
 
   const activeTemplateId = siteSpec.template.id;
   const fontOptions = fontFamilies;
+  const editableTheme = getEditableThemeSnapshot(siteSpec.theme);
   const isFontFamily = (value: string): value is (typeof fontFamilies)[number] =>
     (fontFamilies as readonly string[]).includes(value);
 
@@ -1276,8 +1279,9 @@ function addSection(type: SiteSectionV3["type"]) {
                     style={{
                       width: `${canvasBaseWidth}px`,
                       minWidth: `${canvasBaseWidth}px`,
-                      background: siteSpec.theme.background,
-                      fontFamily: siteSpec.theme.font_body
+                      background: siteSpec.theme.palette.background,
+                      color: siteSpec.theme.palette.text_primary,
+                      fontFamily: getBodyFontFamily(siteSpec.theme)
                     }}
                   >
               {headerVariant !== "none" ? (
@@ -1357,7 +1361,7 @@ function addSection(type: SiteSectionV3["type"]) {
                                 opacity: block.style.opacity,
                                 fontSize: block.style.fontSize,
                                 fontWeight: block.style.fontWeight,
-                                fontFamily: block.style.fontFamily ?? siteSpec.theme.font_body,
+                                fontFamily: resolveFontStack(block.style.fontFamily ?? editableTheme.font_body),
                                 textAlign: block.style.textAlign as "left" | "center" | "right" | undefined,
                                 padding: block.type === "text" ? 8 : 0,
                                 overflow: "visible",
@@ -1861,7 +1865,7 @@ function addSection(type: SiteSectionV3["type"]) {
                                 if (value === "__body") {
                                   nextFontFamily = undefined;
                                 } else if (value === "__heading") {
-                                  nextFontFamily = isFontFamily(siteSpec.theme.font_heading) ? siteSpec.theme.font_heading : undefined;
+                                  nextFontFamily = isFontFamily(editableTheme.font_heading) ? editableTheme.font_heading : undefined;
                                 } else if (isFontFamily(value)) {
                                   nextFontFamily = value;
                                 }
@@ -1897,11 +1901,11 @@ function addSection(type: SiteSectionV3["type"]) {
                     <label>
                       Tipografía de títulos
                       <select
-                        value={siteSpec.theme.font_heading}
+                        value={editableTheme.font_heading}
                         onChange={(event) =>
                           setSiteSpec((prev) => ({
                             ...prev,
-                            theme: { ...prev.theme, font_heading: event.target.value }
+                            theme: applyEditableThemePatch(prev.theme, { font_heading: event.target.value as (typeof fontFamilies)[number] })
                           }))
                         }
                       >
@@ -1915,11 +1919,11 @@ function addSection(type: SiteSectionV3["type"]) {
                     <label>
                       Tipografía del cuerpo
                       <select
-                        value={siteSpec.theme.font_body}
+                        value={editableTheme.font_body}
                         onChange={(event) =>
                           setSiteSpec((prev) => ({
                             ...prev,
-                            theme: { ...prev.theme, font_body: event.target.value }
+                            theme: applyEditableThemePatch(prev.theme, { font_body: event.target.value as (typeof fontFamilies)[number] })
                           }))
                         }
                       >
@@ -1934,24 +1938,24 @@ function addSection(type: SiteSectionV3["type"]) {
                       Color primario
                         <input
                           type="color"
-                          value={siteSpec.theme.primary}
-                          onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, primary: event.target.value } }))}
+                          value={editableTheme.primary}
+                          onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: applyEditableThemePatch(prev.theme, { primary: event.target.value }) }))}
                         />
                       </label>
                       <label>
                         Color secundario
                         <input
                           type="color"
-                          value={siteSpec.theme.secondary}
-                          onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, secondary: event.target.value } }))}
+                          value={editableTheme.secondary}
+                          onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: applyEditableThemePatch(prev.theme, { secondary: event.target.value }) }))}
                         />
                       </label>
                       <label>
                         Fondo del sitio
                         <input
                           type="color"
-                          value={siteSpec.theme.background}
-                          onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: { ...prev.theme, background: event.target.value } }))}
+                          value={editableTheme.background}
+                          onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: applyEditableThemePatch(prev.theme, { background: event.target.value }) }))}
                         />
                       </label>
                     </div>

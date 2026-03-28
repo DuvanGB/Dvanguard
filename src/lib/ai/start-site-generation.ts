@@ -248,7 +248,7 @@ export async function maybeRecordFirstResultAccepted(input: {
       .maybeSingle();
 
     const schemaVersion = (version?.site_spec_json as { schema_version?: string } | null)?.schema_version;
-    if (schemaVersion === "3.0") {
+    if (schemaVersion === "3.0" || schemaVersion === "3.1") {
       await recordPlatformEvent(admin, {
         eventType: "site.v3.first_result.accepted",
         userId,

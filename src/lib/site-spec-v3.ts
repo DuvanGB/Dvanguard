@@ -45,18 +45,71 @@ const sectionHeightRatioSchema = z.object({
 });
 
 export const fontFamilies = [
-  "Manrope",
+  "Playfair Display",
+  "Lato",
   "Space Grotesk",
   "Inter",
+  "Cormorant Garamond",
+  "Mulish",
+  "Outfit",
+  "DM Sans",
+  "Syne",
+  "Manrope",
+  "Bebas Neue",
+  "DM Serif Display",
   "Poppins",
   "Montserrat",
-  "Lato",
   "Nunito",
   "Source Sans Pro",
-  "DM Sans",
   "Oswald",
   "Open Sans"
 ] as const;
+
+const legacyThemeSchema = z.object({
+  primary: colorToken,
+  secondary: colorToken,
+  background: colorToken,
+  font_heading: z.string().min(1),
+  font_body: z.string().min(1),
+  radius: z.enum(["sm", "md", "lg"])
+});
+
+const visualThemeSchema = z.object({
+  palette: z.object({
+    background: colorToken,
+    surface: colorToken,
+    border: colorToken,
+    primary: colorToken,
+    accent: colorToken,
+    text_primary: colorToken,
+    text_muted: colorToken
+  }),
+  typography: z.object({
+    heading_font: z.enum(fontFamilies),
+    body_font: z.enum(fontFamilies),
+    scale: z.enum(["compact", "balanced", "editorial"]),
+    heading_weight: z.number().int().min(300).max(900),
+    letter_spacing: z.enum(["tight", "normal", "wide"])
+  }),
+  style_tokens: z.object({
+    spacing_scale: z.enum(["tight", "comfortable", "spacious"]),
+    border_style: z.enum(["none", "subtle", "strong"]),
+    section_rhythm: z.enum(["flat", "alternating", "layered"]),
+    hero_treatment: z.enum([
+      "fullbleed-dark",
+      "fullbleed-light",
+      "split-asymmetric",
+      "centered-cinematic",
+      "editorial-overlap"
+    ]),
+    image_treatment: z.enum(["raw", "rounded-sm", "rounded-lg", "masked-organic"])
+  }),
+  cta: z.object({
+    variant: z.enum(["filled", "ghost", "pill", "underline"]),
+    size: z.enum(["sm", "md", "lg"]),
+    uppercase: z.boolean()
+  })
+});
 
 const blockStyleSchema = z.object({
   fontSize: z.number().min(10).max(120).optional(),
@@ -208,6 +261,29 @@ const headerSchema = z
   .optional();
 
 export const siteSpecV3Schema = z.object({
+  schema_version: z.literal("3.1"),
+  site_type: z.enum(["informative", "commerce_lite"]),
+  locale: z.literal("es-LATAM"),
+  template: z.object({
+    id: z.enum(templateIds),
+    family: z.enum(["clean", "bold", "trust", "shop", "social", "dark"])
+  }),
+  theme: visualThemeSchema,
+  pages: z.array(pageSchema).min(1),
+  header: headerSchema,
+  integrations: z.object({
+    whatsapp: z
+      .object({
+        enabled: z.boolean(),
+        phone: z.string().optional(),
+        cta_label: z.string().optional(),
+        message: z.string().optional()
+      })
+      .optional()
+  })
+});
+
+const percentLegacySiteSpecV3Schema = z.object({
   schema_version: z.literal("3.0"),
   site_type: z.enum(["informative", "commerce_lite"]),
   locale: z.literal("es-LATAM"),
@@ -215,14 +291,7 @@ export const siteSpecV3Schema = z.object({
     id: z.enum(templateIds),
     family: z.enum(["clean", "bold", "trust", "shop", "social", "dark"])
   }),
-  theme: z.object({
-    primary: colorToken,
-    secondary: colorToken,
-    background: colorToken,
-    font_heading: z.string().min(1),
-    font_body: z.string().min(1),
-    radius: z.enum(["sm", "md", "lg"])
-  }),
+  theme: legacyThemeSchema,
   pages: z.array(pageSchema).min(1),
   header: headerSchema,
   integrations: z.object({
@@ -345,14 +414,7 @@ const legacySiteSpecV3Schema = z.object({
     id: z.enum(templateIds),
     family: z.enum(["clean", "bold", "trust", "shop", "social", "dark"])
   }),
-  theme: z.object({
-    primary: colorToken,
-    secondary: colorToken,
-    background: colorToken,
-    font_heading: z.string().min(1),
-    font_body: z.string().min(1),
-    radius: z.enum(["sm", "md", "lg"])
-  }),
+  theme: legacyThemeSchema,
   pages: z.array(legacyPageSchema).min(1),
   header: headerSchema,
   integrations: z.object({
@@ -371,11 +433,138 @@ export type CanvasLayoutRect = z.infer<typeof canvasRectSchema>;
 export type CanvasBlock = z.infer<typeof canvasBlockSchema>;
 export type SiteSpecV3 = z.infer<typeof siteSpecV3Schema>;
 export type SiteSectionV3 = SiteSpecV3["pages"][number]["sections"][number];
+export type SiteThemeV31 = SiteSpecV3["theme"];
+type LegacyTheme = z.infer<typeof legacyThemeSchema>;
+
+const LEGACY_FONT_MAP: Record<string, (typeof fontFamilies)[number]> = {
+  Poppins: "Outfit",
+  Montserrat: "Space Grotesk",
+  Nunito: "DM Sans",
+  "Source Sans Pro": "DM Sans",
+  Oswald: "Bebas Neue",
+  "Open Sans": "DM Sans"
+};
+
+export function isSupportedFontFamily(value?: string | null): value is (typeof fontFamilies)[number] {
+  return Boolean(value && fontFamilies.includes(value as (typeof fontFamilies)[number]));
+}
+
+export function normalizeFontFamilyToken(
+  value: string | undefined | null,
+  fallback: "heading" | "body" = "body"
+): (typeof fontFamilies)[number] {
+  if (isSupportedFontFamily(value)) {
+    return value;
+  }
+  const mapped = value ? LEGACY_FONT_MAP[value] : undefined;
+  if (mapped) {
+    return mapped;
+  }
+  return fallback === "heading" ? "Outfit" : "DM Sans";
+}
+
+export function deriveVisualThemeFromLegacy(theme: LegacyTheme): SiteThemeV31 {
+  const headingFont = normalizeFontFamilyToken(theme.font_heading, "heading");
+  const bodyFont = normalizeFontFamilyToken(theme.font_body, "body");
+  const darkBackground = isDarkColor(theme.background);
+  const heroTreatment: SiteThemeV31["style_tokens"]["hero_treatment"] = darkBackground
+    ? "fullbleed-dark"
+    : headingFont === "Playfair Display" || headingFont === "Cormorant Garamond"
+      ? "editorial-overlap"
+      : "split-asymmetric";
+  return {
+    palette: {
+      background: theme.background,
+      surface: darkBackground ? mixHex(theme.background, "#ffffff", 0.06) : "#ffffff",
+      border: darkBackground ? mixHex(theme.background, "#ffffff", 0.14) : mixHex(theme.secondary, "#ffffff", 0.72),
+      primary: theme.primary,
+      accent: theme.secondary,
+      text_primary: darkBackground ? "#f8fafc" : theme.primary,
+      text_muted: darkBackground ? "#cbd5e1" : mixHex(theme.primary, "#94a3b8", 0.45)
+    },
+    typography: {
+      heading_font: headingFont,
+      body_font: bodyFont,
+      scale: headingFont === "Playfair Display" || headingFont === "Cormorant Garamond" ? "editorial" : "balanced",
+      heading_weight: headingFont === "Cormorant Garamond" ? 400 : 700,
+      letter_spacing: headingFont === "Bebas Neue" ? "wide" : headingFont === "Space Grotesk" ? "tight" : "normal"
+    },
+    style_tokens: {
+      spacing_scale: theme.radius === "lg" ? "spacious" : theme.radius === "sm" ? "tight" : "comfortable",
+      border_style: theme.radius === "sm" ? "strong" : "subtle",
+      section_rhythm: darkBackground ? "layered" : "alternating",
+      hero_treatment: heroTreatment,
+      image_treatment: theme.radius === "lg" ? "rounded-lg" : theme.radius === "sm" ? "raw" : "rounded-sm"
+    },
+    cta: {
+      variant: theme.radius === "lg" ? "pill" : "filled",
+      size: "md",
+      uppercase: headingFont === "Bebas Neue"
+    }
+  };
+}
+
+export function getEditableThemeSnapshot(theme: SiteThemeV31) {
+  return {
+    primary: theme.palette.primary,
+    secondary: theme.palette.accent,
+    background: theme.palette.background,
+    font_heading: theme.typography.heading_font,
+    font_body: theme.typography.body_font,
+    radius:
+      theme.style_tokens.image_treatment === "rounded-lg"
+        ? ("lg" as const)
+        : theme.style_tokens.image_treatment === "raw"
+          ? ("sm" as const)
+          : ("md" as const)
+  };
+}
+
+export function applyEditableThemePatch(
+  theme: SiteThemeV31,
+  patch: Partial<ReturnType<typeof getEditableThemeSnapshot>>
+): SiteThemeV31 {
+  const next = structuredClone(theme);
+  if (patch.primary) {
+    next.palette.primary = patch.primary;
+    next.palette.text_primary = isDarkColor(next.palette.background) ? next.palette.text_primary : patch.primary;
+  }
+  if (patch.secondary) {
+    next.palette.accent = patch.secondary;
+  }
+  if (patch.background) {
+    next.palette.background = patch.background;
+    next.palette.surface = isDarkColor(patch.background) ? mixHex(patch.background, "#ffffff", 0.06) : "#ffffff";
+    next.palette.border = isDarkColor(patch.background) ? mixHex(patch.background, "#ffffff", 0.14) : mixHex(next.palette.accent, "#ffffff", 0.72);
+    next.palette.text_primary = isDarkColor(patch.background) ? "#f8fafc" : next.palette.primary;
+    next.palette.text_muted = isDarkColor(patch.background) ? "#cbd5e1" : mixHex(next.palette.primary, "#94a3b8", 0.45);
+    next.style_tokens.hero_treatment = isDarkColor(patch.background) ? "fullbleed-dark" : next.style_tokens.hero_treatment === "fullbleed-dark" ? "fullbleed-light" : next.style_tokens.hero_treatment;
+  }
+  if (patch.font_heading) {
+    next.typography.heading_font = normalizeFontFamilyToken(patch.font_heading, "heading");
+  }
+  if (patch.font_body) {
+    next.typography.body_font = normalizeFontFamilyToken(patch.font_body, "body");
+  }
+  if (patch.radius) {
+    next.style_tokens.image_treatment = patch.radius === "lg" ? "rounded-lg" : patch.radius === "sm" ? "raw" : "rounded-sm";
+    next.cta.variant = patch.radius === "lg" ? "pill" : next.cta.variant === "pill" ? "filled" : next.cta.variant;
+  }
+  return next;
+}
 
 export function parseSiteSpecV3(input: unknown) {
   const parsed = siteSpecV3Schema.safeParse(input);
   if (parsed.success) {
     return parsed;
+  }
+
+  const percentLegacyParsed = percentLegacySiteSpecV3Schema.safeParse(input);
+  if (percentLegacyParsed.success) {
+    return {
+      success: true as const,
+      data: upgradePercentLegacySpec(percentLegacyParsed.data)
+    };
   }
 
   const legacyParsed = legacySiteSpecV3Schema.safeParse(input);
@@ -394,6 +583,10 @@ export function normalizeSiteSpecV3(input: unknown) {
   if (parsed.success) {
     return { spec: parsed.data, migrated: false };
   }
+  const percentLegacyParsed = percentLegacySiteSpecV3Schema.safeParse(input);
+  if (percentLegacyParsed.success) {
+    return { spec: upgradePercentLegacySpec(percentLegacyParsed.data), migrated: true };
+  }
   const legacyParsed = legacySiteSpecV3Schema.safeParse(input);
   if (legacyParsed.success) {
     return { spec: convertLegacySpecToPercent(legacyParsed.data), migrated: true };
@@ -402,6 +595,7 @@ export function normalizeSiteSpecV3(input: unknown) {
 }
 
 type LegacySiteSpecV3 = z.infer<typeof legacySiteSpecV3Schema>;
+type PercentLegacySiteSpecV3 = z.infer<typeof percentLegacySiteSpecV3Schema>;
 type LegacySection = LegacySiteSpecV3["pages"][number]["sections"][number];
 type LegacyCanvasLayoutRect = z.infer<typeof legacyCanvasRectSchema>;
 type LegacyCanvasBlock = z.infer<typeof legacyCanvasBlockSchema>;
@@ -440,13 +634,26 @@ function convertLegacySpecToPercent(spec: LegacySiteSpecV3): SiteSpecV3 {
   }));
 
   return {
-    schema_version: "3.0",
+    schema_version: "3.1",
     site_type: spec.site_type,
     locale: spec.locale,
     template: spec.template,
-    theme: spec.theme,
+    theme: deriveVisualThemeFromLegacy(spec.theme),
     header: spec.header,
     pages,
+    integrations: spec.integrations
+  };
+}
+
+function upgradePercentLegacySpec(spec: PercentLegacySiteSpecV3): SiteSpecV3 {
+  return {
+    schema_version: "3.1",
+    site_type: spec.site_type,
+    locale: spec.locale,
+    template: spec.template,
+    theme: deriveVisualThemeFromLegacy(spec.theme),
+    header: spec.header,
+    pages: spec.pages,
     integrations: spec.integrations
   };
 }
@@ -784,14 +991,14 @@ export function buildSiteSpecV3FromBrief(input: {
   );
 
   const spec: SiteSpecV3 = {
-    schema_version: "3.0",
+    schema_version: "3.1",
     site_type: input.siteType,
     locale: "es-LATAM",
     template: {
       id: template.id,
       family: template.family
     },
-    theme: template.theme,
+    theme: deriveVisualThemeFromLegacy(template.theme),
     header: {
       variant: buildDefaultHeaderVariant(template),
       brand: businessName,
@@ -1213,4 +1420,40 @@ function normalizeBusinessName(value: string) {
   const normalized = value.trim().replace(/\s+/g, " ");
   if (!normalized) return "Tu negocio";
   return normalized.length > 80 ? normalized.slice(0, 80) : normalized;
+}
+
+function isDarkColor(color: string) {
+  const hex = color.replace("#", "");
+  const normalized = hex.length === 3 ? hex.split("").map((char) => char + char).join("") : hex;
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return luminance < 0.46;
+}
+
+function mixHex(base: string, target: string, weight: number) {
+  const safeWeight = Math.max(0, Math.min(1, weight));
+  const from = expandHex(base);
+  const to = expandHex(target);
+  const mixed = [0, 2, 4]
+    .map((index) => {
+      const start = parseInt(from.slice(index, index + 2), 16);
+      const end = parseInt(to.slice(index, index + 2), 16);
+      const value = Math.round(start + (end - start) * safeWeight);
+      return value.toString(16).padStart(2, "0");
+    })
+    .join("");
+  return `#${mixed}`;
+}
+
+function expandHex(color: string) {
+  const hex = color.replace("#", "");
+  if (hex.length === 3) {
+    return hex
+      .split("")
+      .map((char) => char + char)
+      .join("");
+  }
+  return hex.padEnd(6, "0").slice(0, 6);
 }

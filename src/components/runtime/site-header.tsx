@@ -2,17 +2,12 @@
 
 import { useState, type CSSProperties } from "react";
 
+import type { SiteThemeV31 } from "@/lib/site-spec-v3";
+import { getBodyFontFamily, getHeadingFontFamily } from "@/lib/site-theme";
+
 type HeaderLink = {
   label: string;
   href: string;
-};
-
-type SiteHeaderTheme = {
-  primary: string;
-  secondary: string;
-  background: string;
-  font_heading: string;
-  font_body: string;
 };
 
 export function getSiteHeaderPreviewHeight(variant: "none" | "hamburger-side" | "hamburger-overlay" | "top-bar") {
@@ -29,7 +24,7 @@ export function SiteHeader({
   variant: "none" | "hamburger-side" | "hamburger-overlay" | "top-bar";
   brand: string;
   links: HeaderLink[];
-  theme: SiteHeaderTheme;
+  theme: SiteThemeV31;
   preview?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -45,15 +40,17 @@ export function SiteHeader({
     justifyContent: "space-between",
     padding: "0.75rem 1.5rem",
     minHeight: `${getSiteHeaderPreviewHeight(variant)}px`,
-    background: theme.background,
-    borderBottom: `1px solid ${theme.secondary}22`
+    background: theme.palette.background,
+    borderBottom: `1px solid ${theme.palette.border}`,
+    color: theme.palette.text_primary
   };
 
   const brandStyle: CSSProperties = {
-    fontFamily: theme.font_heading,
-    fontWeight: 700,
+    fontFamily: getHeadingFontFamily(theme),
+    fontWeight: theme.typography.heading_weight,
     fontSize: "1.1rem",
-    color: theme.primary
+    color: theme.palette.text_primary,
+    letterSpacing: theme.typography.letter_spacing === "wide" ? "0.08em" : theme.typography.letter_spacing === "tight" ? "-0.03em" : "0"
   };
 
   if (variant === "top-bar") {
@@ -61,7 +58,7 @@ export function SiteHeader({
       <div style={{ position: "relative", zIndex: 30 }}>
         <header style={headerStyle}>
           <span style={brandStyle}>{brand}</span>
-          <nav style={{ display: "flex", gap: "1rem", fontSize: "0.95rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <nav style={{ display: "flex", gap: "1rem", fontSize: "0.95rem", flexWrap: "wrap", justifyContent: "flex-end", fontFamily: getBodyFontFamily(theme) }}>
             {links.map((link) => (
               <a
                 key={link.href}
@@ -71,7 +68,7 @@ export function SiteHeader({
                     event.preventDefault();
                   }
                 }}
-                style={{ color: theme.primary, textDecoration: "none", fontWeight: 600 }}
+                style={{ color: theme.palette.text_primary, textDecoration: "none", fontWeight: 600 }}
               >
                 {link.label}
               </a>
@@ -87,11 +84,11 @@ export function SiteHeader({
       type="button"
       onClick={() => setOpen((prev) => !prev)}
       style={{
-        border: `1px solid ${theme.secondary}33`,
+        border: `1px solid ${theme.palette.border}`,
         background: "transparent",
         borderRadius: 999,
         padding: "0.4rem 0.65rem",
-        color: theme.primary,
+        color: theme.palette.text_primary,
         display: "grid",
         placeItems: "center",
         cursor: "pointer"
@@ -128,7 +125,7 @@ export function SiteHeader({
               width: variant === "hamburger-side" ? "72%" : "80%",
               maxWidth: 360,
               height: "100%",
-              background: theme.background,
+              background: theme.palette.surface,
               padding: "1.5rem",
               boxShadow: "0 18px 48px rgba(15, 23, 42, 0.25)"
             }}
@@ -139,7 +136,7 @@ export function SiteHeader({
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                style={{ border: "none", background: "transparent", fontSize: "1.2rem", cursor: "pointer", color: theme.primary }}
+                style={{ border: "none", background: "transparent", fontSize: "1.2rem", cursor: "pointer", color: theme.palette.text_primary }}
               >
                 ✕
               </button>
@@ -156,7 +153,7 @@ export function SiteHeader({
                     setOpen(false);
                   }}
                   style={{
-                    color: theme.primary,
+                    color: theme.palette.text_primary,
                     textDecoration: "none",
                     fontWeight: 600,
                     padding: "0.5rem 0.25rem"

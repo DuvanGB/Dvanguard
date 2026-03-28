@@ -121,10 +121,14 @@ async function requestProposalFromModel(input) {
           role: "system",
           content:
             "Devuelve SOLO JSON válido para una homepage usando este contrato: " +
-            "{design_direction:{name,description},header_variant,section_order,section_compositions,theme_direction}. " +
+            "{design_direction:{name,description},header_variant,section_order,section_compositions,theme_direction:{palette,typography,style_tokens,cta}}. " +
             "No generes HTML. section_compositions solo puede usar hero, catalog, testimonials, contact. " +
             "La estructura debe dejar siempre testimonials como penúltima sección y contact como última sección cuando ambas existan. " +
             "Tu trabajo es proponer composición interna de bloques dentro de cada sección. " +
+            "Habla lenguaje de dirección visual profesional: paletas coherentes por industria, parejas tipográficas con personalidad, ritmo visual, tratamiento de hero e imágenes, CTA distintivo. " +
+            "Nunca uses defaults genéricos como #082f49 o #0ea5e9. " +
+            "Usa referencias como moda=pálidos neutros+acento refinado con Cormorant Garamond/Mulish, tech=fondos profundos+acento púrpura con Syne/Manrope, salud=verdes suaves con DM Serif Display/DM Sans, deporte=negro+amarillo con Bebas Neue/Inter, restaurante=cálidos oscuros con Playfair Display/Lato, moderno=Outfit/DM Sans. " +
+            "theme_direction debe incluir palette:{background,surface,border,primary,accent,text_primary,text_muted}, typography:{heading_font,body_font,scale,heading_weight,letter_spacing}, style_tokens:{spacing_scale,border_style,section_rhythm,hero_treatment,image_treatment}, cta:{variant,size,uppercase}. " +
             "Usa familias distintas por sección, por ejemplo hero: editorial, split-brand, compact-sale, centered-clean, image-left; " +
             "catalog: three-grid, mosaic, featured-left, featured-top, service-cards, service-strip; " +
             "testimonials: wall, spotlight, compact-band, quote-column; contact: CTA band, split contact, card CTA. " +
@@ -185,14 +189,14 @@ function buildHeuristicLayoutProposal(input) {
   const sport = /deport|fitness|gym|gimnas|running/.test(prompt);
   const tech = /tech|software|digital|app|saas|gadgets|tecnolog/.test(prompt);
   const health = /salud|clinica|wellness|spa|medic/.test(prompt);
-  const stylePreset = inferStylePreset([brief.tone || "", brief.offer_summary || "", prompt].join(" "), {
+  const stylePreset = inferIndustryProfile([brief.tone || "", brief.offer_summary || "", prompt].join(" "), {
     tech,
     sport,
     health,
     fashion,
     premium
   });
-  const theme = themeFor(stylePreset, { premium, health, fashion });
+  const theme = themeFor(stylePreset);
 
   const sectionOrder =
     siteType === "commerce_lite"
@@ -297,7 +301,7 @@ function heroTech(brief, theme) {
     variant: "split",
     height_ratio: { desktop: 0.68, mobile: 1.18 },
     blocks: [
-      compose("headline", true, rect(8, 16, 46, 16, 3), rect(8, 14, 84, 16, 3), { fontSize: 54, fontWeight: 700, color: theme.primary }, { text: brief.business_name }),
+      compose("headline", true, rect(8, 16, 46, 16, 3), rect(8, 14, 84, 16, 3), { fontSize: 54, fontWeight: 700, color: themeTextPrimary(theme) }, { text: brief.business_name }),
       compose("subheadline", true, rect(8, 36, 42, 12, 3), rect(8, 32, 84, 12, 3), { fontSize: 18, color: "#334155" }, { text: heroSubtitle(brief) }),
       compose("hero-image", true, rect(58, 16, 30, 52, 2), rect(12, 58, 76, 22, 2), { radius: 22 }, { fit: "cover" })
     ]
@@ -310,7 +314,7 @@ function heroSoft(brief, theme) {
     variant: "centered",
     height_ratio: { desktop: 0.64, mobile: 1.2 },
     blocks: [
-      compose("headline", true, rect(18, 12, 64, 16, 3), rect(8, 12, 84, 16, 3), { fontSize: 52, fontWeight: 700, textAlign: "center", color: theme.primary }, { text: brief.business_name }),
+      compose("headline", true, rect(18, 12, 64, 16, 3), rect(8, 12, 84, 16, 3), { fontSize: 52, fontWeight: 700, textAlign: "center", color: themeTextPrimary(theme) }, { text: brief.business_name }),
       compose("subheadline", true, rect(20, 32, 60, 12, 3), rect(8, 30, 84, 12, 3), { fontSize: 18, textAlign: "center", color: "#475569" }, { text: heroSubtitle(brief) }),
       compose("hero-image", true, rect(22, 54, 56, 28, 2), rect(10, 54, 80, 24, 2), { radius: 22 }, { fit: "cover" })
     ]
@@ -324,7 +328,7 @@ function heroService(brief, theme) {
     height_ratio: { desktop: 0.6, mobile: 1.16 },
     blocks: [
       compose("hero-image", true, rect(8, 16, 32, 52, 1), rect(14, 56, 72, 24, 1), { radius: 18 }, { fit: "cover" }),
-      compose("headline", true, rect(48, 16, 42, 14, 3), rect(8, 14, 84, 16, 3), { fontSize: 48, fontWeight: 700, color: theme.primary }, { text: brief.business_name }),
+      compose("headline", true, rect(48, 16, 42, 14, 3), rect(8, 14, 84, 16, 3), { fontSize: 48, fontWeight: 700, color: themeTextPrimary(theme) }, { text: brief.business_name }),
       compose("subheadline", true, rect(48, 34, 38, 12, 3), rect(8, 32, 84, 12, 3), { fontSize: 18, color: "#475569" }, { text: heroSubtitle(brief) })
     ]
   };
@@ -332,7 +336,7 @@ function heroService(brief, theme) {
 
 function catalogGrid(theme) {
   return section("catalog", "grid", { desktop: 0.68, mobile: 1.75 }, [
-    compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 38, fontWeight: 700, color: theme.primary }),
+    compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 38, fontWeight: 700, color: themeTextPrimary(theme) }),
     compose("product-1", true, rect(8, 22, 26, 62, 1), rect(8, 18, 84, 22, 1)),
     compose("product-2", true, rect(38, 22, 26, 62, 1), rect(8, 44, 84, 22, 1)),
     compose("product-3", true, rect(68, 22, 26, 62, 1), rect(8, 70, 84, 22, 1))
@@ -341,7 +345,7 @@ function catalogGrid(theme) {
 
 function catalogMosaic(theme) {
   return section("catalog", "grid", { desktop: 0.72, mobile: 1.86 }, [
-    compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 38, fontWeight: 700, color: theme.primary }),
+    compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 38, fontWeight: 700, color: themeTextPrimary(theme) }),
     compose("product-1", true, rect(8, 22, 38, 62, 1), rect(8, 18, 84, 22, 1)),
     compose("product-2", true, rect(50, 22, 42, 28, 1), rect(8, 44, 84, 22, 1)),
     compose("product-3", true, rect(50, 54, 42, 30, 1), rect(8, 70, 84, 22, 1))
@@ -350,7 +354,7 @@ function catalogMosaic(theme) {
 
 function catalogFeatured(theme) {
   return section("catalog", "list", { desktop: 0.76, mobile: 1.82 }, [
-    compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 40, fontWeight: 700, color: theme.primary }),
+    compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 40, fontWeight: 700, color: themeTextPrimary(theme) }),
     compose("product-1", true, rect(8, 22, 56, 62, 1), rect(8, 18, 84, 22, 1)),
     compose("product-2", true, rect(68, 22, 24, 28, 1), rect(8, 44, 84, 22, 1)),
     compose("product-3", true, rect(68, 54, 24, 30, 1), rect(8, 70, 84, 22, 1))
@@ -359,7 +363,7 @@ function catalogFeatured(theme) {
 
 function infoCards(theme) {
   return section("catalog", "cards", { desktop: 0.6, mobile: 1.38 }, [
-    compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: theme.primary }),
+    compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: themeTextPrimary(theme) }),
     compose("card-1", true, rect(8, 22, 26, 56, 1), rect(8, 18, 84, 24, 1)),
     compose("image-1", true, rect(10, 24, 22, 20, 2), rect(12, 20, 76, 10, 2), { radius: 14 }, { fit: "cover" }),
     compose("name-1", true, rect(10, 48, 18, 6, 3), rect(12, 32, 70, 5, 3), { fontSize: 20, fontWeight: 700 }),
@@ -377,7 +381,7 @@ function infoCards(theme) {
 
 function infoStrip(theme) {
   return section("catalog", "list", { desktop: 0.5, mobile: 1.26 }, [
-    compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: theme.primary }),
+    compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: themeTextPrimary(theme) }),
     compose("card-1", true, rect(8, 24, 84, 14, 1), rect(8, 18, 84, 18, 1)),
     compose("name-1", true, rect(12, 28, 30, 4, 2), rect(12, 22, 70, 5, 2), { fontSize: 18, fontWeight: 700 }),
     compose("desc-1", true, rect(12, 33, 54, 4, 2), rect(12, 28, 70, 5, 2), { fontSize: 14, color: "#475569" }),
@@ -410,7 +414,7 @@ function testimonialsSpotlight(theme) {
 
 function testimonialsBand(theme) {
   return section("testimonials", "minimal", { desktop: 0.24, mobile: 0.72 }, [
-    compose("title", true, rect(8, 12, 38, 10, 2), rect(8, 8, 84, 10, 2), { fontSize: 30, fontWeight: 700, color: theme.primary }),
+    compose("title", true, rect(8, 12, 38, 10, 2), rect(8, 8, 84, 10, 2), { fontSize: 30, fontWeight: 700, color: themeTextPrimary(theme) }),
     compose("quote-1", true, rect(8, 38, 84, 10, 2), rect(8, 34, 84, 14, 2), { fontSize: 19, color: "#52525b" })
   ]);
 }
@@ -433,7 +437,7 @@ function contactSplit(theme) {
 
 function contactBand(theme) {
   return section("contact", "compact", { desktop: 0.2, mobile: 0.62 }, [
-    compose("title", true, rect(8, 24, 22, 10, 2), rect(8, 14, 84, 10, 2), { fontSize: 30, fontWeight: 700, color: theme.primary }),
+    compose("title", true, rect(8, 24, 22, 10, 2), rect(8, 14, 84, 10, 2), { fontSize: 30, fontWeight: 700, color: themeTextPrimary(theme) }),
     compose("description", true, rect(34, 24, 34, 10, 2), rect(8, 30, 84, 10, 2), { fontSize: 17, color: "#a1a1aa" }),
     compose("contact-cta", true, rect(72, 22, 18, 14, 3), rect(8, 46, 52, 12, 3), undefined, { label: "Escribir" })
   ]);
@@ -451,34 +455,56 @@ function rect(x, y, w, h, z) {
   return { x, y, w, h, z };
 }
 
-function themeFor(stylePreset, flags) {
-  if (stylePreset === "mono") {
+function themeTextPrimary(theme) {
+  return theme?.palette?.text_primary || "#18253f";
+}
+
+function themeFor(profile) {
+  if (profile === "restaurant") {
     return {
-      primary: "#f8fafc",
-      secondary: "#f97316",
-      background: "#09090b",
-      font_heading: "Space Grotesk",
-      font_body: "Manrope",
-      radius: "sm"
+      palette: { background: "#130f0c", surface: "#211913", border: "#5c4326", primary: "#f5efe6", accent: "#d89b3d", text_primary: "#fff8ef", text_muted: "#cfbeaa" },
+      typography: { heading_font: "Playfair Display", body_font: "Lato", scale: "editorial", heading_weight: 700, letter_spacing: "normal" },
+      style_tokens: { spacing_scale: "spacious", border_style: "subtle", section_rhythm: "layered", hero_treatment: "fullbleed-dark", image_treatment: "rounded-lg" },
+      cta: { variant: "pill", size: "md", uppercase: false }
     };
   }
-  if (stylePreset === "sunset" || flags.health || flags.fashion) {
+  if (profile === "fashion") {
     return {
-      primary: "#0f172a",
-      secondary: "#ea580c",
-      background: "#fff7ed",
-      font_heading: "Montserrat",
-      font_body: "Open Sans",
-      radius: "md"
+      palette: { background: "#f7f2eb", surface: "#fffdf9", border: "#dcc9b1", primary: "#2a2019", accent: "#b99149", text_primary: "#21160f", text_muted: "#7a6759" },
+      typography: { heading_font: "Cormorant Garamond", body_font: "Mulish", scale: "editorial", heading_weight: 300, letter_spacing: "tight" },
+      style_tokens: { spacing_scale: "spacious", border_style: "subtle", section_rhythm: "alternating", hero_treatment: "editorial-overlap", image_treatment: "rounded-lg" },
+      cta: { variant: "underline", size: "md", uppercase: false }
+    };
+  }
+  if (profile === "tech") {
+    return {
+      palette: { background: "#0a1020", surface: "#11192e", border: "#273357", primary: "#eef2ff", accent: "#8b5cf6", text_primary: "#f5f7ff", text_muted: "#b9c0dc" },
+      typography: { heading_font: "Syne", body_font: "Manrope", scale: "balanced", heading_weight: 800, letter_spacing: "tight" },
+      style_tokens: { spacing_scale: "comfortable", border_style: "subtle", section_rhythm: "layered", hero_treatment: "split-asymmetric", image_treatment: "rounded-sm" },
+      cta: { variant: "filled", size: "md", uppercase: false }
+    };
+  }
+  if (profile === "health") {
+    return {
+      palette: { background: "#eff8f3", surface: "#ffffff", border: "#bfd8c8", primary: "#1f4736", accent: "#5fa88a", text_primary: "#17382b", text_muted: "#61806f" },
+      typography: { heading_font: "DM Serif Display", body_font: "DM Sans", scale: "balanced", heading_weight: 400, letter_spacing: "normal" },
+      style_tokens: { spacing_scale: "comfortable", border_style: "subtle", section_rhythm: "alternating", hero_treatment: "fullbleed-light", image_treatment: "rounded-lg" },
+      cta: { variant: "ghost", size: "md", uppercase: false }
+    };
+  }
+  if (profile === "sport") {
+    return {
+      palette: { background: "#090909", surface: "#151515", border: "#2b2b2b", primary: "#f8f8f8", accent: "#facc15", text_primary: "#ffffff", text_muted: "#d4d4d4" },
+      typography: { heading_font: "Bebas Neue", body_font: "Inter", scale: "compact", heading_weight: 400, letter_spacing: "wide" },
+      style_tokens: { spacing_scale: "tight", border_style: "strong", section_rhythm: "layered", hero_treatment: "centered-cinematic", image_treatment: "raw" },
+      cta: { variant: "pill", size: "lg", uppercase: true }
     };
   }
   return {
-    primary: "#082f49",
-    secondary: "#0ea5e9",
-    background: "#f4fbff",
-    font_heading: "Space Grotesk",
-    font_body: "Manrope",
-    radius: "md"
+    palette: { background: "#f8fbff", surface: "#ffffff", border: "#d7e3f4", primary: "#243b6b", accent: "#4f46e5", text_primary: "#18253f", text_muted: "#6a7893" },
+    typography: { heading_font: "Outfit", body_font: "DM Sans", scale: "balanced", heading_weight: 700, letter_spacing: "normal" },
+    style_tokens: { spacing_scale: "comfortable", border_style: "subtle", section_rhythm: "alternating", hero_treatment: "split-asymmetric", image_treatment: "rounded-sm" },
+    cta: { variant: "filled", size: "md", uppercase: false }
   };
 }
 
@@ -789,11 +815,13 @@ function extractWhatsappPhone(input) {
   return String(input || "").match(/\+\d{8,15}/)?.[0];
 }
 
-function inferStylePreset(prompt, flags = {}) {
-  if (/premium|elegante|lujo/.test(prompt) || flags.premium) return "sunset";
-  if (/tech|digital|moderno|software|app|deport|fitness/.test(prompt) || flags.tech || flags.sport) return "ocean";
-  if (/salud|clinica|wellness|spa|medic|moda|ropa|zapato|sneaker/.test(prompt) || flags.health || flags.fashion) return "sunset";
-  return "ocean";
+function inferIndustryProfile(prompt, flags = {}) {
+  if (/restaurante|comida|food|cafe|cafeter|bar|pizza|burger/.test(prompt)) return "restaurant";
+  if (flags.fashion || flags.premium || /moda|ropa|zapato|sneaker|boutique|fashion|lujo|premium/.test(prompt)) return "fashion";
+  if (flags.tech || /tech|digital|moderno|software|app|saas|gadgets|tecnolog/.test(prompt)) return "tech";
+  if (flags.health || /salud|clinica|wellness|spa|medic/.test(prompt)) return "health";
+  if (flags.sport || /deport|fitness|gym|gimnas|running/.test(prompt)) return "sport";
+  return "modern";
 }
 
 function promptAvailable(prompt) {
