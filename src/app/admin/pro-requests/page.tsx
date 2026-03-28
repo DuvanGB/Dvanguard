@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { AdminPaginationSummary } from "@/components/admin/admin-pagination-summary";
 import { ReviewProRequestButton } from "@/components/admin/review-pro-request-button";
 import { listAdminProRequests } from "@/lib/data/admin/pro-requests";
 
@@ -28,10 +29,23 @@ export default async function AdminProRequestsPage({
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
 
   return (
-    <section className="card stack">
-      <h2>Solicitudes Pro</h2>
+    <section className="admin-page-stack">
+      <article className="admin-panel stack">
+      <div className="admin-panel-head">
+        <div className="stack" style={{ gap: "0.3rem" }}>
+          <h2>Solicitudes Pro</h2>
+          <p>Revisa solicitudes manuales de upgrade y su estado operativo.</p>
+        </div>
+        <AdminPaginationSummary
+          label={`${result.total} solicitudes · página ${page}/${totalPages}`}
+          prevHref={`/admin/pro-requests?${buildQuery(params, Math.max(1, page - 1))}`}
+          nextHref={`/admin/pro-requests?${buildQuery(params, Math.min(totalPages, page + 1))}`}
+          disablePrev={page <= 1}
+          disableNext={page >= totalPages}
+        />
+      </div>
 
-      <form className="stack" action="/admin/pro-requests" method="get">
+      <form className="admin-filters-grid" action="/admin/pro-requests" method="get">
         <label>
           Estado
           <select name="status" defaultValue={params.status ?? ""}>
@@ -41,13 +55,16 @@ export default async function AdminProRequestsPage({
             <option value="rejected">rejected</option>
           </select>
         </label>
-        <button className="btn-secondary" type="submit">
-          Filtrar
-        </button>
+        <div style={{ display: "flex", alignItems: "end" }}>
+          <button className="btn-secondary" type="submit">
+            Filtrar
+          </button>
+        </div>
       </form>
 
       {result.items.length ? (
-        <table>
+        <div className="admin-table-wrap">
+          <table className="admin-table">
           <thead>
             <tr>
               <th>ID</th>
@@ -81,30 +98,34 @@ export default async function AdminProRequestsPage({
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       ) : (
         <p>No hay solicitudes para este filtro.</p>
       )}
 
-      <div style={{ display: "flex", gap: "0.5rem" }}>
-        <Link
-          className="btn-secondary"
-          href={`/admin/pro-requests?${buildQuery(params, Math.max(1, page - 1))}`}
-          aria-disabled={page <= 1}
-        >
-          Anterior
-        </Link>
-        <Link
-          className="btn-secondary"
-          href={`/admin/pro-requests?${buildQuery(params, Math.min(totalPages, page + 1))}`}
-          aria-disabled={page >= totalPages}
-        >
-          Siguiente
-        </Link>
+      <div className="admin-pagination-row">
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <Link
+            className="btn-secondary"
+            href={`/admin/pro-requests?${buildQuery(params, Math.max(1, page - 1))}`}
+            aria-disabled={page <= 1}
+          >
+            Anterior
+          </Link>
+          <Link
+            className="btn-secondary"
+            href={`/admin/pro-requests?${buildQuery(params, Math.min(totalPages, page + 1))}`}
+            aria-disabled={page >= totalPages}
+          >
+            Siguiente
+          </Link>
+        </div>
+        <small>
+          Página {page} de {totalPages} | Total {result.total}
+        </small>
       </div>
-      <small>
-        Página {page} de {totalPages} | Total {result.total}
-      </small>
+      </article>
     </section>
   );
 }

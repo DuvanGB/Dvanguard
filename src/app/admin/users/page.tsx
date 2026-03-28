@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { AdminPaginationSummary } from "@/components/admin/admin-pagination-summary";
 import { ChangePlanSelect } from "@/components/admin/change-plan-select";
 import { listAdminUsers } from "@/lib/data/admin/users";
 
@@ -28,78 +29,98 @@ export default async function AdminUsersPage({
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
 
   return (
-    <section className="card stack">
-      <h2>Usuarios</h2>
+    <section className="admin-page-stack">
+      <article className="admin-panel stack">
+      <div className="admin-panel-head">
+        <div className="stack" style={{ gap: "0.3rem" }}>
+          <h2>Usuarios</h2>
+          <p>Soporte de cuentas, planes, billing y actividad reciente.</p>
+        </div>
+        <AdminPaginationSummary
+          label={`${result.total} usuarios · página ${page}/${totalPages}`}
+          prevHref={`/admin/users?${buildQuery(params, Math.max(1, page - 1))}`}
+          nextHref={`/admin/users?${buildQuery(params, Math.min(totalPages, page + 1))}`}
+          disablePrev={page <= 1}
+          disableNext={page >= totalPages}
+        />
+      </div>
 
-      <form className="stack" action="/admin/users" method="get">
+      <form className="admin-filters-grid" action="/admin/users" method="get">
         <label>
           Buscar por email
           <input name="search" defaultValue={params.search ?? ""} />
         </label>
-        <button className="btn-secondary" type="submit">
-          Filtrar
-        </button>
+        <div style={{ display: "flex", alignItems: "end" }}>
+          <button className="btn-secondary" type="submit">
+            Filtrar
+          </button>
+        </div>
       </form>
 
       {result.items.length ? (
-        <table>
-          <thead>
-            <tr>
-              <th>Email</th>
-              <th>Plan</th>
-              <th>Stripe</th>
-              <th>Ciclo</th>
-              <th>Alta</th>
-              <th>Total sitios</th>
-              <th>Publicados</th>
-              <th>Última actividad</th>
-              <th>Acción plan</th>
-            </tr>
-          </thead>
-          <tbody>
-            {result.items.map((item) => (
-              <tr key={item.id}>
-                <td>{item.email}</td>
-                <td>{item.plan_code}</td>
-                <td>{item.billing_status ?? "-"}</td>
-                <td>
-                  {item.billing_interval ?? "-"}
-                  {item.billing_cancel_at_period_end ? " (cancelación fin de periodo)" : ""}
-                </td>
-                <td>{new Date(item.created_at).toLocaleString()}</td>
-                <td>{item.total_sites}</td>
-                <td>{item.published_sites}</td>
-                <td>{item.last_activity ? new Date(item.last_activity).toLocaleString() : "-"}</td>
-                <td>
-                  <ChangePlanSelect userId={item.id} currentPlan={item.plan_code} />
-                </td>
+        <div className="admin-table-wrap">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Plan</th>
+                <th>Stripe</th>
+                <th>Ciclo</th>
+                <th>Alta</th>
+                <th>Total sitios</th>
+                <th>Publicados</th>
+                <th>Última actividad</th>
+                <th>Acción plan</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {result.items.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.email}</td>
+                  <td>{item.plan_code}</td>
+                  <td>{item.billing_status ?? "-"}</td>
+                  <td>
+                    {item.billing_interval ?? "-"}
+                    {item.billing_cancel_at_period_end ? " (cancelación fin de periodo)" : ""}
+                  </td>
+                  <td>{new Date(item.created_at).toLocaleString()}</td>
+                  <td>{item.total_sites}</td>
+                  <td>{item.published_sites}</td>
+                  <td>{item.last_activity ? new Date(item.last_activity).toLocaleString() : "-"}</td>
+                  <td>
+                    <ChangePlanSelect userId={item.id} currentPlan={item.plan_code} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <p>No hay usuarios para este filtro.</p>
       )}
 
-      <div style={{ display: "flex", gap: "0.5rem" }}>
-        <Link
-          className="btn-secondary"
-          href={`/admin/users?${buildQuery(params, Math.max(1, page - 1))}`}
-          aria-disabled={page <= 1}
-        >
-          Anterior
-        </Link>
-        <Link
-          className="btn-secondary"
-          href={`/admin/users?${buildQuery(params, Math.min(totalPages, page + 1))}`}
-          aria-disabled={page >= totalPages}
-        >
-          Siguiente
-        </Link>
+      <div className="admin-pagination-row">
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <Link
+            className="btn-secondary"
+            href={`/admin/users?${buildQuery(params, Math.max(1, page - 1))}`}
+            aria-disabled={page <= 1}
+          >
+            Anterior
+          </Link>
+          <Link
+            className="btn-secondary"
+            href={`/admin/users?${buildQuery(params, Math.min(totalPages, page + 1))}`}
+            aria-disabled={page >= totalPages}
+          >
+            Siguiente
+          </Link>
+        </div>
+        <small>
+          Página {page} de {totalPages} | Total {result.total}
+        </small>
       </div>
-      <small>
-        Página {page} de {totalPages} | Total {result.total}
-      </small>
+      </article>
     </section>
   );
 }

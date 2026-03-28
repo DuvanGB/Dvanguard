@@ -6,6 +6,7 @@ import { OnboardingWizard } from "@/components/forms/onboarding-wizard";
 import { requireUser } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { recordPlatformEvent } from "@/lib/platform-events";
+import { normalizeSiteSpecV3, type SiteSpecV3 } from "@/lib/site-spec-v3";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export default async function OnboardingPage({
@@ -83,7 +84,7 @@ export default async function OnboardingPage({
 
   const { data: site } = await supabase
     .from("sites")
-    .select("id, name")
+    .select("id, name, current_version_id")
     .eq("id", siteId)
     .eq("owner_id", user.id)
     .is("deleted_at", null)
@@ -113,6 +114,20 @@ export default async function OnboardingPage({
     }
   }
 
+  let initialSpec: SiteSpecV3 | undefined;
+  if (source === "regenerate" && site.current_version_id) {
+    const { data: version } = await admin
+      .from("site_versions")
+      .select("site_spec_json")
+      .eq("id", site.current_version_id)
+      .maybeSingle();
+
+    const normalized = normalizeSiteSpecV3(version?.site_spec_json);
+    if (normalized) {
+      initialSpec = normalized.spec;
+    }
+  }
+
   return (
     <main className="container stack" style={{ paddingTop: "2rem" }}>
       <h1>Onboarding IA</h1>
@@ -122,6 +137,8 @@ export default async function OnboardingPage({
         siteName={site.name}
         maxInputChars={env.onboardingMaxInputChars}
         voiceLocale={env.voiceLocale}
+        generationMode={source === "regenerate" ? "regenerate" : "new"}
+        initialSpec={initialSpec}
       />
     </main>
   );

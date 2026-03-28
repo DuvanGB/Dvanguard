@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { startSiteGeneration } from "@/lib/ai/start-site-generation";
+import { summarizeSiteSpecForRegeneration } from "@/lib/ai/visual-generation";
 import { requireApiUser } from "@/lib/auth";
+import { getOwnedSiteWithCurrentSpec } from "@/lib/canvas/store";
 import { getRequestClientKey } from "@/lib/http";
 import { buildPromptFromBrief } from "@/lib/onboarding/prompt-builder";
 import { businessBriefDraftSchema, onboardingInputModeSchema } from "@/lib/onboarding/types";
@@ -19,7 +21,8 @@ const bodySchema = z.object({
   templateId: z.enum(templateIds).optional(),
   recommendedTemplateId: z.enum(templateIds).optional(),
   refineConfidence: z.number().min(0).max(1).optional(),
-  warnings: z.array(z.string()).max(20).optional()
+  warnings: z.array(z.string()).max(20).optional(),
+  generationMode: z.enum(["new", "regenerate"]).optional()
 });
 
 export async function POST(request: NextRequest) {
@@ -44,7 +47,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
   }
 
-  const { siteId, inputMode, briefDraft, templateId, recommendedTemplateId, refineConfidence, warnings } = parsed.data;
+  const { siteId, inputMode, briefDraft, templateId, recommendedTemplateId, refineConfidence, warnings, generationMode = "new" } = parsed.data;
   if (templateId) {
     const selectedTemplate = getTemplateById(templateId);
     if (!selectedTemplate || selectedTemplate.site_type !== briefDraft.business_type) {
@@ -68,6 +71,31 @@ export async function POST(request: NextRequest) {
 
   const admin = getSupabaseAdminClient();
   const prompt = buildPromptFromBrief(briefDraft, { templateId });
+  const siteContext =
+    generationMode === "regenerate"
+      ? await getOwnedSiteWithCurrentSpec({
+          supabase,
+          siteId,
+          userId: user.id
+        })
+      : null;
+
+  const { data: assetRows } =
+    generationMode === "regenerate"
+      ? await supabase.from("site_media_assets").select("public_url").eq("site_id", siteId).order("created_at", { ascending: false }).limit(24)
+      : { data: [] as Array<{ public_url: string | null }> };
+
+  const currentSiteSummary =
+    generationMode === "regenerate"
+      ? summarizeSiteSpecForRegeneration({
+          siteSpec: siteContext?.spec ?? null,
+          assetUrls: (assetRows ?? []).map((item) => item.public_url).filter((value): value is string => Boolean(value))
+        })
+      : "";
+  const effectivePrompt =
+    generationMode === "regenerate" && currentSiteSummary
+      ? `${prompt}\n\n${currentSiteSummary}\n\nObjetivo: regenerar una mejor propuesta visual manteniendo contenido, media y estructura del sitio actual.`
+      : prompt;
 
   if (templateId) {
     try {
@@ -91,12 +119,15 @@ export async function POST(request: NextRequest) {
     admin,
     userId: user.id,
     siteId,
-    prompt,
+    prompt: effectivePrompt,
     briefDraft,
     inputMode,
     templateId,
     refineConfidence,
-    warningsCount: warnings?.length ?? 0
+    warningsCount: warnings?.length ?? 0,
+    generationMode,
+    currentSiteSpec: generationMode === "regenerate" ? siteContext?.spec : undefined,
+    currentSiteSummary
   });
 
   if (result.ok) {

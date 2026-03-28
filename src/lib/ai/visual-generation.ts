@@ -202,7 +202,15 @@ export function buildVisualSeedSpec(input: {
   prompt: string;
   templateId?: TemplateId;
   briefDraft?: BusinessBriefDraft;
+  currentSiteSpec?: SiteSpecV3;
 }): SiteSpecV3 {
+  if (input.currentSiteSpec) {
+    const parsedCurrent = parseSiteSpecV3(input.currentSiteSpec);
+    if (parsedCurrent.success) {
+      return parsedCurrent.data;
+    }
+  }
+
   if (input.templateId && input.briefDraft) {
     return buildTemplateAlternativeSpec({
       briefDraft: input.briefDraft,
@@ -211,6 +219,52 @@ export function buildVisualSeedSpec(input: {
   }
 
   return buildNeutralProposalSeed(input);
+}
+
+export function preserveCurrentSiteDataFromPatch(patch?: DesignPatch | null): DesignPatch | undefined {
+  if (!patch) return undefined;
+
+  return {
+    ...patch,
+    sectionOrder: undefined,
+    blockPatches: patch.blockPatches?.map((blockPatch) => ({
+      ...blockPatch,
+      content: undefined
+    }))
+  };
+}
+
+export function summarizeSiteSpecForRegeneration(input: { siteSpec?: SiteSpecV3 | null; assetUrls?: string[] | null }) {
+  const siteSpec = input.siteSpec;
+  if (!siteSpec) return "";
+
+  const home = siteSpec.pages.find((page) => page.slug === "/") ?? siteSpec.pages[0];
+  if (!home) return "";
+
+  const sectionSummary = home.sections.map((section) => {
+    const blockSummary = section.blocks
+      .slice(0, 6)
+      .map((block) => {
+        if (block.type === "text") return `text:${block.content.text.slice(0, 60)}`;
+        if (block.type === "button") return `button:${block.content.label}`;
+        if (block.type === "product") return `product:${block.content.name}`;
+        if (block.type === "image") return `image:${block.content.alt ?? "asset"}`;
+        return block.type;
+      })
+      .join(" | ");
+    return `${section.type}(${section.variant}) => ${blockSummary}`;
+  });
+
+  return [
+    "Sitio actual para regeneración:",
+    `Header: ${siteSpec.header?.variant ?? "none"}`,
+    `Secciones actuales: ${home.sections.map((section) => section.type).join(", ")}`,
+    ...sectionSummary,
+    input.assetUrls?.length ? `Assets existentes: ${input.assetUrls.length}` : null,
+    "Mantén la estructura y el contenido existente; propón una UI más fuerte con nueva composición visual, tema y ritmo."
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function buildTemplateAlternativeSpec(input: {

@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { AdminPaginationSummary } from "@/components/admin/admin-pagination-summary";
 import { RetryJobButton } from "@/components/admin/retry-job-button";
 import { listAdminAiJobs } from "@/lib/data/admin/ai-jobs";
 
@@ -36,10 +37,23 @@ export default async function AdminAiJobsPage({
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
 
   return (
-    <section className="card stack">
-      <h2>Jobs IA</h2>
+    <section className="admin-page-stack">
+      <article className="admin-panel stack">
+      <div className="admin-panel-head">
+        <div className="stack" style={{ gap: "0.3rem" }}>
+          <h2>Jobs IA</h2>
+          <p>Audita colas, fallos, latencia y reintentos del pipeline de generación.</p>
+        </div>
+        <AdminPaginationSummary
+          label={`${result.total} jobs · página ${page}/${totalPages}`}
+          prevHref={`/admin/ai-jobs?${buildQuery(params, Math.max(1, page - 1))}`}
+          nextHref={`/admin/ai-jobs?${buildQuery(params, Math.min(totalPages, page + 1))}`}
+          disablePrev={page <= 1}
+          disableNext={page >= totalPages}
+        />
+      </div>
 
-      <form className="stack" action="/admin/ai-jobs" method="get">
+      <form className="admin-filters-grid" action="/admin/ai-jobs" method="get">
         <label>
           Estado
           <select name="status" defaultValue={params.status ?? ""}>
@@ -66,13 +80,16 @@ export default async function AdminAiJobsPage({
           Hasta (ISO)
           <input name="to" defaultValue={params.to ?? ""} placeholder="2026-03-01T23:59:59.999Z" />
         </label>
-        <button className="btn-secondary" type="submit">
-          Filtrar
-        </button>
+        <div style={{ display: "flex", alignItems: "end" }}>
+          <button className="btn-secondary" type="submit">
+            Filtrar
+          </button>
+        </div>
       </form>
 
       {result.items.length ? (
-        <table>
+        <div className="admin-table-wrap">
+          <table className="admin-table">
           <thead>
             <tr>
               <th>Job</th>
@@ -105,30 +122,34 @@ export default async function AdminAiJobsPage({
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       ) : (
         <p>No hay jobs para este filtro.</p>
       )}
 
-      <div style={{ display: "flex", gap: "0.5rem" }}>
-        <Link
-          className="btn-secondary"
-          href={`/admin/ai-jobs?${buildQuery(params, Math.max(1, page - 1))}`}
-          aria-disabled={page <= 1}
-        >
-          Anterior
-        </Link>
-        <Link
-          className="btn-secondary"
-          href={`/admin/ai-jobs?${buildQuery(params, Math.min(totalPages, page + 1))}`}
-          aria-disabled={page >= totalPages}
-        >
-          Siguiente
-        </Link>
+      <div className="admin-pagination-row">
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <Link
+            className="btn-secondary"
+            href={`/admin/ai-jobs?${buildQuery(params, Math.max(1, page - 1))}`}
+            aria-disabled={page <= 1}
+          >
+            Anterior
+          </Link>
+          <Link
+            className="btn-secondary"
+            href={`/admin/ai-jobs?${buildQuery(params, Math.min(totalPages, page + 1))}`}
+            aria-disabled={page >= totalPages}
+          >
+            Siguiente
+          </Link>
+        </div>
+        <small>
+          Página {page} de {totalPages} | Total {result.total}
+        </small>
       </div>
-      <small>
-        Página {page} de {totalPages} | Total {result.total}
-      </small>
+      </article>
     </section>
   );
 }

@@ -9,6 +9,7 @@ import type { BusinessBriefDraft } from "@/lib/onboarding/types";
 import { recordPlatformEvent } from "@/lib/platform-events";
 import type { TemplateId } from "@/lib/templates/types";
 import { env } from "@/lib/env";
+import type { SiteSpecV3 } from "@/lib/site-spec-v3";
 
 type StartGenerationInput = {
   supabase: SupabaseClient;
@@ -21,6 +22,9 @@ type StartGenerationInput = {
   templateId?: TemplateId;
   refineConfidence?: number;
   warningsCount?: number;
+  generationMode?: "new" | "regenerate";
+  currentSiteSpec?: SiteSpecV3;
+  currentSiteSummary?: string;
 };
 
 type StartGenerationResult =
@@ -93,7 +97,8 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
   const seedSpec = buildVisualSeedSpec({
     prompt,
     templateId: input.templateId,
-    briefDraft: input.briefDraft
+    briefDraft: input.briefDraft,
+    currentSiteSpec: input.generationMode === "regenerate" ? input.currentSiteSpec : undefined
   });
 
   const { data: job, error: jobError } = await supabase
@@ -105,11 +110,14 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
       input_json: {
         prompt,
         briefDraft: input.briefDraft ?? null,
+        currentSiteSpec: input.generationMode === "regenerate" ? input.currentSiteSpec ?? null : null,
         meta: {
           input_mode: input.inputMode,
           template_id: input.templateId ?? null,
           refine_confidence: input.refineConfidence ?? null,
-          warnings_count: input.warningsCount ?? 0
+          warnings_count: input.warningsCount ?? 0,
+          generation_mode: input.generationMode ?? "new",
+          current_site_summary: input.currentSiteSummary ?? null
         }
       },
       status: "queued",
@@ -135,7 +143,8 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
     prompt,
     templateId: input.templateId,
     briefDraft: input.briefDraft,
-    callbackBaseUrl: env.appUrl
+    callbackBaseUrl: env.appUrl,
+    currentSiteSummary: input.currentSiteSummary
   });
 
   if (!workerTrigger.ok) {

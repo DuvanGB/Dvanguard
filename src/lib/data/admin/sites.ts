@@ -55,16 +55,28 @@ export async function listAdminSites(params: Params) {
 
   const ownerIds = Array.from(new Set(sites.map((site) => site.owner_id)));
   const siteIds = sites.map((site) => site.id);
-  const [{ data: profiles }, domainsBySiteId] = await Promise.all([
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const [{ data: profiles }, domainsBySiteId, { data: analyticsEvents }] = await Promise.all([
     admin.from("profiles").select("id, email").in("id", ownerIds),
-    listSiteDomainsBySiteIds(siteIds)
+    listSiteDomainsBySiteIds(siteIds),
+    admin.from("site_analytics_events").select("site_id, event_type").in("site_id", siteIds).gte("occurred_at", thirtyDaysAgo)
   ]);
   const emailByOwner = new Map((profiles ?? []).map((profile) => [profile.id, profile.email]));
+  const analyticsBySiteId = new Map<string, { visits: number; whatsapp_clicks: number; cta_clicks: number }>();
+
+  for (const event of analyticsEvents ?? []) {
+    const current = analyticsBySiteId.get(event.site_id) ?? { visits: 0, whatsapp_clicks: 0, cta_clicks: 0 };
+    if (event.event_type === "visit") current.visits += 1;
+    if (event.event_type === "whatsapp_click") current.whatsapp_clicks += 1;
+    if (event.event_type === "cta_click") current.cta_clicks += 1;
+    analyticsBySiteId.set(event.site_id, current);
+  }
 
   const items = sites.map((site) => ({
     ...site,
     owner_email: emailByOwner.get(site.owner_id) ?? null,
-    primary_domain: pickPrimaryDomain(domainsBySiteId.get(site.id) ?? [])?.hostname ?? null
+    primary_domain: pickPrimaryDomain(domainsBySiteId.get(site.id) ?? [])?.hostname ?? null,
+    analytics: analyticsBySiteId.get(site.id) ?? { visits: 0, whatsapp_clicks: 0, cta_clicks: 0 }
   }));
 
   return { items, total: count ?? 0, page, pageSize };

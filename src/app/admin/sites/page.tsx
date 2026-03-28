@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { AdminPaginationSummary } from "@/components/admin/admin-pagination-summary";
 import { SiteModerationActions } from "@/components/admin/site-moderation-actions";
 import { listAdminSites } from "@/lib/data/admin/sites";
 
@@ -32,90 +33,116 @@ export default async function AdminSitesPage({
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
 
   return (
-    <section className="card stack">
-      <h2>Sitios</h2>
+    <section className="admin-page-stack">
+      <article className="admin-panel stack">
+        <div className="admin-panel-head">
+          <div className="stack" style={{ gap: "0.3rem" }}>
+            <h2>Moderación de sitios</h2>
+            <p>Supervisa estado, owner, dominios y rendimiento reciente sin salir del módulo admin.</p>
+          </div>
+          <AdminPaginationSummary
+            label={`${result.total} sitios · página ${page}/${totalPages}`}
+            prevHref={`/admin/sites?${buildQuery(params, Math.max(1, page - 1))}`}
+            nextHref={`/admin/sites?${buildQuery(params, Math.min(totalPages, page + 1))}`}
+            disablePrev={page <= 1}
+            disableNext={page >= totalPages}
+          />
+        </div>
 
-      <form className="stack" action="/admin/sites" method="get">
-        <label>
-          Estado
-          <select name="status" defaultValue={params.status ?? ""}>
-            <option value="">Todos</option>
-            <option value="draft">draft</option>
-            <option value="published">published</option>
-            <option value="archived">archived</option>
-          </select>
-        </label>
-        <label>
-          Tipo
-          <select name="type" defaultValue={params.type ?? ""}>
-            <option value="">Todos</option>
-            <option value="informative">informative</option>
-            <option value="commerce_lite">commerce_lite</option>
-          </select>
-        </label>
-        <label>
-          Owner email
-          <input name="owner" defaultValue={params.owner ?? ""} />
-        </label>
-        <button className="btn-secondary" type="submit">
-          Filtrar
-        </button>
-      </form>
+        <form className="admin-filters-grid" action="/admin/sites" method="get">
+          <label>
+            Estado
+            <select name="status" defaultValue={params.status ?? ""}>
+              <option value="">Todos</option>
+              <option value="draft">draft</option>
+              <option value="published">published</option>
+              <option value="archived">archived</option>
+            </select>
+          </label>
+          <label>
+            Tipo
+            <select name="type" defaultValue={params.type ?? ""}>
+              <option value="">Todos</option>
+              <option value="informative">informative</option>
+              <option value="commerce_lite">commerce_lite</option>
+            </select>
+          </label>
+          <label>
+            Owner email
+            <input name="owner" defaultValue={params.owner ?? ""} />
+          </label>
+          <div style={{ display: "flex", alignItems: "end" }}>
+            <button className="btn-secondary" type="submit">
+              Filtrar
+            </button>
+          </div>
+        </form>
+      </article>
 
       {result.items.length ? (
-        <table>
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Subdominio</th>
-              <th>Dominio principal</th>
-              <th>Owner</th>
-              <th>Estado</th>
-              <th>Tipo</th>
-              <th>Creado</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
+        <div className="admin-results-stack">
+          <div className="admin-site-card-grid">
             {result.items.map((item) => (
-              <tr key={item.id}>
-                <td>{item.name}</td>
-                <td>{item.subdomain}</td>
-                <td>{item.primary_domain ?? "-"}</td>
-                <td>{item.owner_email ?? "-"}</td>
-                <td>{item.status}</td>
-                <td>{item.site_type}</td>
-                <td>{new Date(item.created_at).toLocaleString()}</td>
-                <td>
-                  <SiteModerationActions siteId={item.id} status={item.status} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <p>No hay sitios para este filtro.</p>
-      )}
+              <article key={item.id} className="admin-site-card stack">
+                <div className="admin-site-card-head">
+                  <div className="stack" style={{ gap: "0.25rem" }}>
+                    <strong>{item.name}</strong>
+                    <small className="muted">
+                      {item.subdomain}
+                      {item.primary_domain ? ` · ${item.primary_domain}` : ""}
+                    </small>
+                  </div>
+                  <div className="admin-badges">
+                    <span className="admin-badge">{item.site_type}</span>
+                    <span className="admin-badge">{item.status}</span>
+                  </div>
+                </div>
 
-      <div style={{ display: "flex", gap: "0.5rem" }}>
-        <Link
-          className="btn-secondary"
-          href={`/admin/sites?${buildQuery(params, Math.max(1, page - 1))}`}
-          aria-disabled={page <= 1}
-        >
-          Anterior
-        </Link>
-        <Link
-          className="btn-secondary"
-          href={`/admin/sites?${buildQuery(params, Math.min(totalPages, page + 1))}`}
-          aria-disabled={page >= totalPages}
-        >
-          Siguiente
-        </Link>
-      </div>
-      <small>
-        Página {page} de {totalPages} | Total {result.total}
-      </small>
+                <div className="admin-site-card-meta">
+                  <span>Owner: {item.owner_email ?? "-"}</span>
+                  <span>Creado: {new Date(item.created_at).toLocaleDateString()}</span>
+                </div>
+
+                <div className="dashboard-site-metrics">
+                  <span>Visitas 30d: {item.analytics.visits}</span>
+                  <span>WhatsApp: {item.analytics.whatsapp_clicks}</span>
+                  <span>CTA: {item.analytics.cta_clicks}</span>
+                </div>
+
+                <div className="admin-site-card-actions">
+                  <SiteModerationActions siteId={item.id} status={item.status} />
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="admin-pagination-row">
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <Link
+                className="btn-secondary"
+                href={`/admin/sites?${buildQuery(params, Math.max(1, page - 1))}`}
+                aria-disabled={page <= 1}
+              >
+                Anterior
+              </Link>
+              <Link
+                className="btn-secondary"
+                href={`/admin/sites?${buildQuery(params, Math.min(totalPages, page + 1))}`}
+                aria-disabled={page >= totalPages}
+              >
+                Siguiente
+              </Link>
+            </div>
+            <small>
+              Página {page} de {totalPages} | Total {result.total}
+            </small>
+          </div>
+        </div>
+      ) : (
+        <article className="admin-panel">
+          <p>No hay sitios para este filtro.</p>
+        </article>
+      )}
     </section>
   );
 }

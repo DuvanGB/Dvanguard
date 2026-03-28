@@ -152,7 +152,7 @@ export default async function AdminHomePage() {
           )}
         </article>
 
-        <article className="admin-panel stack">
+        <article className="admin-panel admin-panel-wide stack">
           <div className="admin-panel-head">
             <h3>Solicitudes Pro</h3>
             <Link href="/admin/pro-requests" className="btn-secondary">

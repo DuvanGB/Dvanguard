@@ -9,6 +9,7 @@ import {
   buildHeuristicDesignPatch,
   buildVisualSeedSpec,
   compileLayoutProposalToDesignPatch,
+  preserveCurrentSiteDataFromPatch,
   type DesignPatch,
   type VisualGenerationProgressPayload,
   type VisualGenerationStage
@@ -26,6 +27,7 @@ type ExecuteGenerationInput = {
   eventType: string;
   templateId?: TemplateId;
   briefDraft?: BusinessBriefDraft;
+  currentSiteSpec?: SiteSpecV3;
   extraEventPayload?: Record<string, unknown>;
 };
 
@@ -55,8 +57,10 @@ type ApplyVisualProgressInput = {
 type JobInputJson = {
   prompt?: string;
   briefDraft?: BusinessBriefDraft | null;
+  currentSiteSpec?: SiteSpecV3 | null;
   meta?: {
     template_id?: TemplateId | null;
+    generation_mode?: "new" | "regenerate" | null;
     [key: string]: unknown;
   };
 };
@@ -82,14 +86,26 @@ export async function executeSiteGenerationJob(input: ExecuteGenerationInput): P
       const seed = buildVisualSeedSpec({
         prompt: input.prompt,
         templateId: input.templateId,
-        briefDraft: input.briefDraft
+        briefDraft: input.briefDraft,
+        currentSiteSpec: input.currentSiteSpec
       });
       generation = {
-        siteSpec: applyDesignPatchToSpec(seed, buildHeuristicDesignPatch({
-          prompt: input.prompt,
-          templateId: input.templateId,
-          briefDraft: input.briefDraft
-        })),
+        siteSpec: applyDesignPatchToSpec(
+          seed,
+          input.currentSiteSpec
+            ? preserveCurrentSiteDataFromPatch(
+                buildHeuristicDesignPatch({
+                  prompt: input.prompt,
+                  templateId: input.templateId,
+                  briefDraft: input.briefDraft
+                })
+              )
+            : buildHeuristicDesignPatch({
+                prompt: input.prompt,
+                templateId: input.templateId,
+                briefDraft: input.briefDraft
+              })
+        ),
         source: "seed",
         enhancementApplied: false
       };
@@ -184,11 +200,15 @@ export async function applyVisualGenerationProgress(input: ApplyVisualProgressIn
   const seedSpec = buildVisualSeedSpec({
     prompt: jobInput.prompt ?? "",
     templateId: jobInput.meta?.template_id ?? undefined,
-    briefDraft: jobInput.briefDraft ?? undefined
+    briefDraft: jobInput.briefDraft ?? undefined,
+    currentSiteSpec: jobInput.meta?.generation_mode === "regenerate" ? jobInput.currentSiteSpec ?? undefined : undefined
   });
   const effectivePatch =
     input.layoutProposal ? compileLayoutProposalToDesignPatch(input.layoutProposal) : input.designPatch;
-  const snapshot = applyDesignPatchToSpec(seedSpec, effectivePatch);
+  const snapshot = applyDesignPatchToSpec(
+    seedSpec,
+    jobInput.meta?.generation_mode === "regenerate" ? preserveCurrentSiteDataFromPatch(effectivePatch) : effectivePatch
+  );
   const sectionCompositionChoices =
     input.layoutProposal?.section_compositions.map((section) => ({
       sectionType: section.type,

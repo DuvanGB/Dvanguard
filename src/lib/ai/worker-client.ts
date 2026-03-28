@@ -9,6 +9,7 @@ type TriggerVisualWorkerInput = {
   templateId?: TemplateId;
   briefDraft?: BusinessBriefDraft;
   callbackBaseUrl: string;
+  currentSiteSummary?: string;
 };
 
 type TriggerRefineWorkerInput = {
@@ -35,7 +36,8 @@ export async function triggerVisualGenerationWorker(input: TriggerVisualWorkerIn
       prompt: input.prompt,
       templateId: input.templateId ?? null,
       briefDraft: input.briefDraft ?? null,
-      callbackBaseUrl: input.callbackBaseUrl
+      callbackBaseUrl: input.callbackBaseUrl,
+      currentSiteSummary: input.currentSiteSummary ?? null
     })
   });
 

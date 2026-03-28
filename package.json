@@ -9,6 +9,7 @@
     "build": "next build",
     "start": "next start",
     "worker:dev": "node worker/server.mjs",
+    "stripe:listen": "node scripts/stripe-listen.mjs",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "db:init": "supabase init",

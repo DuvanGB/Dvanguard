@@ -140,8 +140,11 @@ async function requestProposalFromModel(input) {
           content: [
             `Prompt: ${String(input.prompt || "")}`,
             `Brief: ${JSON.stringify(input.briefDraft || {})}`,
+            input.currentSiteSummary ? `Contexto sitio actual:\n${String(input.currentSiteSummary)}` : null,
             "Quiero una sola propuesta visual fuerte, distinta por composición y jerarquía, no solo por color."
-          ].join("\n")
+          ]
+            .filter(Boolean)
+            .join("\n")
         }
       ]
     })

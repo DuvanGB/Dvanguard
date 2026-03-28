@@ -24,6 +24,7 @@ type EditorSaveState = "idle" | "saving" | "saved" | "error";
 type EditorViewport = "desktop" | "mobile";
 type EditorZoomMode = "fit" | "manual";
 type DragMode = "move" | "resize";
+type HistoryChangeMode = "push" | "replace" | "none";
 
 type SelectedBlock = {
   sectionId: string;
@@ -47,6 +48,23 @@ type SectionDragState = {
   initialHeight: number;
   sectionWidth: number;
   viewport: EditorViewport;
+};
+
+type EditorVersionItem = {
+  id: string;
+  version: number;
+  source: "manual" | "canvas_auto_save" | "canvas_manual_checkpoint" | "hybrid_generate";
+  created_at: string;
+  isCurrent: boolean;
+};
+
+type EditorVersionDetail = {
+  id: string;
+  version: number;
+  source: "manual" | "canvas_auto_save" | "canvas_manual_checkpoint" | "hybrid_generate";
+  created_at: string;
+  isCurrent: boolean;
+  siteSpec: SiteSpecV3;
 };
 
 type SiteAsset = {
@@ -83,7 +101,10 @@ const BLOCK_LIBRARY: Array<CanvasBlock["type"]> = ["text", "image", "button", "p
 export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, initialSpec, initialMigrated }: Props) {
   const normalized = useMemo(() => normalizeSiteSpecV3(initialSpec) ?? { spec: initialSpec, migrated: false }, [initialSpec]);
   const [siteSpec, setSiteSpec] = useState<SiteSpecV3>(normalized.spec);
+  const siteSpecRef = useRef<SiteSpecV3>(normalized.spec);
   const [wasMigrated] = useState(() => initialMigrated ?? normalized.migrated);
+  const [historyPast, setHistoryPast] = useState<SiteSpecV3[]>([]);
+  const [historyFuture, setHistoryFuture] = useState<SiteSpecV3[]>([]);
   const [viewport, setViewport] = useState<EditorViewport>("desktop");
   const [zoomMode, setZoomMode] = useState<EditorZoomMode>("fit");
   const [zoomPercent, setZoomPercent] = useState(100);
@@ -91,12 +112,14 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
   const [saveState, setSaveState] = useState<EditorSaveState>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [lastPersistedHash, setLastPersistedHash] = useState(() => hashSpec(normalized.spec));
+  const [lastSavedSource, setLastSavedSource] = useState<"manual" | "canvas_auto_save" | "canvas_manual_checkpoint" | "hybrid_generate" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [isPublished, setIsPublished] = useState(initialPublished);
   const dragStateRef = useRef<DragState | null>(null);
   const sectionDragRef = useRef<SectionDragState | null>(null);
   const migrationRunRef = useRef(false);
+  const draggingHistoryBaseRef = useRef<SiteSpecV3 | null>(null);
   const [leftTab, setLeftTab] = useState<"templates" | "sections" | "layers">("templates");
   const [rightTab, setRightTab] = useState<"content" | "style" | "position">("content");
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -122,6 +145,11 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
   const [canvasDropSectionId, setCanvasDropSectionId] = useState<string | null>(null);
   const [draggingSectionId, setDraggingSectionId] = useState<string | null>(null);
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
+  const [versions, setVersions] = useState<EditorVersionItem[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [versionsMessage, setVersionsMessage] = useState<string | null>(null);
+  const [loadingVersionId, setLoadingVersionId] = useState<string | null>(null);
 
   const currentHash = useMemo(() => hashSpec(siteSpec), [siteSpec]);
   const isDirty = currentHash !== lastPersistedHash;
@@ -154,6 +182,68 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
   const canvasHorizontalPadding = 24;
   const isCanvasOverflowingHorizontally = scaledCanvasWidth + canvasHorizontalPadding * 2 > canvasHostWidth;
 
+  function applySiteSpecUpdate(
+    updater: SiteSpecV3 | ((prev: SiteSpecV3) => SiteSpecV3),
+    options?: { history?: HistoryChangeMode }
+  ) {
+    const historyMode = options?.history ?? "push";
+    const previous = siteSpecRef.current;
+    const next = typeof updater === "function" ? (updater as (prev: SiteSpecV3) => SiteSpecV3)(previous) : updater;
+
+    if (hashSpec(previous) === hashSpec(next)) {
+      return;
+    }
+
+    if (historyMode === "push") {
+      setHistoryPast((current) => [...current.slice(-59), structuredClone(previous)]);
+      setHistoryFuture([]);
+    }
+
+    if (historyMode === "replace") {
+      setHistoryFuture([]);
+    }
+
+    siteSpecRef.current = next;
+    setSiteSpec(next);
+  }
+
+  function commitHistoryFromBase(baseSpec: SiteSpecV3 | null) {
+    if (!baseSpec) return;
+    if (hashSpec(baseSpec) === hashSpec(siteSpecRef.current)) return;
+    setHistoryPast((current) => [...current.slice(-59), structuredClone(baseSpec)]);
+    setHistoryFuture([]);
+  }
+
+  function undoLastChange() {
+    setHistoryPast((currentPast) => {
+      const previous = currentPast[currentPast.length - 1];
+      if (!previous) return currentPast;
+      const current = structuredClone(siteSpecRef.current);
+      siteSpecRef.current = structuredClone(previous);
+      setSiteSpec(siteSpecRef.current);
+      setHistoryFuture((currentFuture) => [current, ...currentFuture.slice(0, 59)]);
+      setMessage("Cambio deshecho");
+      return currentPast.slice(0, -1);
+    });
+  }
+
+  function redoLastChange() {
+    setHistoryFuture((currentFuture) => {
+      const next = currentFuture[0];
+      if (!next) return currentFuture;
+      const current = structuredClone(siteSpecRef.current);
+      siteSpecRef.current = structuredClone(next);
+      setSiteSpec(siteSpecRef.current);
+      setHistoryPast((currentPast) => [...currentPast.slice(-59), current]);
+      setMessage("Cambio restaurado");
+      return currentFuture.slice(1);
+    });
+  }
+
+  useEffect(() => {
+    siteSpecRef.current = siteSpec;
+  }, [siteSpec]);
+
   useEffect(() => {
     if (!home?.sections?.length) return;
     if (!blockTargetSectionId || !home.sections.some((section) => section.id === blockTargetSectionId)) {
@@ -163,6 +253,7 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
 
   useEffect(() => {
     void loadAssets();
+    void loadVersions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId]);
 
@@ -242,6 +333,28 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
   }, [viewport]);
 
   useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isUndo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z" && !event.shiftKey;
+      const isRedo =
+        (event.metaKey || event.ctrlKey) &&
+        ((event.key.toLowerCase() === "z" && event.shiftKey) || event.key.toLowerCase() === "y");
+
+      if (isUndo) {
+        event.preventDefault();
+        undoLastChange();
+      }
+
+      if (isRedo) {
+        event.preventDefault();
+        redoLastChange();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [historyFuture.length, historyPast.length]);
+
+  useEffect(() => {
     if (!wasMigrated) return;
     if (migrationRunRef.current) return;
     migrationRunRef.current = true;
@@ -259,6 +372,8 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
       setLastPersistedHash(result.hash);
       setLastSavedAt(Date.now());
       setSaveState("saved");
+      setLastSavedSource("canvas_manual_checkpoint");
+      void loadVersions();
     };
 
     void run();
@@ -290,6 +405,8 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
       setSaveState("saved");
       setLastPersistedHash(result.hash);
       setLastSavedAt(Date.now());
+      setLastSavedSource("canvas_auto_save");
+      void loadVersions();
     }, 2500);
 
     return () => clearTimeout(timeout);
@@ -302,13 +419,34 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
         const deltaY = (event.clientY - sectionDrag.startY) / zoomScale;
         const nextHeight = Math.max(200, sectionDrag.initialHeight + deltaY);
         const nextRatio = clampRatio(nextHeight / sectionDrag.sectionWidth);
-        updateSection(sectionDrag.sectionId, (section) => ({
-          ...section,
-          height_ratio: {
-            ...section.height_ratio,
-            [sectionDrag.viewport]: nextRatio
-          }
-        }));
+        applySiteSpecUpdate(
+          (prev) => {
+            const page = prev.pages.find((item) => item.id === home?.id);
+            if (!page) return prev;
+            return {
+              ...prev,
+              pages: prev.pages.map((currentPage) =>
+                currentPage.id === page.id
+                  ? {
+                      ...currentPage,
+                      sections: currentPage.sections.map((section) =>
+                        section.id === sectionDrag.sectionId
+                          ? {
+                              ...section,
+                              height_ratio: {
+                                ...section.height_ratio,
+                                [sectionDrag.viewport]: nextRatio
+                              }
+                            }
+                          : section
+                      )
+                    }
+                  : currentPage
+              )
+            };
+          },
+          { history: "none" }
+        );
         return;
       }
 
@@ -333,7 +471,7 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
           sectionWidth,
           sectionHeight
         );
-        updateBlockRect(drag.sectionId, drag.blockId, rectPxToPercent(nextRectPx, sectionWidth, sectionHeight));
+        updateBlockRect(drag.sectionId, drag.blockId, rectPxToPercent(nextRectPx, sectionWidth, sectionHeight), { history: "none" });
         return;
       }
 
@@ -346,10 +484,12 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
         sectionWidth,
         sectionHeight
       );
-      updateBlockRect(drag.sectionId, drag.blockId, rectPxToPercent(resizedPx, sectionWidth, sectionHeight));
+      updateBlockRect(drag.sectionId, drag.blockId, rectPxToPercent(resizedPx, sectionWidth, sectionHeight), { history: "none" });
     };
 
     const onMouseUp = () => {
+      commitHistoryFromBase(draggingHistoryBaseRef.current);
+      draggingHistoryBaseRef.current = null;
       dragStateRef.current = null;
       sectionDragRef.current = null;
     };
@@ -362,10 +502,10 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
     };
   }, [home?.sections, viewport, zoomScale]);
 
-  function setHomeSections(updater: (sections: SiteSectionV3[]) => SiteSectionV3[]) {
+  function setHomeSections(updater: (sections: SiteSectionV3[]) => SiteSectionV3[], options?: { history?: HistoryChangeMode }) {
     if (!home) return;
 
-    setSiteSpec((prev) => ({
+    applySiteSpecUpdate((prev) => ({
       ...prev,
       pages: prev.pages.map((page) =>
         page.id === home.id
@@ -375,15 +515,15 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
             }
           : page
       )
-    }));
+    }), options);
   }
 
-  function updateSection(sectionId: string, updater: (section: SiteSectionV3) => SiteSectionV3) {
-    setHomeSections((sections) => sections.map((section) => (section.id === sectionId ? updater(section) : section)));
+  function updateSection(sectionId: string, updater: (section: SiteSectionV3) => SiteSectionV3, options?: { history?: HistoryChangeMode }) {
+    setHomeSections((sections) => sections.map((section) => (section.id === sectionId ? updater(section) : section)), options);
   }
 
   function updateHeaderVariant(nextVariant: "none" | "hamburger-side" | "hamburger-overlay" | "top-bar") {
-    setSiteSpec((prev) => ({
+    applySiteSpecUpdate((prev) => ({
       ...prev,
       header: {
         variant: nextVariant,
@@ -393,26 +533,37 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
     }));
   }
 
-  function updateBlock(sectionId: string, blockId: string, updater: (block: CanvasBlock) => CanvasBlock) {
+  function updateBlock(sectionId: string, blockId: string, updater: (block: CanvasBlock) => CanvasBlock, options?: { history?: HistoryChangeMode }) {
     updateSection(sectionId, (section) => ({
       ...section,
       blocks: section.blocks.map((block) => (block.id === blockId ? updater(block) : block))
-    }));
+    }), options);
   }
 
-  function updateBlockRect(sectionId: string, blockId: string, nextRect: CanvasLayoutRect) {
+  function updateBlockRect(sectionId: string, blockId: string, nextRect: CanvasLayoutRect, options?: { history?: HistoryChangeMode }) {
     const section = home?.sections.find((item) => item.id === sectionId);
     if (!section) return;
     const sectionWidth = canvasWidth;
     const sectionHeight = getSectionHeightPx(section, viewport, sectionWidth);
     const clamped = clampRectPercent(nextRect, sectionWidth, sectionHeight);
-    updateBlock(sectionId, blockId, (block) => ({
-      ...block,
-      layout: {
-        ...block.layout,
-        [viewport]: clamped
-      }
-    }));
+    updateSection(
+      sectionId,
+      (sectionItem) => ({
+        ...sectionItem,
+        blocks: sectionItem.blocks.map((block) =>
+          block.id === blockId
+            ? {
+                ...block,
+                layout: {
+                  ...block.layout,
+                  [viewport]: clamped
+                }
+              }
+            : block
+        )
+      }),
+      options
+    );
   }
 
 function addSection(type: SiteSectionV3["type"]) {
@@ -595,6 +746,9 @@ function addSection(type: SiteSectionV3["type"]) {
       sectionWidth,
       sectionHeight
     };
+    if (!draggingHistoryBaseRef.current) {
+      draggingHistoryBaseRef.current = structuredClone(siteSpecRef.current);
+    }
     setSelected({ sectionId, blockId: block.id });
     setSelectedSectionId(sectionId);
     setBlockTargetSectionId(sectionId);
@@ -612,6 +766,9 @@ function addSection(type: SiteSectionV3["type"]) {
       sectionWidth,
       viewport
     };
+    if (!draggingHistoryBaseRef.current) {
+      draggingHistoryBaseRef.current = structuredClone(siteSpecRef.current);
+    }
     setSelectedSectionId(section.id);
     setSelected(null);
     setBlockTargetSectionId(section.id);
@@ -664,7 +821,9 @@ function addSection(type: SiteSectionV3["type"]) {
     setSaveState("saved");
     setLastPersistedHash(result.hash);
     setLastSavedAt(Date.now());
-    setMessage(`Checkpoint guardado (version_id: ${result.versionId})${result.deduped ? " sin cambios nuevos" : ""}`);
+    setLastSavedSource("canvas_manual_checkpoint");
+    setMessage(result.deduped ? "Checkpoint guardado sin cambios nuevos" : "Checkpoint guardado");
+    await loadVersions();
   }
 
   async function publish() {
@@ -695,9 +854,11 @@ function addSection(type: SiteSectionV3["type"]) {
     setLastPersistedHash(persisted.hash);
     setLastSavedAt(Date.now());
     setSaveState("saved");
+    setLastSavedSource("canvas_manual_checkpoint");
     setIsPublished(true);
     setMessage("Sitio publicado correctamente");
     setPublishing(false);
+    await loadVersions();
   }
 
   async function loadAssets() {
@@ -713,6 +874,43 @@ function addSection(type: SiteSectionV3["type"]) {
 
     setAssets(data.items ?? []);
     setAssetsLoading(false);
+  }
+
+  async function loadVersions() {
+    setVersionsLoading(true);
+    setVersionsMessage(null);
+    const response = await fetch(`/api/sites/${siteId}/versions`);
+    const data = (await response.json().catch(() => ({}))) as { error?: string; items?: EditorVersionItem[] };
+
+    if (!response.ok) {
+      setVersionsMessage(data.error ?? "No se pudo cargar el historial de versiones.");
+      setVersionsLoading(false);
+      return;
+    }
+
+    setVersions(Array.isArray(data.items) ? data.items : []);
+    setVersionsLoading(false);
+  }
+
+  async function loadVersionIntoEditor(versionId: string) {
+    setLoadingVersionId(versionId);
+    setVersionsMessage(null);
+
+    const response = await fetch(`/api/sites/${siteId}/versions?versionId=${encodeURIComponent(versionId)}`);
+    const data = (await response.json().catch(() => ({}))) as { error?: string; item?: EditorVersionDetail };
+
+    if (!response.ok || !data.item?.siteSpec) {
+      setVersionsMessage(data.error ?? "No se pudo cargar esa versión.");
+      setLoadingVersionId(null);
+      return;
+    }
+
+    const normalizedVersion = normalizeSiteSpecV3(data.item.siteSpec);
+    const nextSpec = normalizedVersion?.spec ?? data.item.siteSpec;
+    applySiteSpecUpdate(structuredClone(nextSpec), { history: "push" });
+    setVersionsOpen(false);
+    setMessage(`Versión ${data.item.version} cargada al editor`);
+    setLoadingVersionId(null);
   }
 
   async function loadTemplates() {
@@ -809,7 +1007,7 @@ function addSection(type: SiteSectionV3["type"]) {
 
 
   function applyTemplateStyleOnly(template: TemplateCard) {
-    setSiteSpec((prev) => ({
+    applySiteSpecUpdate((prev) => ({
       ...prev,
       template: { id: template.id, family: template.family },
       theme: deriveVisualThemeFromLegacy(template.theme),
@@ -833,6 +1031,9 @@ function addSection(type: SiteSectionV3["type"]) {
           : !isDirty
             ? "Sin cambios"
             : "Pendiente";
+  const canUndo = historyPast.length > 0;
+  const canRedo = historyFuture.length > 0;
+  const currentVersionBadge = versions.find((item) => item.isCurrent) ?? null;
 
   const activeTemplateId = siteSpec.template.id;
   const fontOptions = fontFamilies;
@@ -849,9 +1050,70 @@ function addSection(type: SiteSectionV3["type"]) {
             <strong>{siteName}</strong>
             <span>Editor visual</span>
           </div>
+          <div className="editor-topbar-left-tools" aria-label="Historial del editor">
+            <div className="editor-version-menu">
+              <button type="button" className="btn-secondary editor-version-trigger" onClick={() => setVersionsOpen((current) => !current)}>
+                Versiones{currentVersionBadge ? ` · v${currentVersionBadge.version}` : ""}
+              </button>
+              {versionsOpen ? (
+                <div className="editor-version-popover">
+                  <div className="stack" style={{ gap: "0.35rem" }}>
+                    <strong>Historial de versiones</strong>
+                    {versionsLoading ? <small className="muted">Cargando versiones...</small> : null}
+                    {versionsMessage ? <small className="muted">{versionsMessage}</small> : null}
+                    {!versionsLoading && !versions.length ? <small className="muted">Aún no hay versiones guardadas.</small> : null}
+                    {versions.map((version) => (
+                      <button
+                        key={version.id}
+                        type="button"
+                        className="editor-version-item"
+                        disabled={loadingVersionId === version.id}
+                        onClick={() => void loadVersionIntoEditor(version.id)}
+                      >
+                        <span>
+                          <strong>Versión {version.version}</strong>
+                          <small>{labelVersionSource(version.source)}</small>
+                        </span>
+                        <small>{new Date(version.created_at).toLocaleString()}</small>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <div className="editor-history-actions" role="group" aria-label="Deshacer y rehacer">
+              <button
+                type="button"
+                className="editor-icon-button"
+                onClick={undoLastChange}
+                disabled={!canUndo}
+                title="Deshacer (Ctrl/Cmd + Z)"
+                aria-label="Deshacer"
+              >
+                <UndoIcon />
+              </button>
+              <button
+                type="button"
+                className="editor-icon-button"
+                onClick={redoLastChange}
+                disabled={!canRedo}
+                title="Rehacer (Ctrl/Cmd + Shift + Z)"
+                aria-label="Rehacer"
+              >
+                <RedoIcon />
+              </button>
+            </div>
+          </div>
         </div>
         <div className="editor-topbar-center">
-          <span className={`editor-status ${saveState}`}>Autosave · {saveStatus}</span>
+          <span className={`editor-status ${saveState}`}>
+            {lastSavedSource === "canvas_manual_checkpoint"
+              ? "Checkpoint"
+              : lastSavedSource === "canvas_auto_save"
+                ? "Autosave"
+                : "Editor"}{" "}
+            · {saveStatus}
+          </span>
           <div className="editor-toggle">
             <button type="button" className={viewport === "desktop" ? "btn-primary" : "btn-secondary"} onClick={() => setViewport("desktop")}>
               Desktop
@@ -1586,32 +1848,94 @@ function addSection(type: SiteSectionV3["type"]) {
                             Label
                             <input
                               value={selectedBlock.content.label}
-                              onChange={(event) =>
-                                updateBlock(selected.sectionId, selected.blockId, (block) =>
-                                  block.type === "button"
-                                    ? {
-                                        ...block,
-                                        content: { ...block.content, label: event.target.value }
-                                      }
-                                    : block
-                                )
-                              }
+                              onChange={(event) => {
+                                const nextLabel = event.target.value;
+                                applySiteSpecUpdate((prev) => ({
+                                  ...prev,
+                                  integrations:
+                                    selectedBlock.content.action === "whatsapp"
+                                      ? {
+                                          ...prev.integrations,
+                                          whatsapp: {
+                                            ...(prev.integrations.whatsapp ?? {}),
+                                            enabled: true,
+                                            phone: prev.integrations.whatsapp?.phone,
+                                            message: prev.integrations.whatsapp?.message,
+                                            cta_label: nextLabel
+                                          }
+                                        }
+                                      : prev.integrations,
+                                  pages: prev.pages.map((page) =>
+                                    page.id === home?.id
+                                      ? {
+                                          ...page,
+                                          sections: page.sections.map((section) =>
+                                            section.id === selected.sectionId
+                                              ? {
+                                                  ...section,
+                                                  blocks: section.blocks.map((block) =>
+                                                    block.id === selected.blockId && block.type === "button"
+                                                      ? {
+                                                          ...block,
+                                                          content: { ...block.content, label: nextLabel }
+                                                        }
+                                                      : block
+                                                  )
+                                                }
+                                              : section
+                                          )
+                                        }
+                                      : page
+                                  )
+                                }));
+                              }}
                             />
                           </label>
                           <label>
                             Acción
                             <select
                               value={selectedBlock.content.action}
-                              onChange={(event) =>
-                                updateBlock(selected.sectionId, selected.blockId, (block) =>
-                                  block.type === "button"
-                                    ? {
-                                        ...block,
-                                        content: { ...block.content, action: event.target.value as "whatsapp" | "link" }
-                                      }
-                                    : block
-                                )
-                              }
+                              onChange={(event) => {
+                                const nextAction = event.target.value as "whatsapp" | "link";
+                                applySiteSpecUpdate((prev) => ({
+                                  ...prev,
+                                  integrations:
+                                    nextAction === "whatsapp"
+                                      ? {
+                                          ...prev.integrations,
+                                          whatsapp: {
+                                            ...(prev.integrations.whatsapp ?? {}),
+                                            enabled: true,
+                                            phone: prev.integrations.whatsapp?.phone,
+                                            message: prev.integrations.whatsapp?.message,
+                                            cta_label: selectedBlock.content.label
+                                          }
+                                        }
+                                      : prev.integrations,
+                                  pages: prev.pages.map((page) =>
+                                    page.id === home?.id
+                                      ? {
+                                          ...page,
+                                          sections: page.sections.map((section) =>
+                                            section.id === selected.sectionId
+                                              ? {
+                                                  ...section,
+                                                  blocks: section.blocks.map((block) =>
+                                                    block.id === selected.blockId && block.type === "button"
+                                                      ? {
+                                                          ...block,
+                                                          content: { ...block.content, action: nextAction }
+                                                        }
+                                                      : block
+                                                  )
+                                                }
+                                              : section
+                                          )
+                                        }
+                                      : page
+                                  )
+                                }));
+                              }}
                             >
                               <option value="whatsapp">whatsapp</option>
                               <option value="link">link</option>
@@ -1634,6 +1958,54 @@ function addSection(type: SiteSectionV3["type"]) {
                                 }
                               />
                             </label>
+                          ) : null}
+                          {selectedBlock.content.action === "whatsapp" ? (
+                            <>
+                              <label>
+                                Número WhatsApp
+                                <input
+                                  value={siteSpec.integrations.whatsapp?.phone ?? ""}
+                                  onChange={(event) =>
+                                    applySiteSpecUpdate((prev) => ({
+                                      ...prev,
+                                      integrations: {
+                                        ...prev.integrations,
+                                        whatsapp: {
+                                          ...(prev.integrations.whatsapp ?? {}),
+                                          enabled: true,
+                                          phone: event.target.value,
+                                          cta_label: selectedBlock.content.label
+                                        }
+                                      }
+                                    }))
+                                  }
+                                  placeholder="+573001234567"
+                                />
+                              </label>
+                              <label>
+                                Mensaje prellenado
+                                <textarea
+                                  rows={3}
+                                  value={siteSpec.integrations.whatsapp?.message ?? ""}
+                                  onChange={(event) =>
+                                    applySiteSpecUpdate((prev) => ({
+                                      ...prev,
+                                      integrations: {
+                                        ...prev.integrations,
+                                        whatsapp: {
+                                          ...(prev.integrations.whatsapp ?? {}),
+                                          enabled: true,
+                                          phone: prev.integrations.whatsapp?.phone,
+                                          message: event.target.value,
+                                          cta_label: selectedBlock.content.label
+                                        }
+                                      }
+                                    }))
+                                  }
+                                  placeholder="Hola, vi tu sitio y quiero más información."
+                                />
+                              </label>
+                            </>
                           ) : null}
                         </>
                       ) : null}
@@ -1900,12 +2272,12 @@ function addSection(type: SiteSectionV3["type"]) {
                   <div className="stack">
                     <strong>Tema del sitio</strong>
                     <small className="muted">Estos cambios afectan el fondo y colores globales del sitio.</small>
-                    <label>
-                      Tipografía de títulos
-                      <select
-                        value={editableTheme.font_heading}
-                        onChange={(event) =>
-                          setSiteSpec((prev) => ({
+                        <label>
+                          Tipografía de títulos
+                          <select
+                            value={editableTheme.font_heading}
+                            onChange={(event) =>
+                          applySiteSpecUpdate((prev) => ({
                             ...prev,
                             theme: applyEditableThemePatch(prev.theme, { font_heading: event.target.value as (typeof fontFamilies)[number] })
                           }))
@@ -1918,12 +2290,12 @@ function addSection(type: SiteSectionV3["type"]) {
                         ))}
                       </select>
                     </label>
-                    <label>
-                      Tipografía del cuerpo
-                      <select
-                        value={editableTheme.font_body}
-                        onChange={(event) =>
-                          setSiteSpec((prev) => ({
+                        <label>
+                          Tipografía del cuerpo
+                          <select
+                            value={editableTheme.font_body}
+                            onChange={(event) =>
+                          applySiteSpecUpdate((prev) => ({
                             ...prev,
                             theme: applyEditableThemePatch(prev.theme, { font_body: event.target.value as (typeof fontFamilies)[number] })
                           }))
@@ -1941,7 +2313,7 @@ function addSection(type: SiteSectionV3["type"]) {
                         <input
                           type="color"
                           value={editableTheme.primary}
-                          onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: applyEditableThemePatch(prev.theme, { primary: event.target.value }) }))}
+                          onChange={(event) => applySiteSpecUpdate((prev) => ({ ...prev, theme: applyEditableThemePatch(prev.theme, { primary: event.target.value }) }))}
                         />
                       </label>
                       <label>
@@ -1949,7 +2321,7 @@ function addSection(type: SiteSectionV3["type"]) {
                         <input
                           type="color"
                           value={editableTheme.secondary}
-                          onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: applyEditableThemePatch(prev.theme, { secondary: event.target.value }) }))}
+                          onChange={(event) => applySiteSpecUpdate((prev) => ({ ...prev, theme: applyEditableThemePatch(prev.theme, { secondary: event.target.value }) }))}
                         />
                       </label>
                       <label>
@@ -1957,7 +2329,7 @@ function addSection(type: SiteSectionV3["type"]) {
                         <input
                           type="color"
                           value={editableTheme.background}
-                          onChange={(event) => setSiteSpec((prev) => ({ ...prev, theme: applyEditableThemePatch(prev.theme, { background: event.target.value }) }))}
+                          onChange={(event) => applySiteSpecUpdate((prev) => ({ ...prev, theme: applyEditableThemePatch(prev.theme, { background: event.target.value }) }))}
                         />
                       </label>
                     </div>
@@ -2472,6 +2844,13 @@ function hashSpec(spec: SiteSpecV3) {
   return JSON.stringify(spec);
 }
 
+function labelVersionSource(source: EditorVersionItem["source"]) {
+  if (source === "canvas_auto_save") return "Autosave";
+  if (source === "canvas_manual_checkpoint") return "Checkpoint";
+  if (source === "hybrid_generate") return "Generación IA";
+  return "Manual";
+}
+
 function useSavedAgoLabel(lastSavedAt: number | null) {
   const [now, setNow] = useState(Date.now());
 
@@ -2499,6 +2878,34 @@ function EyeIcon() {
         strokeWidth="1.6"
       />
       <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function UndoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M9 7 5 11l4 4M6 11h8a5 5 0 1 1 0 10h-2"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function RedoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="m15 7 4 4-4 4M18 11h-8a5 5 0 1 0 0 10h2"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
     </svg>
   );
 }

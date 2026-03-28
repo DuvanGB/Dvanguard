@@ -13,6 +13,84 @@ const bodySchema = z.object({
   source: z.enum(["manual", "canvas_auto_save", "canvas_manual_checkpoint"]).optional()
 });
 
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const { user, supabase } = await requireApiUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const versionId = searchParams.get("versionId");
+
+  const { data: site } = await supabase
+    .from("sites")
+    .select("id, current_version_id")
+    .eq("id", id)
+    .eq("owner_id", user.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!site) {
+    return NextResponse.json({ error: "Site not found" }, { status: 404 });
+  }
+
+  if (versionId) {
+    const { data: version, error } = await supabase
+      .from("site_versions")
+      .select("id, version, source, created_at, site_spec_json")
+      .eq("id", versionId)
+      .eq("site_id", id)
+      .maybeSingle();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    if (!version) {
+      return NextResponse.json({ error: "Version not found" }, { status: 404 });
+    }
+
+    const parsedSpec = parseAnySiteSpec(version.site_spec_json);
+    if (!parsedSpec.success) {
+      return NextResponse.json({ error: "Stored version is invalid" }, { status: 422 });
+    }
+
+    return NextResponse.json({
+      item: {
+        id: version.id,
+        version: version.version,
+        source: version.source,
+        created_at: version.created_at,
+        isCurrent: site.current_version_id === version.id,
+        siteSpec: parsedSpec.data
+      }
+    });
+  }
+
+  const { data: versions, error } = await supabase
+    .from("site_versions")
+    .select("id, version, source, created_at")
+    .eq("site_id", id)
+    .order("version", { ascending: false })
+    .limit(40);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
+  return NextResponse.json({
+    items: (versions ?? []).map((version) => ({
+      id: version.id,
+      version: version.version,
+      source: version.source,
+      created_at: version.created_at,
+      isCurrent: site.current_version_id === version.id
+    }))
+  });
+}
+
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { user, supabase } = await requireApiUser();

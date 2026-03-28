@@ -43,6 +43,8 @@ type Props = {
   siteName?: string;
   maxInputChars: number;
   voiceLocale: string;
+  generationMode?: "new" | "regenerate";
+  initialSpec?: SiteSpecV3;
 };
 
 type RecognitionCtor = new () => {
@@ -62,7 +64,7 @@ type ChatMessage = {
   content: string;
 };
 
-export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale }: Props) {
+export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale, generationMode = "new", initialSpec }: Props) {
   const router = useRouter();
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
@@ -108,6 +110,20 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
       recognitionRef.current?.stop();
     };
   }, []);
+
+  useEffect(() => {
+    if (generationMode !== "regenerate" || !initialSpec) return;
+    const bootstrap = buildBriefFromExistingSite(initialSpec, siteName);
+    setRawInput(bootstrap.rawInput);
+    setBriefDraft(bootstrap.briefDraft);
+    setWhatsappPhoneInput(bootstrap.briefDraft.whatsapp_phone ?? "");
+    setWhatsappMessageInput(bootstrap.briefDraft.whatsapp_message ?? "");
+    setWarnings(["Estamos partiendo del contenido actual de tu sitio para proponer una nueva dirección visual sin perder tu información."]);
+    setMissingFields([]);
+    setFollowUpQuestion(null);
+    setChatMessages([]);
+    setStep(2);
+  }, [generationMode, initialSpec, siteName]);
 
   useEffect(() => {
     if (!briefDraft || ctaManuallyEdited) return;
@@ -359,7 +375,8 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale 
           inputMode,
           briefDraft: buildFinalBrief(briefDraft),
           refineConfidence: confidence ?? undefined,
-          warnings
+          warnings,
+          generationMode
         })
       });
 
@@ -762,6 +779,42 @@ function suggestPrimaryCtaClient(input: {
   }
   if (/agenda|cita|consulta|asesor/.test(lower)) return "Agendar asesoría";
   return "Solicitar información";
+}
+
+function buildBriefFromExistingSite(siteSpec: SiteSpecV3, siteName?: string) {
+  const home = siteSpec.pages.find((page) => page.slug === "/") ?? siteSpec.pages[0];
+  const textBlocks = home?.sections.flatMap((section) => section.blocks.filter((block) => block.type === "text")) ?? [];
+  const buttonBlocks = home?.sections.flatMap((section) => section.blocks.filter((block) => block.type === "button")) ?? [];
+  const headline = textBlocks[0]?.type === "text" ? textBlocks[0].content.text.trim() : "";
+  const supporting = textBlocks
+    .slice(1, 4)
+    .map((block) => (block.type === "text" ? block.content.text.trim() : ""))
+    .filter(Boolean)
+    .join(" ");
+  const firstButton = buttonBlocks[0];
+  const whatsapp = siteSpec.integrations.whatsapp;
+
+  const offerSummary = [headline, supporting].filter(Boolean).join(". ").slice(0, 420) || "Presentación del negocio y su propuesta principal.";
+  const rawInput = [siteName ?? headline, offerSummary, siteSpec.site_type === "commerce_lite" ? "Sitio comercial con catálogo." : "Sitio informativo."]
+    .filter(Boolean)
+    .join(" ");
+
+  return {
+    rawInput,
+    briefDraft: {
+      business_name: siteName?.trim() || headline || "Mi negocio",
+      business_type: siteSpec.site_type,
+      offer_summary: offerSummary,
+      target_audience: siteSpec.site_type === "commerce_lite" ? "Clientes interesados en comprar online o por WhatsApp." : "Clientes potenciales que buscan información y contacto.",
+      tone: "profesional y claro",
+      primary_cta:
+        (firstButton?.type === "button" ? firstButton.content.label : undefined) ||
+        whatsapp?.cta_label ||
+        (siteSpec.site_type === "commerce_lite" ? "Comprar por WhatsApp" : "Solicitar información"),
+      whatsapp_phone: whatsapp?.phone,
+      whatsapp_message: whatsapp?.message
+    } satisfies BusinessBriefDraft
+  };
 }
 
 function suggestWhatsappMessageClient(input: {

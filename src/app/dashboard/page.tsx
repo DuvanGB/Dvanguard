@@ -211,7 +211,7 @@ export default async function DashboardPage() {
                       <Link className="btn-secondary" href={`/sites/${site.site_id}`}>
                         Editar
                       </Link>
-                      <Link className="btn-secondary" href={`/onboarding?siteId=${site.site_id}`}>
+                      <Link className="btn-secondary" href={`/onboarding?siteId=${site.site_id}&source=regenerate`}>
                         Regenerar IA
                       </Link>
                       {site.status === "published" ? (
