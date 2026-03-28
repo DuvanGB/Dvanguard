@@ -150,6 +150,11 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [versionsMessage, setVersionsMessage] = useState<string | null>(null);
   const [loadingVersionId, setLoadingVersionId] = useState<string | null>(null);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<"none" | "rail" | "inspector">("none");
+  const [isMobileEditor, setIsMobileEditor] = useState(false);
+  const versionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
 
   const currentHash = useMemo(() => hashSpec(siteSpec), [siteSpec]);
   const isDirty = currentHash !== lastPersistedHash;
@@ -243,6 +248,41 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
   useEffect(() => {
     siteSpecRef.current = siteSpec;
   }, [siteSpec]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 900px)");
+    const sync = () => {
+      const next = media.matches;
+      setIsMobileEditor(next);
+      if (!next) {
+        setMobilePanel("none");
+      }
+    };
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (versionsMenuRef.current && !versionsMenuRef.current.contains(target)) {
+        setVersionsOpen(false);
+      }
+      if (moreMenuRef.current && !moreMenuRef.current.contains(target)) {
+        setMoreMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileEditor) return;
+    setMoreMenuOpen(false);
+    setVersionsOpen(false);
+  }, [mobilePanel, isMobileEditor]);
 
   useEffect(() => {
     if (!home?.sections?.length) return;
@@ -1051,8 +1091,15 @@ function addSection(type: SiteSectionV3["type"]) {
             <span>Editor visual</span>
           </div>
           <div className="editor-topbar-left-tools" aria-label="Historial del editor">
-            <div className="editor-version-menu">
-              <button type="button" className="btn-secondary editor-version-trigger" onClick={() => setVersionsOpen((current) => !current)}>
+            <div className="editor-version-menu" ref={versionsMenuRef}>
+              <button
+                type="button"
+                className="btn-secondary editor-version-trigger"
+                onClick={() => {
+                  setVersionsOpen((current) => !current);
+                  setMoreMenuOpen(false);
+                }}
+              >
                 Versiones{currentVersionBadge ? ` · v${currentVersionBadge.version}` : ""}
               </button>
               {versionsOpen ? (
@@ -1102,6 +1149,15 @@ function addSection(type: SiteSectionV3["type"]) {
               >
                 <RedoIcon />
               </button>
+              <button
+                type="button"
+                className="editor-icon-button"
+                onClick={() => void saveCheckpoint()}
+                title="Guardar checkpoint"
+                aria-label="Guardar checkpoint"
+              >
+                <SaveIcon />
+              </button>
             </div>
           </div>
         </div>
@@ -1124,37 +1180,51 @@ function addSection(type: SiteSectionV3["type"]) {
           </div>
         </div>
         <div className="editor-topbar-actions">
-          <ModuleTour
-            module="editor"
-            title="Cómo editar tu sitio"
-            description="Este editor te permite ajustar el layout, el contenido y la publicación de tu página."
-            compact
-            steps={[
-              {
-                title: "Selecciona y mueve bloques",
-                body: "Haz clic sobre cualquier bloque para editarlo y arrástralo dentro de la sección para reubicarlo."
-              },
-              {
-                title: "Usa el panel izquierdo y el inspector",
-                body: "Desde secciones y capas agregas contenido; desde el inspector cambias texto, estilo, posición y navegación."
-              },
-              {
-                title: "Guarda, revisa y publica",
-                body: "El editor hace autosave, pero también puedes guardar checkpoints y publicar cuando la web ya esté lista."
-              }
-            ]}
-          />
-          <Link href="/dashboard" className="btn-secondary">
-            Dashboard
-          </Link>
-          {isPublished ? (
-            <a href={publicSiteUrl} target="_blank" rel="noreferrer" className="btn-secondary">
-              Abrir sitio
-            </a>
-          ) : null}
-          <button className="btn-secondary" type="button" onClick={() => void saveCheckpoint()}>
-            Guardar
-          </button>
+          <div className="editor-overflow-menu" ref={moreMenuRef}>
+            <button
+              type="button"
+              className="btn-secondary editor-overflow-trigger"
+              onClick={() => {
+                setMoreMenuOpen((current) => !current);
+                setVersionsOpen(false);
+              }}
+              aria-expanded={moreMenuOpen}
+            >
+              Más
+            </button>
+            {moreMenuOpen ? (
+              <div className="editor-overflow-popover">
+                <ModuleTour
+                  module="editor"
+                  title="Cómo editar tu sitio"
+                  description="Este editor te permite ajustar el layout, el contenido y la publicación de tu página."
+                  compact
+                  steps={[
+                    {
+                      title: "Selecciona y mueve bloques",
+                      body: "Haz clic sobre cualquier bloque para editarlo y arrástralo dentro de la sección para reubicarlo."
+                    },
+                    {
+                      title: "Usa el panel izquierdo y el inspector",
+                      body: "Desde secciones y capas agregas contenido; desde el inspector cambias texto, estilo, posición y navegación."
+                    },
+                    {
+                      title: "Guarda, revisa y publica",
+                      body: "El editor hace autosave, pero también puedes guardar checkpoints y publicar cuando la web ya esté lista."
+                    }
+                  ]}
+                />
+                <Link href="/dashboard" className="btn-secondary" onClick={() => setMoreMenuOpen(false)}>
+                  Dashboard
+                </Link>
+                {isPublished ? (
+                  <a href={publicSiteUrl} target="_blank" rel="noreferrer" className="btn-secondary" onClick={() => setMoreMenuOpen(false)}>
+                    Abrir sitio
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
           <button className="btn-primary" type="button" onClick={() => void publish()} disabled={publishing}>
             {publishing ? "Publicando..." : "Publicar"}
           </button>
@@ -1163,8 +1233,37 @@ function addSection(type: SiteSectionV3["type"]) {
 
       {message ? <div className="editor-alert">{message}</div> : null}
 
+      {isMobileEditor ? (
+        <div className="editor-mobile-toolbar">
+          <button
+            type="button"
+            className={`btn-secondary ${mobilePanel === "rail" ? "editor-mobile-toolbar-active" : ""}`}
+            onClick={() => setMobilePanel((current) => (current === "rail" ? "none" : "rail"))}
+          >
+            Herramientas
+          </button>
+          <button
+            type="button"
+            className={`btn-secondary ${mobilePanel === "inspector" ? "editor-mobile-toolbar-active" : ""}`}
+            onClick={() => setMobilePanel((current) => (current === "inspector" ? "none" : "inspector"))}
+          >
+            Editar
+          </button>
+        </div>
+      ) : null}
+
+      {isMobileEditor && mobilePanel !== "none" ? (
+        <button type="button" className="editor-mobile-overlay" aria-label="Cerrar panel móvil" onClick={() => setMobilePanel("none")} />
+      ) : null}
+
       <section className="editor-body">
-        <aside className="editor-rail">
+        <aside className={`editor-rail ${isMobileEditor ? "editor-mobile-panel" : ""} ${mobilePanel === "rail" ? "open" : ""}`}>
+          <div className="editor-mobile-panel-header">
+            <strong>Herramientas</strong>
+            <button type="button" className="editor-icon-button" onClick={() => setMobilePanel("none")} aria-label="Cerrar herramientas">
+              <CloseIcon />
+            </button>
+          </div>
           <div className="editor-tabs">
             <button type="button" className={leftTab === "templates" ? "tab active" : "tab"} onClick={() => setLeftTab("templates")}>
               Templates
@@ -1716,7 +1815,13 @@ function addSection(type: SiteSectionV3["type"]) {
           </div>
         </section>
 
-        <aside className="editor-inspector">
+        <aside className={`editor-inspector ${isMobileEditor ? "editor-mobile-panel" : ""} ${mobilePanel === "inspector" ? "open" : ""}`}>
+          <div className="editor-mobile-panel-header">
+            <strong>{selected && selectedBlock ? `Editar ${selectedBlock.type}` : "Inspector"}</strong>
+            <button type="button" className="editor-icon-button" onClick={() => setMobilePanel("none")} aria-label="Cerrar inspector">
+              <CloseIcon />
+            </button>
+          </div>
 
           <div className="editor-tabs">
             <button type="button" className={rightTab === "content" ? "tab active" : "tab"} onClick={() => setRightTab("content")}>
@@ -2906,6 +3011,28 @@ function RedoIcon() {
         strokeLinejoin="round"
         strokeWidth="1.8"
       />
+    </svg>
+  );
+}
+
+function SaveIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M6 4h9l3 3v13H6V4Zm3 0v5h6V4"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="m7 7 10 10M17 7 7 17" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
     </svg>
   );
 }
