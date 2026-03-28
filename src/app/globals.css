@@ -2517,7 +2517,7 @@ td {
   }
 
   .editor-canvas-area {
-    min-height: calc(100vh - 220px);
+    min-height: 100%;
     height: calc(100vh - 220px);
   }
 
