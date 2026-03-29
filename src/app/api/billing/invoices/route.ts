@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireApiUser } from "@/lib/auth";
-import { listBillingInvoices } from "@/lib/billing/subscription";
+import { listBillingTransactions } from "@/lib/billing/subscription";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export async function GET() {
@@ -11,6 +11,6 @@ export async function GET() {
   }
 
   const admin = getSupabaseAdminClient();
-  const invoices = await listBillingInvoices(admin, user.id);
-  return NextResponse.json({ invoices });
+  const transactions = await listBillingTransactions(admin, user.id);
+  return NextResponse.json({ invoices: transactions, transactions });
 }

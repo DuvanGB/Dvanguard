@@ -11,6 +11,10 @@ export async function POST() {
   }
 
   const admin = getSupabaseAdminClient();
-  await cancelBillingSubscription(admin, user.id);
-  return NextResponse.json({ ok: true });
+  try {
+    await cancelBillingSubscription(admin, user.id);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "No se pudo cancelar la renovación." }, { status: 400 });
+  }
 }

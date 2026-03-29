@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireApiUser } from "@/lib/auth";
-import { changeBillingPlanInterval } from "@/lib/billing/subscription";
+import { acceptBillingLegalTerms } from "@/lib/billing/subscription";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 const bodySchema = z.object({
-  interval: z.enum(["month", "year"])
+  acceptTerms: z.literal(true),
+  acceptPrivacy: z.literal(true)
 });
 
 export async function POST(request: Request) {
@@ -18,14 +19,10 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+    return NextResponse.json({ error: "Debes aceptar términos y privacidad." }, { status: 400 });
   }
 
   const admin = getSupabaseAdminClient();
-  try {
-    const result = await changeBillingPlanInterval(admin, user.id, parsed.data.interval);
-    return NextResponse.json({ ok: true, mode: result.mode });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "No se pudo cambiar el ciclo." }, { status: 400 });
-  }
+  const legal = await acceptBillingLegalTerms(admin, user.id);
+  return NextResponse.json({ ok: true, legal });
 }

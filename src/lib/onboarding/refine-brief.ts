@@ -1,8 +1,10 @@
 import { requestRefineFromWorker } from "@/lib/ai/worker-client";
 import {
   businessBriefDraftSchema,
+  heroSuggestionSchema,
   missingBriefFieldSchema,
   type BusinessBriefDraft,
+  type HeroSuggestion,
   type MissingBriefField,
   type OnboardingInputMode,
   type RefineResponse
@@ -53,6 +55,8 @@ function normalizeWorkerRefineResponse(
     provider?: unknown;
     followUpQuestion?: unknown;
     missingFields?: unknown;
+    heroSuggestion?: unknown;
+    heroConfidence?: unknown;
   };
 
   const parsedBrief = businessBriefDraftSchema.safeParse(candidate.briefDraft);
@@ -65,6 +69,18 @@ function normalizeWorkerRefineResponse(
   if (!parsed.success) return null;
 
   const missingFields = normalizeMissingFields(candidate.missingFields, parsed.data);
+  const heroSuggestion = normalizeHeroSuggestion(candidate.heroSuggestion, parsed.data);
+  const heroConfidence = heroSuggestion
+    ? typeof candidate.heroConfidence === "number"
+      ? clamp01(candidate.heroConfidence)
+      : computeHeroConfidence(parsed.data, heroSuggestion, missingFields)
+    : 0;
+  const effectiveFollowUpQuestion =
+    heroConfidence < 0.75
+      ? buildHeroFollowUpQuestion(parsed.data, missingFields)
+      : typeof candidate.followUpQuestion === "string" && candidate.followUpQuestion.trim()
+        ? candidate.followUpQuestion.trim()
+        : buildFollowUpQuestion(missingFields);
   return {
     briefDraft: parsed.data,
     confidence: typeof candidate.confidence === "number" ? clamp01(candidate.confidence) : 0.82,
@@ -74,8 +90,10 @@ function normalizeWorkerRefineResponse(
         : computeCompletenessScore(parsed.data, rawInput),
     warnings: Array.isArray(candidate.warnings) ? candidate.warnings.filter((item): item is string => typeof item === "string") : [],
     provider: candidate.provider === "heuristic" ? "heuristic" : "llm",
-    followUpQuestion: typeof candidate.followUpQuestion === "string" && candidate.followUpQuestion.trim() ? candidate.followUpQuestion.trim() : buildFollowUpQuestion(missingFields),
-    missingFields
+    followUpQuestion: effectiveFollowUpQuestion,
+    missingFields,
+    heroSuggestion: heroConfidence >= 0.75 ? heroSuggestion : null,
+    heroConfidence
   };
 }
 
@@ -91,6 +109,8 @@ function buildFallbackRefineResponse(input: {
   );
   const warnings = buildActionableWarnings(input.rawInput, briefDraft);
   const missingFields = collectMissingFields(briefDraft);
+  const heroSuggestion = buildHeroSuggestion(briefDraft);
+  const heroConfidence = computeHeroConfidence(briefDraft, heroSuggestion, missingFields);
 
   return {
     briefDraft,
@@ -98,8 +118,10 @@ function buildFallbackRefineResponse(input: {
     completenessScore: computeCompletenessScore(briefDraft, input.rawInput),
     warnings,
     provider: "heuristic",
-    followUpQuestion: buildFollowUpQuestion(missingFields),
-    missingFields
+    followUpQuestion: heroConfidence < 0.75 ? buildHeroFollowUpQuestion(briefDraft, missingFields) : buildFollowUpQuestion(missingFields),
+    missingFields,
+    heroSuggestion: heroConfidence >= 0.75 ? heroSuggestion : null,
+    heroConfidence
   };
 }
 
@@ -423,6 +445,60 @@ function containsValueProposition(lower: string) {
 function extractWhatsappPhone(input: string) {
   const match = input.match(/\+\d{8,15}/);
   return match?.[0];
+}
+
+function normalizeHeroSuggestion(input: unknown, brief: BusinessBriefDraft): HeroSuggestion | null {
+  const parsed = heroSuggestionSchema.safeParse(input);
+  if (parsed.success) return parsed.data;
+  return buildHeroSuggestion(brief);
+}
+
+function buildHeroSuggestion(brief: BusinessBriefDraft): HeroSuggestion {
+  const audience = brief.target_audience.trim();
+  const offer = brief.offer_summary.trim();
+  const cta = brief.primary_cta.trim();
+  const opening =
+    brief.business_type === "commerce_lite"
+      ? `Descubre ${brief.business_name}`
+      : `${brief.business_name}: ${offer.split(/[,.]/)[0]?.trim() ?? "tu propuesta"}`;
+
+  return {
+    headline: opening.length > 78 ? opening.slice(0, 78) : opening,
+    subheadline:
+      offer.length > 150
+        ? offer.slice(0, 147).trimEnd() + "..."
+        : `${offer}${offer.endsWith(".") ? "" : "."} Pensado para ${audience.toLowerCase()}.`,
+    primary_cta: cta,
+    hero_direction:
+      brief.business_type === "commerce_lite"
+        ? "Hero con foco en producto, beneficio inmediato y CTA de contacto visible."
+        : "Hero de credibilidad con propuesta clara, soporte visual limpio y CTA principal único."
+  };
+}
+
+function computeHeroConfidence(brief: BusinessBriefDraft, hero: HeroSuggestion | null, missingFields: MissingBriefField[]) {
+  if (!hero) return 0.4;
+  let score = 0.58;
+  if (brief.offer_summary.trim().length >= 60) score += 0.12;
+  if (brief.target_audience.trim().length >= 20) score += 0.08;
+  if (brief.primary_cta.trim().length >= 4) score += 0.06;
+  if (brief.business_name.trim().length >= 3) score += 0.05;
+  if (brief.whatsapp_phone) score += 0.03;
+  if (!missingFields.includes("offer_summary")) score += 0.04;
+  if (!missingFields.includes("target_audience")) score += 0.04;
+  return clamp01(score);
+}
+
+function buildHeroFollowUpQuestion(brief: BusinessBriefDraft, missingFields: MissingBriefField[]) {
+  if (missingFields.includes("offer_summary")) {
+    return "Para proponer un hero más fuerte necesito entender mejor tu oferta. ¿Qué vendes o qué servicio das y cuál es el resultado principal para el cliente?";
+  }
+
+  if (missingFields.includes("target_audience")) {
+    return "Antes de cerrar el hero, cuéntame mejor para quién es tu oferta. ¿Qué tipo de cliente quieres atraer primero?";
+  }
+
+  return `Ya tenemos base del brief, pero todavía no tengo suficiente confianza para proponerte un hero fuerte para ${brief.business_name}. Cuéntame en una frase qué promesa principal quieres que vea la gente apenas entra a la página.`;
 }
 
 function clampScore(value: number) {

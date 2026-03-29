@@ -570,10 +570,11 @@ async function requestRefineFromModel(input) {
           content:
             "Devuelve SOLO JSON válido con este contrato: " +
             "{briefDraft:{business_name,business_type,offer_summary,target_audience,tone,primary_cta,whatsapp_phone,whatsapp_message}," +
-            "confidence,completenessScore,warnings,followUpQuestion,missingFields}. " +
+            "confidence,completenessScore,warnings,followUpQuestion,missingFields,heroSuggestion:{headline,subheadline,primary_cta,hero_direction},heroConfidence}. " +
             "No incluyas section_preferences ni style_preset. " +
             "missingFields solo puede contener offer_summary,target_audience,whatsapp_phone,business_type. " +
-            "tone es interno: puedes devolverlo, pero no hagas preguntas al usuario sobre estilo visual si faltan otros datos de negocio."
+            "tone es interno: puedes devolverlo, pero no hagas preguntas al usuario sobre estilo visual si faltan otros datos de negocio. " +
+            "Intenta siempre proponer heroSuggestion; si no tienes suficiente claridad, devuelve heroConfidence bajo y usa followUpQuestion para pedir la pieza faltante."
         },
         {
           role: "user",
@@ -613,8 +614,10 @@ function buildHeuristicRefine(input) {
     completenessScore: computeCompletenessScore(briefDraft, rawInput),
     warnings: buildWarnings(rawInput, briefDraft),
     provider: "heuristic",
-    followUpQuestion: buildFollowUpQuestion(missingFields),
-    missingFields
+    followUpQuestion: buildHeroConfidence(briefDraft, missingFields) < 0.75 ? buildHeroFollowUpQuestion(briefDraft, missingFields) : buildFollowUpQuestion(missingFields),
+    missingFields,
+    heroSuggestion: buildHeroSuggestion(briefDraft),
+    heroConfidence: buildHeroConfidence(briefDraft, missingFields)
   };
 }
 
@@ -748,6 +751,42 @@ function buildWarnings(rawInput, brief) {
   if ((brief.target_audience || "").trim().length < 10) warnings.push("Conviene definir mejor a quién quieres atraer.");
   if (!containsLocationInfo(String(rawInput || "").toLowerCase())) warnings.push("Si tu negocio depende de ubicación, añade ciudad o zona.");
   return warnings;
+}
+
+function buildHeroSuggestion(brief) {
+  const headline =
+    brief.business_type === "commerce_lite"
+      ? `Descubre ${brief.business_name}`
+      : `${brief.business_name}: ${String(brief.offer_summary || "").split(/[,.]/)[0] || "tu propuesta"}`;
+  return {
+    headline: headline.slice(0, 120),
+    subheadline: `${brief.offer_summary}${String(brief.offer_summary || "").endsWith(".") ? "" : "."} Pensado para ${String(brief.target_audience || "").toLowerCase()}.`.slice(0, 220),
+    primary_cta: brief.primary_cta || "Solicitar información",
+    hero_direction:
+      brief.business_type === "commerce_lite"
+        ? "Hero con enfoque en producto, valor visible y CTA comercial fuerte."
+        : "Hero de credibilidad con promesa clara, apoyo visual limpio y un CTA principal."
+  };
+}
+
+function buildHeroConfidence(brief, missingFields) {
+  let score = 0.58;
+  if (String(brief.offer_summary || "").trim().length >= 60) score += 0.12;
+  if (String(brief.target_audience || "").trim().length >= 20) score += 0.08;
+  if (String(brief.primary_cta || "").trim().length >= 4) score += 0.06;
+  if (!missingFields.includes("offer_summary")) score += 0.04;
+  if (!missingFields.includes("target_audience")) score += 0.04;
+  return Math.max(0, Math.min(1, score));
+}
+
+function buildHeroFollowUpQuestion(brief, missingFields) {
+  if (missingFields.includes("offer_summary")) {
+    return "Antes de proponerte un hero fuerte, cuéntame mejor qué ofreces y cuál es el principal beneficio para el cliente.";
+  }
+  if (missingFields.includes("target_audience")) {
+    return "Antes de cerrar el hero, dime mejor para quién es tu oferta. ¿Qué tipo de cliente quieres atraer primero?";
+  }
+  return `Quiero mejorar el hero de ${brief.business_name || "tu negocio"}, pero aún falta una promesa principal clara. ¿Qué debe entender alguien en los primeros 3 segundos al entrar a tu web?`;
 }
 
 function computeCompletenessScore(brief, rawInput) {

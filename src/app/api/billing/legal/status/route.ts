@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireApiUser } from "@/lib/auth";
-import { getBillingSummary, listBillingTransactions } from "@/lib/billing/subscription";
+import { getBillingLegalStatus } from "@/lib/billing/subscription";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export async function GET() {
@@ -11,10 +11,6 @@ export async function GET() {
   }
 
   const admin = getSupabaseAdminClient();
-  const [summary, transactions] = await Promise.all([
-    getBillingSummary(admin, user.id, user.email ?? null),
-    listBillingTransactions(admin, user.id)
-  ]);
-
-  return NextResponse.json({ summary, transactions });
+  const legal = await getBillingLegalStatus(admin, user.id);
+  return NextResponse.json({ legal });
 }

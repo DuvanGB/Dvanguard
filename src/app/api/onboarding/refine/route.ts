@@ -105,7 +105,8 @@ export async function POST(request: NextRequest) {
         completenessScore: refined.completenessScore,
         warningsCount: refined.warnings.length,
         provider: refined.provider,
-        missingFields: refined.missingFields
+        missingFields: refined.missingFields,
+        heroConfidence: refined.heroConfidence ?? null
       }
     });
   } catch {
@@ -119,6 +120,8 @@ export async function POST(request: NextRequest) {
     warnings: refined.warnings,
     provider: refined.provider,
     followUpQuestion: refined.followUpQuestion ?? null,
-    missingFields: refined.missingFields
+    missingFields: refined.missingFields,
+    heroSuggestion: refined.heroSuggestion ?? null,
+    heroConfidence: refined.heroConfidence ?? null
   });
 }

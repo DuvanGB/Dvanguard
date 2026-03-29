@@ -1,15 +1,15 @@
 export type PlanCode = "free" | "pro";
 export type BillingInterval = "month" | "year";
 export type BillingAccessState = "within_limit" | "grace_period" | "enforcement_applied";
+export type BillingPaymentRail = "card_subscription" | "manual_term_purchase";
+export type BillingPaymentMethodKind = "card" | "pse" | "nequi" | "bank_transfer";
 export type BillingSubscriptionStatus =
   | "active"
-  | "trialing"
-  | "past_due"
+  | "payment_pending"
+  | "pending_activation"
+  | "payment_failed"
+  | "expired"
   | "canceled"
-  | "unpaid"
-  | "incomplete"
-  | "incomplete_expired"
-  | "paused"
   | "not_started";
 
 export type UsageSnapshot = {
@@ -30,19 +30,32 @@ export type UsageSnapshot = {
 
 export type ProRequestStatus = "pending" | "approved" | "rejected";
 
+export type BillingLegalAcceptanceStatus = {
+  accepted: boolean;
+  acceptedAt: string | null;
+  termsVersion: string;
+  privacyVersion: string;
+};
+
 export type BillingSummary = {
   plan: PlanCode;
-  isStripeManaged: boolean;
+  provider: "wompi" | null;
+  rail: BillingPaymentRail | null;
+  paymentMethodKind: BillingPaymentMethodKind | null;
   interval: BillingInterval | null;
   subscriptionStatus: BillingSubscriptionStatus;
-  cancelAtPeriodEnd: boolean;
+  renewsAutomatically: boolean;
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   accessState: BillingAccessState;
   graceUntil: string | null;
-  pendingInterval: BillingInterval | null;
-  customerId: string | null;
   checkoutEnabled: boolean;
+  switchToCardAt: string | null;
+  legal: BillingLegalAcceptanceStatus;
+  wompiAcceptance: {
+    termsPermalink: string | null;
+    personalDataPermalink: string | null;
+  };
   paymentMethod:
     | {
         brand: string | null;

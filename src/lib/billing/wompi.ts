@@ -1,0 +1,190 @@
+import { createHash } from "node:crypto";
+
+import { env } from "@/lib/env";
+import type { BillingInterval, BillingPaymentMethodKind } from "@/lib/billing/types";
+
+type JsonRecord = Record<string, unknown>;
+
+export type WompiMerchantAcceptance = {
+  acceptanceToken: string | null;
+  personalDataAuthToken: string | null;
+  termsPermalink: string | null;
+  personalDataPermalink: string | null;
+};
+
+type WompiTransactionInput = {
+  reference: string;
+  amountInCents: number;
+  customerEmail: string;
+  redirectUrl?: string | null;
+  customerData?: JsonRecord | null;
+  paymentMethod: JsonRecord;
+  paymentSourceId?: number | null;
+  acceptanceToken: string;
+  acceptPersonalAuth: string;
+  ipAddress?: string | null;
+};
+
+type WompiPaymentSourceInput = {
+  token: string;
+  customerEmail: string;
+  acceptanceToken: string;
+  acceptPersonalAuth: string;
+};
+
+function resolveBaseUrl() {
+  if (env.wompiApiBaseUrl) {
+    return env.wompiApiBaseUrl.replace(/\/$/, "");
+  }
+
+  const publicKey = env.wompiPublicKey;
+  if (publicKey.startsWith("pub_test_")) {
+    return "https://sandbox.wompi.co/v1";
+  }
+
+  return "https://production.wompi.co/v1";
+}
+
+export function isWompiConfigured() {
+  return Boolean(env.wompiPublicKey && env.wompiPrivateKey && env.wompiIntegritySecret);
+}
+
+function ensureWompiConfigured() {
+  if (!isWompiConfigured()) {
+    throw new Error("Wompi no está configurado en este entorno.");
+  }
+}
+
+async function wompiRequest<T>(path: string, init: RequestInit & { auth?: "public" | "private" | "none" } = {}) {
+  ensureWompiConfigured();
+  const headers = new Headers(init.headers ?? {});
+  headers.set("Content-Type", "application/json");
+
+  const auth = init.auth ?? "private";
+  if (auth === "private") {
+    headers.set("Authorization", `Bearer ${env.wompiPrivateKey}`);
+  } else if (auth === "public") {
+    headers.set("Authorization", `Bearer ${env.wompiPublicKey}`);
+  }
+
+  const response = await fetch(`${resolveBaseUrl()}${path}`, {
+    ...init,
+    headers,
+    cache: "no-store"
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as T & { error?: unknown };
+  if (!response.ok) {
+    const message =
+      typeof payload === "object" && payload && "error" in payload && payload.error
+        ? JSON.stringify(payload.error)
+        : `Wompi HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return payload;
+}
+
+export async function getWompiAcceptanceTokens(): Promise<WompiMerchantAcceptance> {
+  ensureWompiConfigured();
+
+  const response = await wompiRequest<{
+    data?: {
+      presigned_acceptance?: {
+        acceptance_token?: string | null;
+        permalink?: string | null;
+      } | null;
+      presigned_personal_data_auth?: {
+        acceptance_token?: string | null;
+        permalink?: string | null;
+      } | null;
+    };
+  }>(`/merchants/${env.wompiPublicKey}`, { method: "GET", auth: "none" });
+
+  return {
+    acceptanceToken: response.data?.presigned_acceptance?.acceptance_token ?? null,
+    personalDataAuthToken: response.data?.presigned_personal_data_auth?.acceptance_token ?? null,
+    termsPermalink: response.data?.presigned_acceptance?.permalink ?? null,
+    personalDataPermalink: response.data?.presigned_personal_data_auth?.permalink ?? null
+  };
+}
+
+export function getPlanAmountInCents(interval: BillingInterval) {
+  return interval === "year" ? 449_000_00 : 49_000_00;
+}
+
+export function getManualAmountInCents(_kind: Exclude<BillingPaymentMethodKind, "card">) {
+  return getPlanAmountInCents("month");
+}
+
+export function buildWompiReference(prefix: string, userId: string) {
+  return `${prefix}-${userId.slice(0, 8)}-${Date.now()}`;
+}
+
+export function buildWompiIntegritySignature(input: { reference: string; amountInCents: number; currency?: string }) {
+  const currency = input.currency ?? "COP";
+  return createHash("sha256")
+    .update(`${input.reference}${input.amountInCents}${currency}${env.wompiIntegritySecret}`)
+    .digest("hex");
+}
+
+export async function createWompiPaymentSource(input: WompiPaymentSourceInput) {
+  const response = await wompiRequest<{
+    data?: {
+      id?: number;
+      status?: string;
+      public_data?: {
+        bin?: string | null;
+        last_four?: string | null;
+        brand?: string | null;
+        exp_month?: number | null;
+        exp_year?: number | null;
+      } | null;
+    };
+  }>("/payment_sources", {
+    method: "POST",
+    body: JSON.stringify({
+      type: "CARD",
+      token: input.token,
+      customer_email: input.customerEmail,
+      acceptance_token: input.acceptanceToken,
+      accept_personal_auth: input.acceptPersonalAuth
+    })
+  });
+
+  return response.data ?? {};
+}
+
+export async function createWompiTransaction(input: WompiTransactionInput) {
+  const response = await wompiRequest<{ data?: JsonRecord }>("/transactions", {
+    method: "POST",
+    body: JSON.stringify({
+      amount_in_cents: input.amountInCents,
+      currency: "COP",
+      customer_email: input.customerEmail,
+      acceptance_token: input.acceptanceToken,
+      accept_personal_auth: input.acceptPersonalAuth,
+      reference: input.reference,
+      signature: buildWompiIntegritySignature({
+        reference: input.reference,
+        amountInCents: input.amountInCents,
+        currency: "COP"
+      }),
+      payment_method: input.paymentMethod,
+      payment_source_id: input.paymentSourceId ?? undefined,
+      customer_data: input.customerData ?? undefined,
+      redirect_url: input.redirectUrl ?? undefined,
+      ip: input.ipAddress ?? undefined
+    })
+  });
+
+  return response.data ?? {};
+}
+
+export async function getWompiTransaction(transactionId: string) {
+  const response = await wompiRequest<{ data?: JsonRecord }>(`/transactions/${transactionId}`, {
+    method: "GET",
+    auth: "public"
+  });
+  return response.data ?? {};
+}

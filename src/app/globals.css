@@ -316,7 +316,7 @@ td {
   position: absolute;
   top: calc(100% + 0.5rem);
   left: 0;
-  width: 18rem;
+  width: min(46rem, calc(100vw - 2rem));
   max-height: 24rem;
   overflow: auto;
   padding: 0.9rem;
@@ -325,6 +325,64 @@ td {
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
   z-index: 30;
+}
+
+.editor-version-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 240px) minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.editor-version-list-column {
+  min-width: 0;
+}
+
+.editor-version-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.editor-version-preview-column {
+  min-width: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.editor-version-preview-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.editor-version-preview-frame {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 1rem;
+  background: linear-gradient(180deg, #f8fafc 0%, #edf4fb 100%);
+  padding: 0.6rem;
+  min-height: 16rem;
+}
+
+.editor-version-preview-canvas {
+  transform: scale(0.26);
+  transform-origin: top left;
+  width: calc(100% / 0.26);
+  pointer-events: none;
+  border-radius: 0.85rem;
+  overflow: hidden;
+}
+
+.editor-version-preview-empty {
+  min-height: 16rem;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: #64748b;
+  border: 1px dashed rgba(15, 23, 42, 0.16);
+  border-radius: 1rem;
+  background: rgba(248, 250, 252, 0.8);
+  padding: 1rem;
 }
 
 .editor-overflow-popover {
@@ -380,6 +438,11 @@ td {
   border-radius: 0.85rem;
   background: #fff;
   padding: 0.75rem 0.85rem;
+}
+
+.editor-version-item.active {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: #eff6ff;
 }
 
 .admin-pagination-row {
@@ -496,6 +559,17 @@ td {
 
 .editor-mobile-toolbar {
   display: none;
+}
+
+.billing-legal-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  font-size: 0.95rem;
+}
+
+.billing-legal-check input {
+  margin-top: 0.18rem;
 }
 
 .editor-mobile-overlay {
@@ -2478,6 +2552,15 @@ td {
     width: auto;
     max-height: min(70vh, 34rem);
     border-radius: 1.15rem;
+  }
+
+  .editor-version-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .editor-version-preview-canvas {
+    transform: scale(0.2);
+    width: calc(100% / 0.2);
   }
 
   .editor-alert {

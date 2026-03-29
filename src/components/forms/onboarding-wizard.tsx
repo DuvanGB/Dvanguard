@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { ModuleTour } from "@/components/guided/module-tour";
 import { SiteRenderer } from "@/components/runtime/site-renderer";
-import type { BusinessBriefDraft, MissingBriefField, OnboardingInputMode } from "@/lib/onboarding/types";
+import type { BusinessBriefDraft, HeroSuggestion, MissingBriefField, OnboardingInputMode } from "@/lib/onboarding/types";
 import type { SiteSpecV3 } from "@/lib/site-spec-v3";
 
 type RefineResponse = {
@@ -17,6 +17,8 @@ type RefineResponse = {
   provider?: "llm" | "heuristic";
   followUpQuestion?: string | null;
   missingFields: MissingBriefField[];
+  heroSuggestion?: HeroSuggestion | null;
+  heroConfidence?: number | null;
   error?: string;
   issues?: Array<{ message?: string }>;
 };
@@ -83,6 +85,8 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
   const [completenessScore, setCompletenessScore] = useState<number | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [missingFields, setMissingFields] = useState<MissingBriefField[]>([]);
+  const [heroSuggestion, setHeroSuggestion] = useState<HeroSuggestion | null>(null);
+  const [heroConfidence, setHeroConfidence] = useState<number | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [followUpQuestion, setFollowUpQuestion] = useState<string | null>(null);
   const [followUpInput, setFollowUpInput] = useState("");
@@ -120,6 +124,8 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
     setWhatsappMessageInput(bootstrap.briefDraft.whatsapp_message ?? "");
     setWarnings(["Estamos partiendo del contenido actual de tu sitio para proponer una nueva dirección visual sin perder tu información."]);
     setMissingFields([]);
+    setHeroSuggestion(buildHeroSuggestionClient(bootstrap.briefDraft));
+    setHeroConfidence(0.82);
     setFollowUpQuestion(null);
     setChatMessages([]);
     setStep(2);
@@ -308,6 +314,8 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
       setCompletenessScore(typeof data.completenessScore === "number" ? data.completenessScore : null);
       setWarnings(data.warnings ?? []);
       setMissingFields(data.missingFields ?? []);
+      setHeroSuggestion(data.heroSuggestion ?? null);
+      setHeroConfidence(typeof data.heroConfidence === "number" ? data.heroConfidence : null);
       setFollowUpQuestion(data.followUpQuestion ?? null);
       setChatMessages(data.followUpQuestion ? [{ role: "assistant", content: data.followUpQuestion }] : []);
       setFollowUpInput("");
@@ -343,6 +351,8 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
       setCompletenessScore(typeof data.completenessScore === "number" ? data.completenessScore : null);
       setWarnings(data.warnings ?? []);
       setMissingFields(data.missingFields ?? []);
+      setHeroSuggestion(data.heroSuggestion ?? null);
+      setHeroConfidence(typeof data.heroConfidence === "number" ? data.heroConfidence : null);
       setFollowUpQuestion(data.followUpQuestion ?? null);
       if (data.followUpQuestion) {
         setChatMessages((prev) => [...prev, { role: "assistant", content: data.followUpQuestion ?? "" }]);
@@ -603,6 +613,33 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
                 <small>Ya tenemos suficiente información para generar una propuesta sólida.</small>
               )}
 
+              <div className="card stack" style={{ gap: "0.5rem" }}>
+                <strong>Propuesta de hero</strong>
+                {heroConfidence !== null ? <small>Confianza del hero: {Math.round(heroConfidence * 100)}%</small> : null}
+                {heroSuggestion ? (
+                  <>
+                    <div className="stack" style={{ gap: "0.2rem" }}>
+                      <small className="muted">Headline</small>
+                      <strong>{heroSuggestion.headline}</strong>
+                    </div>
+                    <div className="stack" style={{ gap: "0.2rem" }}>
+                      <small className="muted">Subheadline</small>
+                      <p>{heroSuggestion.subheadline}</p>
+                    </div>
+                    <div className="stack" style={{ gap: "0.2rem" }}>
+                      <small className="muted">CTA</small>
+                      <strong>{heroSuggestion.primary_cta}</strong>
+                    </div>
+                    <div className="stack" style={{ gap: "0.2rem" }}>
+                      <small className="muted">Dirección</small>
+                      <p>{heroSuggestion.hero_direction}</p>
+                    </div>
+                  </>
+                ) : (
+                  <p className="muted">Todavía no hay suficiente claridad para proponerte un hero fuerte. Vamos a pedir una precisión adicional por chat.</p>
+                )}
+              </div>
+
               <div className="onboarding-chat-thread">
                 {chatMessages.length ? (
                   chatMessages.map((message, index) => (
@@ -831,6 +868,23 @@ function suggestWhatsappMessageClient(input: {
   }
   if (/agenda|cita|consulta|asesor/.test(lower)) return `Hola, vi la página de ${input.businessName} y quiero agendar una asesoría.`;
   return `Hola, vi la página de ${input.businessName} y quiero recibir más información.`;
+}
+
+function buildHeroSuggestionClient(brief: BusinessBriefDraft): HeroSuggestion {
+  const headline =
+    brief.business_type === "commerce_lite"
+      ? `Descubre ${brief.business_name}`
+      : `${brief.business_name}: ${brief.offer_summary.split(/[,.]/)[0] ?? "tu propuesta"}`;
+
+  return {
+    headline: headline.slice(0, 120),
+    subheadline: `${brief.offer_summary}${brief.offer_summary.endsWith(".") ? "" : "."} Pensado para ${brief.target_audience.toLowerCase()}.`.slice(0, 220),
+    primary_cta: brief.primary_cta,
+    hero_direction:
+      brief.business_type === "commerce_lite"
+        ? "Hero comercial con beneficio principal visible y CTA de contacto inmediato."
+        : "Hero de credibilidad con promesa clara, apoyo visual limpio y CTA principal único."
+  };
 }
 
 function getRecognitionCtor(): RecognitionCtor | null {

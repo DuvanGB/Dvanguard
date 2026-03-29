@@ -46,7 +46,7 @@ export default async function PricingPage() {
 
       <section className="card stack">
         <h2>Preguntas frecuentes</h2>
-        <p>El plan Pro se gestiona con Stripe, incluyendo suscripción, facturas y actualización de tarjeta dentro de DVanguard.</p>
+        <p>El plan Pro se gestiona con Wompi: tarjeta para renovación automática y PSE, Nequi o banco para compras manuales de tiempo Pro.</p>
       </section>
     </main>
   );

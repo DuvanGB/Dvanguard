@@ -30,6 +30,15 @@ export const businessBriefDraftSchema = z.object({
 export type BusinessBriefDraft = z.infer<typeof businessBriefDraftSchema>;
 export type MissingBriefField = z.infer<typeof missingBriefFieldSchema>;
 
+export const heroSuggestionSchema = z.object({
+  headline: z.string().min(6).max(120),
+  subheadline: z.string().min(12).max(220),
+  primary_cta: z.string().min(2).max(80),
+  hero_direction: z.string().min(8).max(160)
+});
+
+export type HeroSuggestion = z.infer<typeof heroSuggestionSchema>;
+
 export const refineResponseSchema = z.object({
   briefDraft: businessBriefDraftSchema,
   confidence: z.number().min(0).max(1),
@@ -37,7 +46,9 @@ export const refineResponseSchema = z.object({
   warnings: z.array(z.string()),
   provider: z.enum(["llm", "heuristic"]),
   followUpQuestion: z.string().max(240).nullable().optional(),
-  missingFields: z.array(missingBriefFieldSchema).default([])
+  missingFields: z.array(missingBriefFieldSchema).default([]),
+  heroSuggestion: heroSuggestionSchema.nullable().optional(),
+  heroConfidence: z.number().min(0).max(1).nullable().optional()
 });
 
 export type RefineResponse = z.infer<typeof refineResponseSchema>;

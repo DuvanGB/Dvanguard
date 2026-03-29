@@ -27,13 +27,14 @@ export async function listAdminUsers(params: Params) {
   }
 
   const profileIds = profiles.map((profile) => profile.id);
-  const [{ data: sites }, { data: plans }, { data: billingSubscriptions }] = await Promise.all([
+  const [{ data: sites }, { data: plans }, { data: billingMemberships }] = await Promise.all([
     admin.from("sites").select("id, owner_id, status").in("owner_id", profileIds),
     admin.from("user_plans").select("user_id, plan_code").in("user_id", profileIds),
     admin
-      .from("billing_subscriptions")
-      .select("user_id, status, billing_interval, access_state, current_period_end, cancel_at_period_end")
+      .from("billing_memberships")
+      .select("user_id, status, interval, access_state, ends_at, renews_automatically, rail, payment_method_kind, created_at")
       .in("user_id", profileIds)
+      .order("created_at", { ascending: false })
   ]);
 
   const siteIds = (sites ?? []).map((site) => site.id);
@@ -50,7 +51,12 @@ export async function listAdminUsers(params: Params) {
 
   const ownerBySite = new Map((sites ?? []).map((site) => [site.id, site.owner_id]));
   const planByUser = new Map((plans ?? []).map((plan) => [plan.user_id, plan.plan_code]));
-  const billingByUser = new Map((billingSubscriptions ?? []).map((item) => [item.user_id, item]));
+  const billingByUser = new Map<string, Record<string, unknown>>();
+  for (const item of billingMemberships ?? []) {
+    if (!billingByUser.has(item.user_id)) {
+      billingByUser.set(item.user_id, item);
+    }
+  }
   const latestActivityByOwner = new Map<string, string>();
 
   for (const event of events ?? []) {
@@ -64,17 +70,20 @@ export async function listAdminUsers(params: Params) {
 
   const items = profiles.map((profile) => {
     const ownerSites = sitesByOwner.get(profile.id) ?? [];
+    const billing = billingByUser.get(profile.id);
 
     return {
       id: profile.id,
       email: profile.email,
       role: profile.role,
       plan_code: planByUser.get(profile.id) ?? "free",
-      billing_status: billingByUser.get(profile.id)?.status ?? null,
-      billing_interval: billingByUser.get(profile.id)?.billing_interval ?? null,
-      billing_access_state: billingByUser.get(profile.id)?.access_state ?? null,
-      billing_current_period_end: billingByUser.get(profile.id)?.current_period_end ?? null,
-      billing_cancel_at_period_end: billingByUser.get(profile.id)?.cancel_at_period_end ?? false,
+      billing_status: typeof billing?.status === "string" ? billing.status : null,
+      billing_interval: typeof billing?.interval === "string" ? billing.interval : null,
+      billing_access_state: typeof billing?.access_state === "string" ? billing.access_state : null,
+      billing_current_period_end: typeof billing?.ends_at === "string" ? billing.ends_at : null,
+      billing_cancel_at_period_end: typeof billing?.renews_automatically === "boolean" ? !billing.renews_automatically : false,
+      billing_rail: typeof billing?.rail === "string" ? billing.rail : null,
+      billing_method: typeof billing?.payment_method_kind === "string" ? billing.payment_method_kind : null,
       created_at: profile.created_at,
       total_sites: ownerSites.length,
       published_sites: ownerSites.filter((site) => site.status === "published").length,

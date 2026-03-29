@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import { ModuleTour } from "@/components/guided/module-tour";
+import { SiteRenderer } from "@/components/runtime/site-renderer";
 import { SiteHeader, getSiteHeaderPreviewHeight } from "@/components/runtime/site-header";
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
 import { CANVAS_BASE_WIDTH, applyEditableThemePatch, deriveVisualThemeFromLegacy, fontFamilies, getEditableThemeSnapshot, normalizeSiteSpecV3, stabilizeSiteSpecForMobile } from "@/lib/site-spec-v3";
@@ -150,6 +151,9 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [versionsMessage, setVersionsMessage] = useState<string | null>(null);
   const [loadingVersionId, setLoadingVersionId] = useState<string | null>(null);
+  const [previewVersionId, setPreviewVersionId] = useState<string | null>(null);
+  const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
+  const [versionPreviewCache, setVersionPreviewCache] = useState<Record<string, EditorVersionDetail>>({});
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<"none" | "rail" | "inspector">("none");
   const [isMobileEditor, setIsMobileEditor] = useState(false);
@@ -956,10 +960,46 @@ function addSection(type: SiteSectionV3["type"]) {
 
     const normalizedVersion = normalizeSiteSpecV3(data.item.siteSpec);
     const nextSpec = normalizedVersion?.spec ?? data.item.siteSpec;
+    setVersionPreviewCache((current) => ({
+      ...current,
+      [versionId]: {
+        ...data.item!,
+        siteSpec: nextSpec
+      }
+    }));
     applySiteSpecUpdate(structuredClone(nextSpec), { history: "push" });
     setVersionsOpen(false);
     setMessage(`Versión ${data.item.version} cargada al editor`);
     setLoadingVersionId(null);
+  }
+
+  async function loadVersionPreview(versionId: string) {
+    if (versionPreviewCache[versionId]) {
+      setPreviewVersionId(versionId);
+      return;
+    }
+
+    setPreviewVersionId(versionId);
+    setPreviewLoadingId(versionId);
+    const response = await fetch(`/api/sites/${siteId}/versions?versionId=${encodeURIComponent(versionId)}`);
+    const data = (await response.json().catch(() => ({}))) as { error?: string; item?: EditorVersionDetail };
+
+    if (!response.ok || !data.item?.siteSpec) {
+      setVersionsMessage(data.error ?? "No se pudo previsualizar esa versión.");
+      setPreviewLoadingId(null);
+      return;
+    }
+
+    const normalizedVersion = normalizeSiteSpecV3(data.item.siteSpec);
+    const nextSpec = normalizedVersion?.spec ?? data.item.siteSpec;
+    setVersionPreviewCache((current) => ({
+      ...current,
+      [versionId]: {
+        ...data.item!,
+        siteSpec: nextSpec
+      }
+    }));
+    setPreviewLoadingId(null);
   }
 
   async function loadTemplates() {
@@ -1073,6 +1113,15 @@ function addSection(type: SiteSectionV3["type"]) {
   const canUndo = historyPast.length > 0;
   const canRedo = historyFuture.length > 0;
   const currentVersionBadge = versions.find((item) => item.isCurrent) ?? null;
+  const activeVersionPreview = previewVersionId ? versionPreviewCache[previewVersionId] ?? null : null;
+
+  useEffect(() => {
+    if (!versionsOpen || !versions.length) return;
+    const nextPreviewId = previewVersionId ?? versions[0]?.id ?? null;
+    if (nextPreviewId) {
+      void loadVersionPreview(nextPreviewId);
+    }
+  }, [versionsOpen, versions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeTemplateId = siteSpec.template.id;
   const fontOptions = fontFamilies;
@@ -1218,26 +1267,67 @@ function addSection(type: SiteSectionV3["type"]) {
               </button>
               {versionsOpen ? (
                 <div className="editor-version-popover">
-                  <div className="stack" style={{ gap: "0.35rem" }}>
-                    <strong>Historial de versiones</strong>
-                    {versionsLoading ? <small className="muted">Cargando versiones...</small> : null}
-                    {versionsMessage ? <small className="muted">{versionsMessage}</small> : null}
-                    {!versionsLoading && !versions.length ? <small className="muted">Aún no hay versiones guardadas.</small> : null}
-                    {versions.map((version) => (
-                      <button
-                        key={version.id}
-                        type="button"
-                        className="editor-version-item"
-                        disabled={loadingVersionId === version.id}
-                        onClick={() => void loadVersionIntoEditor(version.id)}
-                      >
-                        <span>
-                          <strong>Versión {version.version}</strong>
-                          <small>{labelVersionSource(version.source)}</small>
-                        </span>
-                        <small>{new Date(version.created_at).toLocaleString()}</small>
-                      </button>
-                    ))}
+                  <div className="editor-version-layout">
+                    <div className="stack editor-version-list-column" style={{ gap: "0.35rem" }}>
+                      <strong>Historial de versiones</strong>
+                      <small className="muted">Hover o toca una versión para ver preview. Tócala de nuevo para cargarla.</small>
+                      {versionsLoading ? <small className="muted">Cargando versiones...</small> : null}
+                      {versionsMessage ? <small className="muted">{versionsMessage}</small> : null}
+                      {!versionsLoading && !versions.length ? <small className="muted">Aún no hay versiones guardadas.</small> : null}
+                      <div className="editor-version-list">
+                        {versions.map((version) => (
+                          <button
+                            key={version.id}
+                            type="button"
+                            className={`editor-version-item ${previewVersionId === version.id ? "active" : ""}`}
+                            disabled={loadingVersionId === version.id}
+                            onMouseEnter={() => void loadVersionPreview(version.id)}
+                            onFocus={() => void loadVersionPreview(version.id)}
+                            onClick={() => {
+                              if (previewVersionId !== version.id) {
+                                setPreviewVersionId(version.id);
+                                void loadVersionPreview(version.id);
+                                return;
+                              }
+                              void loadVersionIntoEditor(version.id);
+                            }}
+                          >
+                            <span>
+                              <strong>Versión {version.version}</strong>
+                              <small>{labelVersionSource(version.source)}</small>
+                            </span>
+                            <small>{new Date(version.created_at).toLocaleString()}</small>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="editor-version-preview-column">
+                      {previewLoadingId && previewVersionId === previewLoadingId ? (
+                        <div className="editor-version-preview-empty">Cargando preview...</div>
+                      ) : activeVersionPreview ? (
+                        <>
+                          <div className="editor-version-preview-meta">
+                            <strong>v{activeVersionPreview.version}</strong>
+                            <small>{labelVersionSource(activeVersionPreview.source)}</small>
+                          </div>
+                          <div className="editor-version-preview-frame">
+                            <div className="editor-version-preview-canvas">
+                              <SiteRenderer spec={activeVersionPreview.siteSpec} viewport="desktop" enableCart={false} />
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            disabled={loadingVersionId === activeVersionPreview.id}
+                            onClick={() => void loadVersionIntoEditor(activeVersionPreview.id)}
+                          >
+                            {loadingVersionId === activeVersionPreview.id ? "Cargando..." : `Cargar versión ${activeVersionPreview.version}`}
+                          </button>
+                        </>
+                      ) : (
+                        <div className="editor-version-preview-empty">Selecciona una versión para verla aquí.</div>
+                      )}
+                    </div>
                   </div>
                 </div>
               ) : null}

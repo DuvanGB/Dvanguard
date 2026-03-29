@@ -1,99 +1,97 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type Stripe from "stripe";
 
 import { FREE_PLAN, PRO_PLAN, ensureUserPlan, getPlanLimits } from "@/lib/billing/plans";
 import type {
   BillingAccessState,
   BillingInterval,
+  BillingLegalAcceptanceStatus,
+  BillingPaymentMethodKind,
+  BillingPaymentRail,
   BillingSubscriptionStatus,
   BillingSummary,
   PlanCode
 } from "@/lib/billing/types";
-import { recordPlatformEvent } from "@/lib/platform-events";
 import {
-  extractCustomerInvoicePaymentMethod,
-  extractDefaultPaymentMethod,
-  getIntervalFromStripePrice,
-  getStripePriceId,
-  getStripeServerClient,
-  hasPaymentMethodDetails,
-  hasStripeManagedProStatus,
-  toDateIso
-} from "@/lib/billing/stripe";
+  buildWompiReference,
+  createWompiPaymentSource,
+  createWompiTransaction,
+  getManualAmountInCents,
+  getPlanAmountInCents,
+  getWompiAcceptanceTokens,
+  getWompiTransaction,
+  isWompiConfigured
+} from "@/lib/billing/wompi";
+import { env } from "@/lib/env";
+import { recordPlatformEvent } from "@/lib/platform-events";
 
 const GRACE_DAYS = 3;
 const ENFORCEMENT_LOOKBACK_DAYS = 30;
+const MANUAL_REMINDER_DAYS = 7;
 
-function getStripeInvoiceSubscriptionId(invoice: Stripe.Invoice) {
-  const raw = invoice as Stripe.Invoice & {
-    subscription?: string | Stripe.Subscription | null;
-  };
-
-  if (typeof raw.subscription === "string") return raw.subscription;
-  if (raw.subscription && typeof raw.subscription === "object") return raw.subscription.id;
-  return null;
-}
-
-function getStripeSubscriptionTimestamp(
-  subscription: Stripe.Subscription,
-  field: "current_period_start" | "current_period_end" | "canceled_at"
-) {
-  const raw = subscription as unknown as Record<string, unknown>;
-  const value = raw[field];
-  return typeof value === "number" ? value : null;
-}
+type JsonRecord = Record<string, unknown>;
 
 export type BillingSubscriptionRecord = {
+  id: string;
   user_id: string;
-  stripe_customer_id: string;
-  stripe_subscription_id: string;
-  stripe_price_id: string;
-  stripe_product_id: string | null;
+  provider: "wompi";
+  rail: BillingPaymentRail;
+  payment_method_kind: BillingPaymentMethodKind;
   plan_code: PlanCode;
-  billing_interval: BillingInterval;
+  billing_interval: BillingInterval | null;
+  term_length_days: number;
   status: BillingSubscriptionStatus;
   access_state: BillingAccessState;
   current_period_start: string | null;
   current_period_end: string | null;
   cancel_at_period_end: boolean;
-  canceled_at: string | null;
   grace_until: string | null;
-  pending_interval: BillingInterval | null;
-  default_payment_method_brand: string | null;
-  default_payment_method_last4: string | null;
-  default_payment_method_exp_month: number | null;
-  default_payment_method_exp_year: number | null;
-  latest_invoice_id: string | null;
-  last_event_id: string | null;
-  last_event_at: string | null;
-  metadata_json: Record<string, unknown> | null;
+  renews_automatically: boolean;
+  next_charge_at: string | null;
+  switch_to_card_at: string | null;
+  switch_to_card_payment_method_id: string | null;
+  reminder_sent_at: string | null;
+  payment_method_id: string | null;
+  payment_method_brand: string | null;
+  payment_method_last4: string | null;
+  payment_method_exp_month: number | null;
+  payment_method_exp_year: number | null;
+  metadata_json: JsonRecord;
 };
 
-export type BillingInvoiceRecord = {
-  stripe_invoice_id: string;
+export type BillingTransactionRecord = {
+  id: string;
+  reference: string;
+  external_transaction_id: string | null;
+  method: BillingPaymentMethodKind;
   status: string;
-  currency: string | null;
-  amount_due: number;
-  amount_paid: number;
-  hosted_invoice_url: string | null;
-  invoice_pdf: string | null;
-  period_start: string | null;
-  period_end: string | null;
-  due_date: string | null;
+  amount_in_cents: number;
+  currency: string;
+  checkout_url: string | null;
   paid_at: string | null;
+  approved_at: string | null;
   created_at: string;
+};
+
+type BillingPaymentMethodRecord = {
+  id: string;
+  user_id: string;
+  wompi_payment_source_id: number;
+  brand: string | null;
+  last4: string | null;
+  exp_month: number | null;
+  exp_year: number | null;
+  status: string;
+  is_default: boolean;
 };
 
 function normalizeBillingStatus(value: string | null | undefined): BillingSubscriptionStatus {
   if (
     value === "active" ||
-    value === "trialing" ||
-    value === "past_due" ||
-    value === "canceled" ||
-    value === "unpaid" ||
-    value === "incomplete" ||
-    value === "incomplete_expired" ||
-    value === "paused"
+    value === "payment_pending" ||
+    value === "pending_activation" ||
+    value === "payment_failed" ||
+    value === "expired" ||
+    value === "canceled"
   ) {
     return value;
   }
@@ -110,286 +108,306 @@ function getGraceUntilIso(now = new Date()) {
   return new Date(now.getTime() + GRACE_DAYS * 24 * 60 * 60 * 1000).toISOString();
 }
 
-async function resolveCustomerPaymentMethodDetails(
-  stripe: ReturnType<typeof getStripeServerClient>,
-  stripeCustomer: Stripe.Subscription["customer"] | string | null | undefined
-) {
-  if (!stripeCustomer) {
-    return { brand: null, last4: null, expMonth: null, expYear: null };
-  }
-
-  if (typeof stripeCustomer !== "string") {
-    return extractCustomerInvoicePaymentMethod(stripeCustomer);
-  }
-
-  const customer = await stripe.customers.retrieve(stripeCustomer, {
-    expand: ["invoice_settings.default_payment_method"]
-  });
-
-  return extractCustomerInvoicePaymentMethod(customer);
+function addDaysIso(startIso: string, days: number) {
+  const start = new Date(startIso);
+  return new Date(start.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
-export async function getBillingSubscriptionRecord(admin: SupabaseClient, userId: string): Promise<BillingSubscriptionRecord | null> {
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function daysForInterval(interval: BillingInterval) {
+  return interval === "year" ? 365 : 30;
+}
+
+function toCheckoutUrl(rawPayload: JsonRecord | null | undefined) {
+  if (!rawPayload) return null;
+  const paymentLink =
+    typeof rawPayload.payment_link === "string"
+      ? rawPayload.payment_link
+      : typeof rawPayload.redirect_url === "string"
+        ? rawPayload.redirect_url
+        : null;
+  if (paymentLink) return paymentLink;
+
+  const paymentMethod = rawPayload.payment_method;
+  if (!paymentMethod || typeof paymentMethod !== "object") return null;
+  const extra = (paymentMethod as JsonRecord).extra;
+  if (!extra || typeof extra !== "object") return null;
+  if (typeof (extra as JsonRecord).async_payment_url === "string") {
+    return String((extra as JsonRecord).async_payment_url);
+  }
+  if (typeof (extra as JsonRecord).redirect_url === "string") {
+    return String((extra as JsonRecord).redirect_url);
+  }
+  return null;
+}
+
+function wompiStatusToBillingStatus(status: string | null | undefined): BillingSubscriptionStatus {
+  if (status === "APPROVED") return "active";
+  if (status === "PENDING") return "payment_pending";
+  if (status === "DECLINED" || status === "ERROR" || status === "VOIDED") return "payment_failed";
+  return "payment_pending";
+}
+
+function mapInterval(value: unknown): BillingInterval | null {
+  return value === "year" ? "year" : value === "month" ? "month" : null;
+}
+
+function mapPaymentKind(value: unknown): BillingPaymentMethodKind {
+  if (value === "pse" || value === "nequi" || value === "bank_transfer" || value === "card") {
+    return value;
+  }
+  return "card";
+}
+
+function sanitizeMetadata(value: unknown): JsonRecord {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as JsonRecord;
+  }
+  return {};
+}
+
+async function requireBillingLegalAccepted(admin: SupabaseClient, userId: string) {
+  const legal = await getBillingLegalStatus(admin, userId);
+  if (!legal.accepted) {
+    throw new Error("Debes aceptar términos y privacidad antes de iniciar un pago.");
+  }
+  return legal;
+}
+
+async function getDefaultPaymentMethod(admin: SupabaseClient, userId: string): Promise<BillingPaymentMethodRecord | null> {
   const { data, error } = await admin
-    .from("billing_subscriptions")
-    .select(
-      [
-        "user_id",
-        "stripe_customer_id",
-        "stripe_subscription_id",
-        "stripe_price_id",
-        "stripe_product_id",
-        "plan_code",
-        "billing_interval",
-        "status",
-        "access_state",
-        "current_period_start",
-        "current_period_end",
-        "cancel_at_period_end",
-        "canceled_at",
-        "grace_until",
-        "pending_interval",
-        "default_payment_method_brand",
-        "default_payment_method_last4",
-        "default_payment_method_exp_month",
-        "default_payment_method_exp_year",
-        "latest_invoice_id",
-        "last_event_id",
-        "last_event_at",
-        "metadata_json"
-      ].join(", ")
-    )
+    .from("billing_payment_methods")
+    .select("id, user_id, wompi_payment_source_id, brand, last4, exp_month, exp_year, status, is_default")
     .eq("user_id", userId)
+    .eq("status", "available")
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to load billing subscription: ${error.message}`);
+    throw new Error(`Failed to load billing payment method: ${error.message}`);
   }
 
   if (!data) return null;
-  const row = data as unknown as Record<string, unknown>;
-
   return {
-    user_id: String(row.user_id ?? ""),
-    stripe_customer_id: String(row.stripe_customer_id ?? ""),
-    stripe_subscription_id: String(row.stripe_subscription_id ?? ""),
-    stripe_price_id: String(row.stripe_price_id ?? ""),
-    stripe_product_id: typeof row.stripe_product_id === "string" ? row.stripe_product_id : null,
-    plan_code: row.plan_code === PRO_PLAN ? PRO_PLAN : FREE_PLAN,
-    billing_interval: row.billing_interval === "year" ? "year" : "month",
-    status: normalizeBillingStatus(typeof row.status === "string" ? row.status : null),
-    access_state: normalizeAccessState(typeof row.access_state === "string" ? row.access_state : null),
-    current_period_start: typeof row.current_period_start === "string" ? row.current_period_start : null,
-    current_period_end: typeof row.current_period_end === "string" ? row.current_period_end : null,
-    cancel_at_period_end: Boolean(row.cancel_at_period_end),
-    canceled_at: typeof row.canceled_at === "string" ? row.canceled_at : null,
-    grace_until: typeof row.grace_until === "string" ? row.grace_until : null,
-    pending_interval: row.pending_interval === "year" ? "year" : row.pending_interval === "month" ? "month" : null,
-    default_payment_method_brand: typeof row.default_payment_method_brand === "string" ? row.default_payment_method_brand : null,
-    default_payment_method_last4: typeof row.default_payment_method_last4 === "string" ? row.default_payment_method_last4 : null,
-    default_payment_method_exp_month: typeof row.default_payment_method_exp_month === "number" ? row.default_payment_method_exp_month : null,
-    default_payment_method_exp_year: typeof row.default_payment_method_exp_year === "number" ? row.default_payment_method_exp_year : null,
-    latest_invoice_id: typeof row.latest_invoice_id === "string" ? row.latest_invoice_id : null,
-    last_event_id: typeof row.last_event_id === "string" ? row.last_event_id : null,
-    last_event_at: typeof row.last_event_at === "string" ? row.last_event_at : null,
-    metadata_json:
-      row.metadata_json && typeof row.metadata_json === "object" && !Array.isArray(row.metadata_json)
-        ? (row.metadata_json as Record<string, unknown>)
-        : {}
+    id: data.id,
+    user_id: data.user_id,
+    wompi_payment_source_id: Number(data.wompi_payment_source_id),
+    brand: data.brand ?? null,
+    last4: data.last4 ?? null,
+    exp_month: typeof data.exp_month === "number" ? data.exp_month : null,
+    exp_year: typeof data.exp_year === "number" ? data.exp_year : null,
+    status: data.status,
+    is_default: Boolean(data.is_default)
   };
 }
 
-export async function getBillingSubscriptionRecordByStripeId(
+async function persistPaymentMethod(
   admin: SupabaseClient,
-  stripeSubscriptionId: string
-): Promise<BillingSubscriptionRecord | null> {
+  input: {
+    userId: string;
+    wompiPaymentSourceId: number;
+    brand: string | null;
+    last4: string | null;
+    expMonth: number | null;
+    expYear: number | null;
+  }
+) {
+  await admin.from("billing_payment_methods").update({ is_default: false }).eq("user_id", input.userId);
+
   const { data, error } = await admin
-    .from("billing_subscriptions")
-    .select(
-      [
-        "user_id",
-        "stripe_customer_id",
-        "stripe_subscription_id",
-        "stripe_price_id",
-        "stripe_product_id",
-        "plan_code",
-        "billing_interval",
-        "status",
-        "access_state",
-        "current_period_start",
-        "current_period_end",
-        "cancel_at_period_end",
-        "canceled_at",
-        "grace_until",
-        "pending_interval",
-        "default_payment_method_brand",
-        "default_payment_method_last4",
-        "default_payment_method_exp_month",
-        "default_payment_method_exp_year",
-        "latest_invoice_id",
-        "last_event_id",
-        "last_event_at",
-        "metadata_json"
-      ].join(", ")
+    .from("billing_payment_methods")
+    .upsert(
+      {
+        user_id: input.userId,
+        provider: "wompi",
+        method_type: "card",
+        wompi_payment_source_id: input.wompiPaymentSourceId,
+        brand: input.brand,
+        last4: input.last4,
+        exp_month: input.expMonth,
+        exp_year: input.expYear,
+        status: "available",
+        is_default: true
+      },
+      { onConflict: "wompi_payment_source_id" }
     )
-    .eq("stripe_subscription_id", stripeSubscriptionId)
+    .select("id, user_id, wompi_payment_source_id, brand, last4, exp_month, exp_year, status, is_default")
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to persist payment method");
+  }
+
+  return {
+    id: data.id,
+    user_id: data.user_id,
+    wompi_payment_source_id: Number(data.wompi_payment_source_id),
+    brand: data.brand ?? null,
+    last4: data.last4 ?? null,
+    exp_month: typeof data.exp_month === "number" ? data.exp_month : null,
+    exp_year: typeof data.exp_year === "number" ? data.exp_year : null,
+    status: data.status,
+    is_default: Boolean(data.is_default)
+  } satisfies BillingPaymentMethodRecord;
+}
+
+export async function getBillingLegalStatus(admin: SupabaseClient, userId: string): Promise<BillingLegalAcceptanceStatus> {
+  const { data, error } = await admin
+    .from("billing_legal_acceptances")
+    .select("accepted_at, terms_version, privacy_version")
+    .eq("user_id", userId)
+    .eq("terms_version", env.billingTermsVersion)
+    .eq("privacy_version", env.billingPrivacyVersion)
+    .order("accepted_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to load billing subscription by Stripe id: ${error.message}`);
+    throw new Error(`Failed to load billing legal status: ${error.message}`);
   }
 
-  if (!data) return null;
-  const row = data as unknown as Record<string, unknown>;
-
   return {
-    user_id: String(row.user_id ?? ""),
-    stripe_customer_id: String(row.stripe_customer_id ?? ""),
-    stripe_subscription_id: String(row.stripe_subscription_id ?? ""),
-    stripe_price_id: String(row.stripe_price_id ?? ""),
-    stripe_product_id: typeof row.stripe_product_id === "string" ? row.stripe_product_id : null,
-    plan_code: row.plan_code === PRO_PLAN ? PRO_PLAN : FREE_PLAN,
-    billing_interval: row.billing_interval === "year" ? "year" : "month",
-    status: normalizeBillingStatus(typeof row.status === "string" ? row.status : null),
-    access_state: normalizeAccessState(typeof row.access_state === "string" ? row.access_state : null),
-    current_period_start: typeof row.current_period_start === "string" ? row.current_period_start : null,
-    current_period_end: typeof row.current_period_end === "string" ? row.current_period_end : null,
-    cancel_at_period_end: Boolean(row.cancel_at_period_end),
-    canceled_at: typeof row.canceled_at === "string" ? row.canceled_at : null,
-    grace_until: typeof row.grace_until === "string" ? row.grace_until : null,
-    pending_interval: row.pending_interval === "year" ? "year" : row.pending_interval === "month" ? "month" : null,
-    default_payment_method_brand: typeof row.default_payment_method_brand === "string" ? row.default_payment_method_brand : null,
-    default_payment_method_last4: typeof row.default_payment_method_last4 === "string" ? row.default_payment_method_last4 : null,
-    default_payment_method_exp_month: typeof row.default_payment_method_exp_month === "number" ? row.default_payment_method_exp_month : null,
-    default_payment_method_exp_year: typeof row.default_payment_method_exp_year === "number" ? row.default_payment_method_exp_year : null,
-    latest_invoice_id: typeof row.latest_invoice_id === "string" ? row.latest_invoice_id : null,
-    last_event_id: typeof row.last_event_id === "string" ? row.last_event_id : null,
-    last_event_at: typeof row.last_event_at === "string" ? row.last_event_at : null,
-    metadata_json:
-      row.metadata_json && typeof row.metadata_json === "object" && !Array.isArray(row.metadata_json)
-        ? (row.metadata_json as Record<string, unknown>)
-        : {}
+    accepted: Boolean(data),
+    acceptedAt: data?.accepted_at ?? null,
+    termsVersion: env.billingTermsVersion,
+    privacyVersion: env.billingPrivacyVersion
   };
 }
 
-export async function listBillingInvoices(admin: SupabaseClient, userId: string, limit = 12): Promise<BillingInvoiceRecord[]> {
+export async function acceptBillingLegalTerms(admin: SupabaseClient, userId: string) {
+  const timestamp = nowIso();
+  const { error } = await admin.from("billing_legal_acceptances").upsert(
+    {
+      user_id: userId,
+      terms_version: env.billingTermsVersion,
+      privacy_version: env.billingPrivacyVersion,
+      accepted_at: timestamp
+    },
+    { onConflict: "user_id,terms_version,privacy_version" }
+  );
+
+  if (error) {
+    throw new Error(`Failed to persist billing legal acceptance: ${error.message}`);
+  }
+
+  return {
+    accepted: true,
+    acceptedAt: timestamp,
+    termsVersion: env.billingTermsVersion,
+    privacyVersion: env.billingPrivacyVersion
+  } satisfies BillingLegalAcceptanceStatus;
+}
+
+export async function listBillingTransactions(admin: SupabaseClient, userId: string, limit = 20): Promise<BillingTransactionRecord[]> {
   const { data, error } = await admin
-    .from("billing_invoices")
-    .select(
-      "stripe_invoice_id, status, currency, amount_due, amount_paid, hosted_invoice_url, invoice_pdf, period_start, period_end, due_date, paid_at, created_at"
-    )
+    .from("billing_transactions")
+    .select("id, reference, external_transaction_id, method, status, amount_in_cents, currency, checkout_url, paid_at, approved_at, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit);
 
   if (error) {
-    throw new Error(`Failed to load billing invoices: ${error.message}`);
+    throw new Error(`Failed to load billing transactions: ${error.message}`);
   }
 
-  return (data ?? []).map((invoice) => ({
-    ...invoice,
-    amount_due: Number(invoice.amount_due ?? 0),
-    amount_paid: Number(invoice.amount_paid ?? 0)
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    reference: row.reference,
+    external_transaction_id: row.external_transaction_id ?? null,
+    method: mapPaymentKind(row.method),
+    status: row.status,
+    amount_in_cents: Number(row.amount_in_cents ?? 0),
+    currency: row.currency ?? "COP",
+    checkout_url: row.checkout_url ?? null,
+    paid_at: row.paid_at ?? null,
+    approved_at: row.approved_at ?? null,
+    created_at: row.created_at
   }));
 }
 
-export async function upsertBillingCustomer(admin: SupabaseClient, input: { userId: string; stripeCustomerId: string; email?: string | null }) {
-  const { error } = await admin.from("billing_customers").upsert(
-    {
-      user_id: input.userId,
-      stripe_customer_id: input.stripeCustomerId,
-      email: input.email ?? null
-    },
-    { onConflict: "user_id" }
-  );
-
-  if (error) {
-    throw new Error(`Failed to upsert billing customer: ${error.message}`);
-  }
+export async function listBillingInvoices(admin: SupabaseClient, userId: string, limit = 20) {
+  return listBillingTransactions(admin, userId, limit);
 }
 
-export async function getStripeCustomerIdForUser(admin: SupabaseClient, userId: string) {
-  const { data, error } = await admin.from("billing_customers").select("stripe_customer_id").eq("user_id", userId).maybeSingle();
+export async function getBillingSubscriptionRecord(admin: SupabaseClient, userId: string): Promise<BillingSubscriptionRecord | null> {
+  const { data, error } = await admin
+    .from("billing_memberships")
+    .select(
+      [
+        "id",
+        "user_id",
+        "provider",
+        "rail",
+        "payment_method_kind",
+        "plan_code",
+        "interval",
+        "term_length_days",
+        "status",
+        "access_state",
+        "starts_at",
+        "ends_at",
+        "renews_automatically",
+        "next_charge_at",
+        "switch_to_card_at",
+        "switch_to_card_payment_method_id",
+        "reminder_sent_at",
+        "grace_until",
+        "payment_method_id",
+        "metadata_json"
+      ].join(", ")
+    )
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to load Stripe customer: ${error.message}`);
+    throw new Error(`Failed to load billing membership: ${error.message}`);
   }
 
-  return data?.stripe_customer_id ?? null;
-}
+  if (!data) return null;
+  const row = data as unknown as Record<string, unknown>;
+  const paymentMethod = row.payment_method_id
+    ? await admin
+        .from("billing_payment_methods")
+        .select("brand, last4, exp_month, exp_year")
+        .eq("id", String(row.payment_method_id))
+        .maybeSingle()
+        .then(({ data: method }) => method ?? null)
+    : null;
 
-export async function resolveUserIdForStripeCustomer(
-  admin: SupabaseClient,
-  stripeCustomerId: string,
-  metadataUserId?: string | null
-) {
-  const hinted = metadataUserId?.trim();
-  if (hinted) {
-    await upsertBillingCustomer(admin, { userId: hinted, stripeCustomerId });
-    return hinted;
-  }
-
-  const { data, error } = await admin.from("billing_customers").select("user_id").eq("stripe_customer_id", stripeCustomerId).maybeSingle();
-  if (error) {
-    throw new Error(`Failed to resolve Stripe customer owner: ${error.message}`);
-  }
-
-  return data?.user_id ?? null;
-}
-
-export async function ensureStripeCustomer(admin: SupabaseClient, input: { userId: string; email: string | null }) {
-  const existing = await getStripeCustomerIdForUser(admin, input.userId);
-  if (existing) return existing;
-
-  const stripe = getStripeServerClient();
-  const customer = await stripe.customers.create({
-    email: input.email ?? undefined,
-    metadata: {
-      user_id: input.userId
-    }
-  });
-
-  await upsertBillingCustomer(admin, {
-    userId: input.userId,
-    stripeCustomerId: customer.id,
-    email: input.email
-  });
-
-  return customer.id;
-}
-
-export async function upsertBillingInvoiceFromStripe(
-  admin: SupabaseClient,
-  input: {
-    userId: string;
-    invoice: Stripe.Invoice;
-  }
-) {
-  const periodStart = input.invoice.lines.data[0]?.period?.start;
-  const periodEnd = input.invoice.lines.data[0]?.period?.end;
-
-  const { error } = await admin.from("billing_invoices").upsert(
-    {
-      user_id: input.userId,
-      stripe_invoice_id: input.invoice.id,
-      stripe_subscription_id: getStripeInvoiceSubscriptionId(input.invoice),
-      status: input.invoice.status ?? "draft",
-      currency: input.invoice.currency ?? null,
-      amount_due: input.invoice.amount_due ?? 0,
-      amount_paid: input.invoice.amount_paid ?? 0,
-      hosted_invoice_url: input.invoice.hosted_invoice_url ?? null,
-      invoice_pdf: input.invoice.invoice_pdf ?? null,
-      period_start: toDateIso(periodStart),
-      period_end: toDateIso(periodEnd),
-      due_date: toDateIso(input.invoice.due_date),
-      paid_at: input.invoice.status_transitions.paid_at ? toDateIso(input.invoice.status_transitions.paid_at) : null
-    },
-    { onConflict: "stripe_invoice_id" }
-  );
-
-  if (error) {
-    throw new Error(`Failed to upsert billing invoice: ${error.message}`);
-  }
+  return {
+    id: String(row.id ?? ""),
+    user_id: String(row.user_id ?? ""),
+    provider: "wompi",
+    rail: row.rail === "manual_term_purchase" ? "manual_term_purchase" : "card_subscription",
+    payment_method_kind: mapPaymentKind(row.payment_method_kind),
+    plan_code: row.plan_code === PRO_PLAN ? PRO_PLAN : FREE_PLAN,
+    billing_interval: mapInterval(row.interval),
+    term_length_days: Number(row.term_length_days ?? 30),
+    status: normalizeBillingStatus(typeof row.status === "string" ? row.status : null),
+    access_state: normalizeAccessState(typeof row.access_state === "string" ? row.access_state : null),
+    current_period_start: typeof row.starts_at === "string" ? row.starts_at : null,
+    current_period_end: typeof row.ends_at === "string" ? row.ends_at : null,
+    cancel_at_period_end: !Boolean(row.renews_automatically),
+    grace_until: typeof row.grace_until === "string" ? row.grace_until : null,
+    renews_automatically: Boolean(row.renews_automatically),
+    next_charge_at: typeof row.next_charge_at === "string" ? row.next_charge_at : null,
+    switch_to_card_at: typeof row.switch_to_card_at === "string" ? row.switch_to_card_at : null,
+    switch_to_card_payment_method_id: typeof row.switch_to_card_payment_method_id === "string" ? row.switch_to_card_payment_method_id : null,
+    reminder_sent_at: typeof row.reminder_sent_at === "string" ? row.reminder_sent_at : null,
+    payment_method_id: typeof row.payment_method_id === "string" ? row.payment_method_id : null,
+    payment_method_brand: typeof paymentMethod?.brand === "string" ? paymentMethod.brand : null,
+    payment_method_last4: typeof paymentMethod?.last4 === "string" ? paymentMethod.last4 : null,
+    payment_method_exp_month: typeof paymentMethod?.exp_month === "number" ? paymentMethod.exp_month : null,
+    payment_method_exp_year: typeof paymentMethod?.exp_year === "number" ? paymentMethod.exp_year : null,
+    metadata_json: sanitizeMetadata(row.metadata_json)
+  };
 }
 
 export async function assignPlanDirectly(admin: SupabaseClient, input: { userId: string; planCode: PlanCode; assignedBy?: string | null }) {
@@ -398,7 +416,7 @@ export async function assignPlanDirectly(admin: SupabaseClient, input: { userId:
       user_id: input.userId,
       plan_code: input.planCode,
       assigned_by: input.assignedBy ?? null,
-      assigned_at: new Date().toISOString()
+      assigned_at: nowIso()
     },
     { onConflict: "user_id" }
   );
@@ -491,28 +509,487 @@ export async function enforcePublishedSiteLimitForFreePlan(admin: SupabaseClient
   return { keptSiteId: winnerSiteId, unpublishedSiteIds: toUnpublish };
 }
 
-export async function applyBillingAccessRules(admin: SupabaseClient, userId: string) {
-  const subscription = await getBillingSubscriptionRecord(admin, userId);
+async function sendManualReminderEmail(input: { to: string; endsAt: string; method: BillingPaymentMethodKind }) {
+  if (!env.resendApiKey || !env.resendFromEmail) return false;
+
+  const label = input.method === "pse" ? "PSE" : input.method === "nequi" ? "Nequi" : "transferencia bancaria";
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${env.resendApiKey}`
+    },
+    body: JSON.stringify({
+      from: env.resendFromEmail,
+      to: [input.to],
+      subject: "Tu plan Pro está por vencer",
+      html: `<p>Tu acceso Pro pagado con ${label} vence el ${new Date(input.endsAt).toLocaleDateString("es-CO")}.</p><p>Puedes renovarlo desde tu panel o registrar una tarjeta para continuar sin interrupciones.</p>`
+    })
+  });
+
+  return response.ok;
+}
+
+async function maybeSendManualReminder(admin: SupabaseClient, membership: BillingSubscriptionRecord, email: string | null | undefined) {
+  if (!email || membership.rail !== "manual_term_purchase" || !membership.current_period_end || membership.reminder_sent_at) return;
+
+  const remainingMs = new Date(membership.current_period_end).getTime() - Date.now();
+  const remainingDays = remainingMs / (24 * 60 * 60 * 1000);
+  if (remainingDays > MANUAL_REMINDER_DAYS || remainingDays < 0) return;
+
+  const sent = await sendManualReminderEmail({
+    to: email,
+    endsAt: membership.current_period_end,
+    method: membership.payment_method_kind
+  }).catch(() => false);
+
+  if (sent) {
+    await admin.from("billing_memberships").update({ reminder_sent_at: nowIso() }).eq("id", membership.id);
+  }
+}
+
+async function recordTransaction(
+  admin: SupabaseClient,
+  input: {
+    userId: string;
+    membershipId?: string | null;
+    method: BillingPaymentMethodKind;
+    reference: string;
+    externalTransactionId?: string | null;
+    status: string;
+    amountInCents: number;
+    interval?: BillingInterval | null;
+    rawPayload: JsonRecord;
+    checkoutUrl?: string | null;
+    paidAt?: string | null;
+    approvedAt?: string | null;
+  }
+) {
+  const { data, error } = await admin
+    .from("billing_transactions")
+    .upsert(
+      {
+        user_id: input.userId,
+        provider: "wompi",
+        method: input.method,
+        membership_id: input.membershipId ?? null,
+        reference: input.reference,
+        external_transaction_id: input.externalTransactionId ?? null,
+        status: input.status,
+        amount_in_cents: input.amountInCents,
+        currency: "COP",
+        interval: input.interval ?? null,
+        checkout_url: input.checkoutUrl ?? null,
+        paid_at: input.paidAt ?? null,
+        approved_at: input.approvedAt ?? null,
+        raw_payload: input.rawPayload
+      },
+      { onConflict: "reference" }
+    )
+    .select("id")
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to record billing transaction");
+  }
+
+  return data.id as string;
+}
+
+async function createOrExtendMembershipForApprovedTransaction(
+  admin: SupabaseClient,
+  input: {
+    userId: string;
+    method: BillingPaymentMethodKind;
+    interval: BillingInterval | null;
+    rail: BillingPaymentRail;
+    paymentMethodId?: string | null;
+    transactionId?: string | null;
+    metadata?: JsonRecord;
+  }
+) {
+  const latest = await getBillingSubscriptionRecord(admin, input.userId);
+  const now = nowIso();
+  const durationDays = input.method === "card" ? daysForInterval(input.interval ?? "month") : 30;
+  const baseStart =
+    latest?.status === "active" && latest.current_period_end && new Date(latest.current_period_end).getTime() > Date.now()
+      ? latest.current_period_end
+      : now;
+  const nextEnd = addDaysIso(baseStart, durationDays);
+
+  if (latest) {
+    const { data, error } = await admin
+      .from("billing_memberships")
+      .update({
+        provider: "wompi",
+        rail: input.rail,
+        payment_method_kind: input.method,
+        plan_code: PRO_PLAN,
+        interval: input.interval,
+        term_length_days: durationDays,
+        status: "active",
+        starts_at: latest.status === "active" && latest.current_period_start ? latest.current_period_start : now,
+        ends_at: nextEnd,
+        renews_automatically: input.rail === "card_subscription",
+        payment_method_id: input.paymentMethodId ?? latest.payment_method_id,
+        next_charge_at: input.rail === "card_subscription" ? nextEnd : null,
+        switch_to_card_at: null,
+        switch_to_card_payment_method_id: null,
+        access_state: "within_limit",
+        grace_until: null,
+        metadata_json: { ...(latest.metadata_json ?? {}), ...(input.metadata ?? {}), latestTransactionId: input.transactionId ?? null }
+      })
+      .eq("id", latest.id)
+      .select("id")
+      .maybeSingle();
+
+    if (error || !data) {
+      throw new Error(error?.message ?? "Failed to update billing membership");
+    }
+
+    return latest.id;
+  }
+
+  const { data, error } = await admin
+    .from("billing_memberships")
+    .insert({
+      user_id: input.userId,
+      provider: "wompi",
+      rail: input.rail,
+      payment_method_kind: input.method,
+      plan_code: PRO_PLAN,
+      interval: input.interval,
+      term_length_days: durationDays,
+      status: "active",
+      starts_at: now,
+      ends_at: nextEnd,
+      renews_automatically: input.rail === "card_subscription",
+      payment_method_id: input.paymentMethodId ?? null,
+      next_charge_at: input.rail === "card_subscription" ? nextEnd : null,
+      metadata_json: { ...(input.metadata ?? {}), latestTransactionId: input.transactionId ?? null }
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to create billing membership");
+  }
+
+  return data.id as string;
+}
+
+async function markMembershipPaymentPending(
+  admin: SupabaseClient,
+  input: {
+    userId: string;
+    rail: BillingPaymentRail;
+    method: BillingPaymentMethodKind;
+    interval: BillingInterval | null;
+    paymentMethodId?: string | null;
+    metadata?: JsonRecord;
+  }
+) {
+  const existing = await getBillingSubscriptionRecord(admin, input.userId);
+  if (existing) {
+    await admin
+      .from("billing_memberships")
+      .update({
+        rail: input.rail,
+        payment_method_kind: input.method,
+        interval: input.interval,
+        payment_method_id: input.paymentMethodId ?? existing.payment_method_id,
+        renews_automatically: input.rail === "card_subscription",
+        status: "payment_pending",
+        metadata_json: { ...(existing.metadata_json ?? {}), ...(input.metadata ?? {}) }
+      })
+      .eq("id", existing.id);
+    return existing.id;
+  }
+
+  const { data, error } = await admin
+    .from("billing_memberships")
+    .insert({
+      user_id: input.userId,
+      provider: "wompi",
+      rail: input.rail,
+      payment_method_kind: input.method,
+      plan_code: PRO_PLAN,
+      interval: input.interval,
+      term_length_days: input.method === "card" ? daysForInterval(input.interval ?? "month") : 30,
+      status: "payment_pending",
+      renews_automatically: input.rail === "card_subscription",
+      payment_method_id: input.paymentMethodId ?? null,
+      metadata_json: input.metadata ?? {}
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to create pending billing membership");
+  }
+
+  return data.id as string;
+}
+
+function getCardPaymentMethodDetails(paymentSourceData: JsonRecord | undefined) {
+  const publicData = paymentSourceData?.public_data;
+  if (!publicData || typeof publicData !== "object") {
+    return { brand: null, last4: null, expMonth: null, expYear: null };
+  }
+
+  return {
+    brand: typeof (publicData as JsonRecord).brand === "string" ? String((publicData as JsonRecord).brand) : null,
+    last4: typeof (publicData as JsonRecord).last_four === "string" ? String((publicData as JsonRecord).last_four) : null,
+    expMonth: typeof (publicData as JsonRecord).exp_month === "number" ? Number((publicData as JsonRecord).exp_month) : null,
+    expYear: typeof (publicData as JsonRecord).exp_year === "number" ? Number((publicData as JsonRecord).exp_year) : null
+  };
+}
+
+function parseApprovedAt(rawPayload: JsonRecord) {
+  if (typeof rawPayload.finalized_at === "string") return rawPayload.finalized_at;
+  if (typeof rawPayload.created_at === "string") return rawPayload.created_at;
+  return nowIso();
+}
+
+async function createStoredCardCharge(admin: SupabaseClient, input: { userId: string; interval: BillingInterval; paymentMethod: BillingPaymentMethodRecord }) {
+  const acceptance = await getWompiAcceptanceTokens();
+  if (!acceptance.acceptanceToken || !acceptance.personalDataAuthToken) {
+    throw new Error("No se pudieron obtener los tokens de aceptación de Wompi.");
+  }
+
+  const reference = buildWompiReference("pro-card", input.userId);
+  const amountInCents = getPlanAmountInCents(input.interval);
+  const rawTx = await createWompiTransaction({
+    reference,
+    amountInCents,
+    customerEmail: "",
+    acceptanceToken: acceptance.acceptanceToken,
+    acceptPersonalAuth: acceptance.personalDataAuthToken,
+    paymentMethod: {
+      installments: 1
+    },
+    paymentSourceId: input.paymentMethod.wompi_payment_source_id
+  });
+
+  return {
+    reference,
+    amountInCents,
+    rawTx
+  };
+}
+
+async function renewCardMembershipIfDue(admin: SupabaseClient, membership: BillingSubscriptionRecord) {
+  if (
+    membership.rail !== "card_subscription" ||
+    !membership.renews_automatically ||
+    !membership.payment_method_id ||
+    !membership.current_period_end ||
+    new Date(membership.current_period_end).getTime() > Date.now()
+  ) {
+    return;
+  }
+
+  const paymentMethod = await getDefaultPaymentMethod(admin, membership.user_id);
+  if (!paymentMethod) {
+    await admin.from("billing_memberships").update({ status: "payment_failed" }).eq("id", membership.id);
+    return;
+  }
+
+  const { data: profile } = await admin.from("profiles").select("email").eq("id", membership.user_id).maybeSingle();
+  const acceptance = await getWompiAcceptanceTokens();
+  if (!acceptance.acceptanceToken || !acceptance.personalDataAuthToken) return;
+
+  const reference = buildWompiReference("renew-card", membership.user_id);
+  const amountInCents = getPlanAmountInCents(membership.billing_interval ?? "month");
+  const rawTx = await createWompiTransaction({
+    reference,
+    amountInCents,
+    customerEmail: profile?.email ?? "",
+    acceptanceToken: acceptance.acceptanceToken,
+    acceptPersonalAuth: acceptance.personalDataAuthToken,
+    paymentMethod: { installments: 1 },
+    paymentSourceId: paymentMethod.wompi_payment_source_id
+  }).catch(() => null);
+
+  if (!rawTx) {
+    await admin.from("billing_memberships").update({ status: "payment_failed" }).eq("id", membership.id);
+    return;
+  }
+
+  const rawStatus = typeof rawTx.status === "string" ? rawTx.status : "PENDING";
+  const transactionId = await recordTransaction(admin, {
+    userId: membership.user_id,
+    membershipId: membership.id,
+    method: "card",
+    reference,
+    externalTransactionId: typeof rawTx.id === "string" ? rawTx.id : null,
+    status: rawStatus,
+    amountInCents,
+    interval: membership.billing_interval,
+    rawPayload: rawTx,
+    checkoutUrl: toCheckoutUrl(rawTx),
+    approvedAt: rawStatus === "APPROVED" ? parseApprovedAt(rawTx) : null,
+    paidAt: rawStatus === "APPROVED" ? parseApprovedAt(rawTx) : null
+  });
+
+  if (rawStatus === "APPROVED") {
+    await createOrExtendMembershipForApprovedTransaction(admin, {
+      userId: membership.user_id,
+      method: "card",
+      interval: membership.billing_interval ?? "month",
+      rail: "card_subscription",
+      paymentMethodId: paymentMethod.id,
+      transactionId
+    });
+  } else {
+    await admin
+      .from("billing_memberships")
+      .update({ status: wompiStatusToBillingStatus(rawStatus), next_charge_at: membership.current_period_end })
+      .eq("id", membership.id);
+  }
+}
+
+async function maybeActivateScheduledCardSwitch(admin: SupabaseClient, membership: BillingSubscriptionRecord) {
+  if (
+    !membership.switch_to_card_at ||
+    !membership.switch_to_card_payment_method_id ||
+    new Date(membership.switch_to_card_at).getTime() > Date.now()
+  ) {
+    return;
+  }
+
+  const { data: paymentMethodRow, error } = await admin
+    .from("billing_payment_methods")
+    .select("id, user_id, wompi_payment_source_id, brand, last4, exp_month, exp_year, status, is_default")
+    .eq("id", membership.switch_to_card_payment_method_id)
+    .maybeSingle();
+
+  if (error || !paymentMethodRow) {
+    return;
+  }
+
+  const paymentMethod: BillingPaymentMethodRecord = {
+    id: paymentMethodRow.id,
+    user_id: paymentMethodRow.user_id,
+    wompi_payment_source_id: Number(paymentMethodRow.wompi_payment_source_id),
+    brand: paymentMethodRow.brand ?? null,
+    last4: paymentMethodRow.last4 ?? null,
+    exp_month: typeof paymentMethodRow.exp_month === "number" ? paymentMethodRow.exp_month : null,
+    exp_year: typeof paymentMethodRow.exp_year === "number" ? paymentMethodRow.exp_year : null,
+    status: paymentMethodRow.status,
+    is_default: Boolean(paymentMethodRow.is_default)
+  };
+
+  const { data: profile } = await admin.from("profiles").select("email").eq("id", membership.user_id).maybeSingle();
+  const acceptance = await getWompiAcceptanceTokens();
+  if (!acceptance.acceptanceToken || !acceptance.personalDataAuthToken) return;
+
+  const reference = buildWompiReference("switch-card", membership.user_id);
+  const amountInCents = getPlanAmountInCents("month");
+  const rawTx = await createWompiTransaction({
+    reference,
+    amountInCents,
+    customerEmail: profile?.email ?? "",
+    acceptanceToken: acceptance.acceptanceToken,
+    acceptPersonalAuth: acceptance.personalDataAuthToken,
+    paymentMethod: { installments: 1 },
+    paymentSourceId: paymentMethod.wompi_payment_source_id
+  }).catch(() => null);
+
+  if (!rawTx) {
+    await admin.from("billing_memberships").update({ status: "pending_activation" }).eq("id", membership.id);
+    return;
+  }
+
+  const rawStatus = typeof rawTx.status === "string" ? rawTx.status : "PENDING";
+  const txId = await recordTransaction(admin, {
+    userId: membership.user_id,
+    membershipId: membership.id,
+    method: "card",
+    reference,
+    externalTransactionId: typeof rawTx.id === "string" ? rawTx.id : null,
+    status: rawStatus,
+    amountInCents,
+    interval: "month",
+    rawPayload: rawTx,
+    checkoutUrl: toCheckoutUrl(rawTx),
+    approvedAt: rawStatus === "APPROVED" ? parseApprovedAt(rawTx) : null,
+    paidAt: rawStatus === "APPROVED" ? parseApprovedAt(rawTx) : null
+  });
+
+  if (rawStatus === "APPROVED") {
+    await createOrExtendMembershipForApprovedTransaction(admin, {
+      userId: membership.user_id,
+      method: "card",
+      interval: "month",
+      rail: "card_subscription",
+      paymentMethodId: paymentMethod.id,
+      transactionId: txId
+    });
+  } else {
+    await admin
+      .from("billing_memberships")
+      .update({ status: rawStatus === "PENDING" ? "pending_activation" : "payment_failed" })
+      .eq("id", membership.id);
+  }
+}
+
+async function runBillingAutomation(admin: SupabaseClient, userId: string, email?: string | null) {
+  const membership = await getBillingSubscriptionRecord(admin, userId);
+  if (!membership) return null;
+
+  if (membership.rail === "manual_term_purchase") {
+    await maybeSendManualReminder(admin, membership, email);
+  }
+
+  if (membership.status === "active" && membership.current_period_end && new Date(membership.current_period_end).getTime() <= Date.now()) {
+    if (membership.rail === "card_subscription" && membership.renews_automatically) {
+      await renewCardMembershipIfDue(admin, membership);
+    } else {
+      await admin.from("billing_memberships").update({ status: "expired", renews_automatically: false }).eq("id", membership.id);
+    }
+  }
+
+  await maybeActivateScheduledCardSwitch(admin, membership);
+  return getBillingSubscriptionRecord(admin, userId);
+}
+
+export async function applyBillingAccessRules(admin: SupabaseClient, userId: string, email?: string | null) {
+  let subscription = await runBillingAutomation(admin, userId, email);
   if (!subscription) {
+    const currentPlan = await ensureUserPlan(admin, userId);
+    if (currentPlan.plan_code === PRO_PLAN) {
+      return {
+        subscription: null,
+        accessState: "within_limit" as BillingAccessState
+      };
+    }
+
+    await assignPlanDirectly(admin, { userId, planCode: FREE_PLAN });
     return {
       subscription: null,
       accessState: "within_limit" as BillingAccessState
     };
   }
 
-  const hasProAccess = hasStripeManagedProStatus(subscription.status);
+  const now = Date.now();
+  const hasProAccess =
+    subscription.status === "active" &&
+    Boolean(subscription.current_period_end) &&
+    new Date(subscription.current_period_end ?? 0).getTime() > now;
 
   if (hasProAccess) {
     await assignPlanDirectly(admin, { userId, planCode: PRO_PLAN });
 
     if (subscription.access_state !== "within_limit" || subscription.grace_until) {
-      await admin
-        .from("billing_subscriptions")
-        .update({ access_state: "within_limit", grace_until: null })
-        .eq("user_id", userId);
+      await admin.from("billing_memberships").update({ access_state: "within_limit", grace_until: null }).eq("id", subscription.id);
+      subscription = { ...subscription, access_state: "within_limit", grace_until: null };
     }
 
-    return { subscription: { ...subscription, access_state: "within_limit", grace_until: null }, accessState: "within_limit" as BillingAccessState };
+    return {
+      subscription,
+      accessState: "within_limit" as BillingAccessState
+    };
   }
 
   await assignPlanDirectly(admin, { userId, planCode: FREE_PLAN });
@@ -530,27 +1007,20 @@ export async function applyBillingAccessRules(admin: SupabaseClient, userId: str
   }
 
   const publishedSites = publishedCount ?? 0;
-
   if (publishedSites <= freeLimits.maxPublishedSites) {
     if (subscription.access_state !== "within_limit" || subscription.grace_until) {
-      await admin
-        .from("billing_subscriptions")
-        .update({ access_state: "within_limit", grace_until: null })
-        .eq("user_id", userId);
+      await admin.from("billing_memberships").update({ access_state: "within_limit", grace_until: null }).eq("id", subscription.id);
+      subscription = { ...subscription, access_state: "within_limit", grace_until: null };
     }
 
-    return { subscription: { ...subscription, access_state: "within_limit", grace_until: null }, accessState: "within_limit" as BillingAccessState };
+    return { subscription, accessState: "within_limit" as BillingAccessState };
   }
 
-  const now = new Date();
   const graceUntil = subscription.grace_until ? new Date(subscription.grace_until) : null;
-  if (!graceUntil || Number.isNaN(graceUntil.getTime()) || graceUntil <= now) {
+  if (!graceUntil || Number.isNaN(graceUntil.getTime()) || graceUntil <= new Date()) {
     if (!graceUntil) {
-      const nextGrace = getGraceUntilIso(now);
-      await admin
-        .from("billing_subscriptions")
-        .update({ access_state: "grace_period", grace_until: nextGrace })
-        .eq("user_id", userId);
+      const nextGrace = getGraceUntilIso();
+      await admin.from("billing_memberships").update({ access_state: "grace_period", grace_until: nextGrace }).eq("id", subscription.id);
 
       await recordPlatformEvent(admin, {
         eventType: "billing.grace_started",
@@ -569,10 +1039,7 @@ export async function applyBillingAccessRules(admin: SupabaseClient, userId: str
     }
 
     const enforcement = await enforcePublishedSiteLimitForFreePlan(admin, userId);
-    await admin
-      .from("billing_subscriptions")
-      .update({ access_state: "enforcement_applied", grace_until: null })
-      .eq("user_id", userId);
+    await admin.from("billing_memberships").update({ access_state: "enforcement_applied", grace_until: null }).eq("id", subscription.id);
 
     await recordPlatformEvent(admin, {
       eventType: "billing.enforcement_applied",
@@ -591,418 +1058,409 @@ export async function applyBillingAccessRules(admin: SupabaseClient, userId: str
   }
 
   if (subscription.access_state !== "grace_period") {
-    await admin
-      .from("billing_subscriptions")
-      .update({ access_state: "grace_period" })
-      .eq("user_id", userId);
-  }
-
-  return { subscription: { ...subscription, access_state: "grace_period" }, accessState: "grace_period" as BillingAccessState };
-}
-
-export async function syncSubscriptionFromStripe(
-  admin: SupabaseClient,
-  subscription: Stripe.Subscription,
-  options?: { eventId?: string | null }
-) {
-  const stripe = getStripeServerClient();
-  const stripeCustomerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id;
-  const metadataUserId = subscription.metadata?.user_id ?? null;
-  const userId = await resolveUserIdForStripeCustomer(admin, stripeCustomerId, metadataUserId);
-
-  if (!userId) {
-    throw new Error(`Could not resolve local user for Stripe customer ${stripeCustomerId}`);
-  }
-
-  const price = subscription.items.data[0]?.price;
-  const subscriptionPaymentMethod = extractDefaultPaymentMethod(subscription.default_payment_method);
-  const customerPaymentMethod = hasPaymentMethodDetails(subscriptionPaymentMethod)
-    ? subscriptionPaymentMethod
-    : await resolveCustomerPaymentMethodDetails(stripe, subscription.customer);
-  const paymentMethod = hasPaymentMethodDetails(subscriptionPaymentMethod) ? subscriptionPaymentMethod : customerPaymentMethod;
-  const interval = getIntervalFromStripePrice(price?.id) ?? (price?.recurring?.interval === "year" ? "year" : "month");
-  const metadataJson = {
-    ...subscription.metadata,
-    pending_interval: subscription.metadata?.dvanguard_pending_interval ?? null
-  };
-  const customerEmail =
-    typeof subscription.customer === "object" && !("deleted" in subscription.customer) ? subscription.customer.email ?? null : null;
-
-  await upsertBillingCustomer(admin, {
-    userId,
-    stripeCustomerId,
-    email: customerEmail
-  });
-
-  const { error } = await admin.from("billing_subscriptions").upsert(
-    {
-      user_id: userId,
-      stripe_customer_id: stripeCustomerId,
-      stripe_subscription_id: subscription.id,
-      stripe_price_id: price?.id ?? "",
-      stripe_product_id: typeof price?.product === "string" ? price.product : price?.product?.id ?? null,
-      plan_code: PRO_PLAN,
-      billing_interval: interval,
-      status: normalizeBillingStatus(subscription.status),
-      current_period_start: toDateIso(getStripeSubscriptionTimestamp(subscription, "current_period_start")),
-      current_period_end: toDateIso(getStripeSubscriptionTimestamp(subscription, "current_period_end")),
-      cancel_at_period_end: subscription.cancel_at_period_end,
-      canceled_at: toDateIso(getStripeSubscriptionTimestamp(subscription, "canceled_at")),
-      pending_interval:
-        subscription.metadata?.dvanguard_pending_interval === "year"
-          ? "year"
-          : subscription.metadata?.dvanguard_pending_interval === "month"
-            ? "month"
-            : null,
-      default_payment_method_brand: paymentMethod.brand,
-      default_payment_method_last4: paymentMethod.last4,
-      default_payment_method_exp_month: paymentMethod.expMonth,
-      default_payment_method_exp_year: paymentMethod.expYear,
-      latest_invoice_id:
-        typeof subscription.latest_invoice === "string"
-          ? subscription.latest_invoice
-          : subscription.latest_invoice?.id ?? null,
-      last_event_id: options?.eventId ?? null,
-      last_event_at: new Date().toISOString(),
-      metadata_json: metadataJson
-    },
-    { onConflict: "user_id" }
-  );
-
-  if (error) {
-    throw new Error(`Failed to upsert billing subscription: ${error.message}`);
-  }
-
-  await applyBillingAccessRules(admin, userId);
-
-  return userId;
-}
-
-export async function getBillingSummary(admin: SupabaseClient, userId: string): Promise<BillingSummary> {
-  await ensureUserPlan(admin, userId);
-  const { subscription } = await applyBillingAccessRules(admin, userId);
-  const { data: userPlan, error: planError } = await admin.from("user_plans").select("plan_code").eq("user_id", userId).maybeSingle();
-
-  if (planError) {
-    throw new Error(`Failed to load user plan: ${planError.message}`);
-  }
-
-  const customerId = await getStripeCustomerIdForUser(admin, userId);
-  const plan = userPlan?.plan_code === PRO_PLAN ? PRO_PLAN : FREE_PLAN;
-  let paymentMethod = subscription
-    ? {
-        brand: subscription.default_payment_method_brand,
-        last4: subscription.default_payment_method_last4,
-        expMonth: subscription.default_payment_method_exp_month,
-        expYear: subscription.default_payment_method_exp_year
-      }
-    : null;
-
-  if (customerId && (!paymentMethod || !paymentMethod.last4)) {
-    try {
-      const stripe = getStripeServerClient();
-      const customer = await stripe.customers.retrieve(customerId, {
-        expand: ["invoice_settings.default_payment_method"]
-      });
-      const fallbackPaymentMethod = extractCustomerInvoicePaymentMethod(customer);
-
-      if (hasPaymentMethodDetails(fallbackPaymentMethod)) {
-        paymentMethod = fallbackPaymentMethod;
-        if (subscription) {
-          await admin
-            .from("billing_subscriptions")
-            .update({
-              default_payment_method_brand: fallbackPaymentMethod.brand,
-              default_payment_method_last4: fallbackPaymentMethod.last4,
-              default_payment_method_exp_month: fallbackPaymentMethod.expMonth,
-              default_payment_method_exp_year: fallbackPaymentMethod.expYear,
-              last_event_at: new Date().toISOString()
-            })
-            .eq("user_id", userId);
-        }
-      }
-    } catch {
-      // Billing page should remain usable even if Stripe fallback lookup fails.
-    }
+    await admin.from("billing_memberships").update({ access_state: "grace_period" }).eq("id", subscription.id);
   }
 
   return {
-    plan,
-    isStripeManaged: Boolean(subscription),
-    interval: subscription?.billing_interval ?? null,
-    subscriptionStatus: subscription?.status ?? "not_started",
-    cancelAtPeriodEnd: subscription?.cancel_at_period_end ?? false,
-    currentPeriodStart: subscription?.current_period_start ?? null,
-    currentPeriodEnd: subscription?.current_period_end ?? null,
-    accessState: normalizeAccessState(subscription?.access_state),
-    graceUntil: subscription?.grace_until ?? null,
-    pendingInterval:
-      subscription?.pending_interval === "year" ? "year" : subscription?.pending_interval === "month" ? "month" : null,
-    customerId,
-    checkoutEnabled: true,
-    paymentMethod
+    subscription: { ...subscription, access_state: "grace_period" },
+    accessState: "grace_period" as BillingAccessState
   };
 }
 
-export async function createCheckoutSession(admin: SupabaseClient, input: {
-  userId: string;
-  email: string | null;
-  interval: BillingInterval;
-  successUrl: string;
-  cancelUrl: string;
-}) {
-  const stripe = getStripeServerClient();
-  const customerId = await ensureStripeCustomer(admin, { userId: input.userId, email: input.email });
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    customer: customerId,
-    success_url: input.successUrl,
-    cancel_url: input.cancelUrl,
-    line_items: [
-      {
-        price: getStripePriceId(input.interval),
-        quantity: 1
-      }
-    ],
-    allow_promotion_codes: true,
-    metadata: {
-      user_id: input.userId,
-      plan_code: PRO_PLAN,
-      billing_interval: input.interval
+export async function getBillingSummary(admin: SupabaseClient, userId: string, email?: string | null): Promise<BillingSummary> {
+  await ensureUserPlan(admin, userId);
+  const [legal, acceptance, applied] = await Promise.all([
+    getBillingLegalStatus(admin, userId),
+    isWompiConfigured()
+      ? getWompiAcceptanceTokens().catch(() => ({
+          acceptanceToken: null,
+          personalDataAuthToken: null,
+          termsPermalink: null,
+          personalDataPermalink: null
+        }))
+      : Promise.resolve({
+          acceptanceToken: null,
+          personalDataAuthToken: null,
+          termsPermalink: null,
+          personalDataPermalink: null
+        }),
+    applyBillingAccessRules(admin, userId, email)
+  ]);
+
+  const plan = (await ensureUserPlan(admin, userId)).plan_code as PlanCode;
+  const subscription = applied.subscription;
+
+  return {
+    plan,
+    provider: subscription ? "wompi" : null,
+    rail: subscription?.rail ?? null,
+    paymentMethodKind: subscription?.payment_method_kind ?? null,
+    interval: subscription?.billing_interval ?? null,
+    subscriptionStatus: subscription?.status ?? "not_started",
+    renewsAutomatically: subscription?.renews_automatically ?? false,
+    currentPeriodStart: subscription?.current_period_start ?? null,
+    currentPeriodEnd: subscription?.current_period_end ?? null,
+    accessState: normalizeAccessState(subscription?.access_state ?? null),
+    graceUntil: subscription?.grace_until ?? null,
+    checkoutEnabled: isWompiConfigured(),
+    switchToCardAt: subscription?.switch_to_card_at ?? null,
+    legal,
+    wompiAcceptance: {
+      termsPermalink: acceptance.termsPermalink,
+      personalDataPermalink: acceptance.personalDataPermalink
     },
-    subscription_data: {
-      metadata: {
-        user_id: input.userId,
-        plan_code: PRO_PLAN,
-        billing_interval: input.interval
-      }
-    }
-  });
-
-  await recordPlatformEvent(admin, {
-    eventType: "billing.checkout_started",
-    userId: input.userId,
-    payload: { interval: input.interval, sessionId: session.id }
-  }).catch(() => undefined);
-
-  return session;
+    paymentMethod: subscription?.payment_method_last4
+      ? {
+          brand: subscription.payment_method_brand,
+          last4: subscription.payment_method_last4,
+          expMonth: subscription.payment_method_exp_month,
+          expYear: subscription.payment_method_exp_year
+        }
+      : null
+  };
 }
 
-export async function createSetupIntent(admin: SupabaseClient, input: { userId: string; email: string | null }) {
-  const stripe = getStripeServerClient();
-  const customerId = await ensureStripeCustomer(admin, { userId: input.userId, email: input.email });
-
-  return stripe.setupIntents.create({
-    customer: customerId,
-    usage: "off_session",
-    payment_method_types: ["card"],
-    metadata: {
-      user_id: input.userId
-    }
-  });
-}
-
-export async function setDefaultPaymentMethod(admin: SupabaseClient, input: { userId: string; paymentMethodId: string }) {
-  const stripe = getStripeServerClient();
-  const customerId = await ensureStripeCustomer(admin, { userId: input.userId, email: null });
-  await stripe.paymentMethods.attach(input.paymentMethodId, { customer: customerId }).catch(() => undefined);
-  await stripe.customers.update(customerId, {
-    invoice_settings: {
-      default_payment_method: input.paymentMethodId
-    }
-  });
-
-  const subscription = await getBillingSubscriptionRecord(admin, input.userId);
-  if (subscription) {
-    await stripe.subscriptions.update(subscription.stripe_subscription_id, {
-      default_payment_method: input.paymentMethodId
-    });
-
-    const refreshed = await stripe.subscriptions.retrieve(subscription.stripe_subscription_id, {
-      expand: ["default_payment_method"]
-    });
-    await syncSubscriptionFromStripe(admin, refreshed);
+export async function subscribeUserWithCard(
+  admin: SupabaseClient,
+  input: {
+    userId: string;
+    email: string;
+    interval: BillingInterval;
+    token: string;
+    cardholderName?: string | null;
+    phoneNumber?: string | null;
+    ipAddress?: string | null;
+  }
+) {
+  await requireBillingLegalAccepted(admin, input.userId);
+  const acceptance = await getWompiAcceptanceTokens();
+  if (!acceptance.acceptanceToken || !acceptance.personalDataAuthToken) {
+    throw new Error("No se pudieron obtener los contratos de aceptación de Wompi.");
   }
 
-  await recordPlatformEvent(admin, {
-    eventType: "billing.payment_method_updated",
+  const paymentSource = await createWompiPaymentSource({
+    token: input.token,
+    customerEmail: input.email,
+    acceptanceToken: acceptance.acceptanceToken,
+    acceptPersonalAuth: acceptance.personalDataAuthToken
+  });
+
+  const cardDetails = getCardPaymentMethodDetails(paymentSource as JsonRecord);
+  const persistedPaymentMethod = await persistPaymentMethod(admin, {
     userId: input.userId,
-    payload: {}
-  }).catch(() => undefined);
+    wompiPaymentSourceId: Number(paymentSource.id),
+    brand: cardDetails.brand,
+    last4: cardDetails.last4,
+    expMonth: cardDetails.expMonth,
+    expYear: cardDetails.expYear
+  });
+
+  const reference = buildWompiReference(`pro-${input.interval}`, input.userId);
+  const amountInCents = getPlanAmountInCents(input.interval);
+  const rawTx = await createWompiTransaction({
+    reference,
+    amountInCents,
+    customerEmail: input.email,
+    acceptanceToken: acceptance.acceptanceToken,
+    acceptPersonalAuth: acceptance.personalDataAuthToken,
+    paymentMethod: { installments: 1 },
+    paymentSourceId: Number(paymentSource.id),
+    customerData: {
+      full_name: input.cardholderName ?? undefined,
+      phone_number: input.phoneNumber ?? undefined
+    },
+    ipAddress: input.ipAddress ?? undefined
+  });
+
+  const rawStatus = typeof rawTx.status === "string" ? rawTx.status : "PENDING";
+  const membershipId =
+    rawStatus === "APPROVED"
+      ? await createOrExtendMembershipForApprovedTransaction(admin, {
+          userId: input.userId,
+          method: "card",
+          interval: input.interval,
+          rail: "card_subscription",
+          paymentMethodId: persistedPaymentMethod.id,
+          metadata: { initialCheckout: true }
+        })
+      : await markMembershipPaymentPending(admin, {
+          userId: input.userId,
+          rail: "card_subscription",
+          method: "card",
+          interval: input.interval,
+          paymentMethodId: persistedPaymentMethod.id,
+          metadata: { initialCheckout: true }
+        });
+
+  await recordTransaction(admin, {
+    userId: input.userId,
+    membershipId,
+    method: "card",
+    reference,
+    externalTransactionId: typeof rawTx.id === "string" ? rawTx.id : null,
+    status: rawStatus,
+    amountInCents,
+    interval: input.interval,
+    rawPayload: rawTx,
+    checkoutUrl: toCheckoutUrl(rawTx),
+    approvedAt: rawStatus === "APPROVED" ? parseApprovedAt(rawTx) : null,
+    paidAt: rawStatus === "APPROVED" ? parseApprovedAt(rawTx) : null
+  });
+
+  await applyBillingAccessRules(admin, input.userId, input.email);
+
+  return {
+    status: wompiStatusToBillingStatus(rawStatus),
+    checkoutUrl: toCheckoutUrl(rawTx),
+    paymentMethod: persistedPaymentMethod
+  };
+}
+
+export async function createManualBillingCheckout(
+  admin: SupabaseClient,
+  input: {
+    userId: string;
+    email: string;
+    method: Exclude<BillingPaymentMethodKind, "card">;
+    customerName?: string | null;
+    phoneNumber?: string | null;
+    legalIdType?: string | null;
+    legalId?: string | null;
+    userType?: number | null;
+    financialInstitutionCode?: string | null;
+    ipAddress?: string | null;
+  }
+) {
+  await requireBillingLegalAccepted(admin, input.userId);
+  const acceptance = await getWompiAcceptanceTokens();
+  if (!acceptance.acceptanceToken || !acceptance.personalDataAuthToken) {
+    throw new Error("No se pudieron obtener los contratos de aceptación de Wompi.");
+  }
+
+  const reference = buildWompiReference(`pro-${input.method}`, input.userId);
+  const redirectUrl = `${env.appUrl}/billing?checkout=${input.method}_pending`;
+  const amountInCents = getManualAmountInCents(input.method);
+
+  let paymentMethod: JsonRecord;
+  if (input.method === "pse") {
+    paymentMethod = {
+      type: "PSE",
+      user_type: input.userType ?? 0,
+      user_legal_id_type: input.legalIdType ?? "CC",
+      user_legal_id: input.legalId ?? "",
+      financial_institution_code: input.financialInstitutionCode ?? "",
+      payment_description: "Suscripción Pro mensual DVanguard",
+      ecommerce_url: redirectUrl
+    };
+  } else if (input.method === "nequi") {
+    paymentMethod = {
+      type: "NEQUI",
+      phone_number: input.phoneNumber ?? ""
+    };
+  } else {
+    paymentMethod = {
+      type: "BANCOLOMBIA_TRANSFER",
+      user_type: "PERSON",
+      payment_description: "Suscripción Pro mensual DVanguard",
+      ecommerce_url: redirectUrl
+    };
+  }
+
+  const rawTx = await createWompiTransaction({
+    reference,
+    amountInCents,
+    customerEmail: input.email,
+    redirectUrl,
+    acceptanceToken: acceptance.acceptanceToken,
+    acceptPersonalAuth: acceptance.personalDataAuthToken,
+    paymentMethod,
+    customerData: {
+      full_name: input.customerName ?? undefined,
+      phone_number: input.phoneNumber ?? undefined,
+      legal_id: input.legalId ?? undefined,
+      legal_id_type: input.legalIdType ?? undefined
+    },
+    ipAddress: input.ipAddress ?? undefined
+  });
+
+  const rawStatus = typeof rawTx.status === "string" ? rawTx.status : "PENDING";
+  const txId = await recordTransaction(admin, {
+    userId: input.userId,
+    method: input.method,
+    reference,
+    externalTransactionId: typeof rawTx.id === "string" ? rawTx.id : null,
+    status: rawStatus,
+    amountInCents,
+    interval: "month",
+    rawPayload: rawTx,
+    checkoutUrl: toCheckoutUrl(rawTx),
+    approvedAt: rawStatus === "APPROVED" ? parseApprovedAt(rawTx) : null,
+    paidAt: rawStatus === "APPROVED" ? parseApprovedAt(rawTx) : null
+  });
+
+  if (rawStatus === "APPROVED") {
+    const membershipId = await createOrExtendMembershipForApprovedTransaction(admin, {
+      userId: input.userId,
+      method: input.method,
+      interval: null,
+      rail: "manual_term_purchase",
+      transactionId: txId
+    });
+    await admin.from("billing_transactions").update({ membership_id: membershipId }).eq("id", txId);
+  }
+
+  await applyBillingAccessRules(admin, input.userId, input.email);
+
+  return {
+    status: wompiStatusToBillingStatus(rawStatus),
+    redirectUrl: toCheckoutUrl(rawTx),
+    transactionId: typeof rawTx.id === "string" ? rawTx.id : null
+  };
+}
+
+export async function switchManualMembershipToCard(
+  admin: SupabaseClient,
+  input: {
+    userId: string;
+    email: string;
+    token: string;
+  }
+) {
+  await requireBillingLegalAccepted(admin, input.userId);
+  const current = await getBillingSubscriptionRecord(admin, input.userId);
+  if (!current || current.rail !== "manual_term_purchase" || !current.current_period_end) {
+    throw new Error("No tienes una compra manual vigente para programar el cambio a tarjeta.");
+  }
+
+  const acceptance = await getWompiAcceptanceTokens();
+  if (!acceptance.acceptanceToken || !acceptance.personalDataAuthToken) {
+    throw new Error("No se pudieron obtener los contratos de aceptación de Wompi.");
+  }
+
+  const paymentSource = await createWompiPaymentSource({
+    token: input.token,
+    customerEmail: input.email,
+    acceptanceToken: acceptance.acceptanceToken,
+    acceptPersonalAuth: acceptance.personalDataAuthToken
+  });
+
+  const cardDetails = getCardPaymentMethodDetails(paymentSource as JsonRecord);
+  const persistedPaymentMethod = await persistPaymentMethod(admin, {
+    userId: input.userId,
+    wompiPaymentSourceId: Number(paymentSource.id),
+    brand: cardDetails.brand,
+    last4: cardDetails.last4,
+    expMonth: cardDetails.expMonth,
+    expYear: cardDetails.expYear
+  });
+
+  const { error } = await admin
+    .from("billing_memberships")
+    .update({
+      switch_to_card_at: current.current_period_end,
+      switch_to_card_payment_method_id: persistedPaymentMethod.id
+    })
+    .eq("id", current.id);
+
+  if (error) {
+    throw new Error(`Failed to schedule switch to card: ${error.message}`);
+  }
+
+  return {
+    switchToCardAt: current.current_period_end
+  };
 }
 
 export async function cancelBillingSubscription(admin: SupabaseClient, userId: string) {
-  const subscription = await getBillingSubscriptionRecord(admin, userId);
-  if (!subscription) {
-    throw new Error("No Stripe-managed subscription found");
+  const current = await getBillingSubscriptionRecord(admin, userId);
+  if (!current || current.rail !== "card_subscription") {
+    throw new Error("No hay una suscripción con tarjeta activa para cancelar.");
   }
 
-  const stripe = getStripeServerClient();
-  const updated = await stripe.subscriptions.update(subscription.stripe_subscription_id, {
-    cancel_at_period_end: true,
-    metadata: {
-      ...(subscription.metadata_json ?? {}),
-      dvanguard_pending_interval: ""
-    }
-  });
+  const { error } = await admin
+    .from("billing_memberships")
+    .update({ renews_automatically: false })
+    .eq("id", current.id);
 
-  await admin
-    .from("billing_subscriptions")
-    .update({ cancel_at_period_end: true, pending_interval: null, last_event_at: new Date().toISOString() })
-    .eq("user_id", userId);
+  if (error) {
+    throw new Error(`Failed to cancel recurring billing: ${error.message}`);
+  }
 
-  await recordPlatformEvent(admin, {
-    eventType: "billing.cancel_scheduled",
-    userId,
-    payload: {
-      subscriptionId: updated.id,
-      currentPeriodEnd: toDateIso(getStripeSubscriptionTimestamp(updated, "current_period_end"))
-    }
-  }).catch(() => undefined);
-
-  return updated;
+  return { ok: true };
 }
 
 export async function changeBillingPlanInterval(admin: SupabaseClient, userId: string, interval: BillingInterval) {
-  const subscription = await getBillingSubscriptionRecord(admin, userId);
-  if (!subscription) {
-    throw new Error("No Stripe-managed subscription found");
+  const current = await getBillingSubscriptionRecord(admin, userId);
+  if (!current || current.rail !== "card_subscription") {
+    throw new Error("No hay una suscripción con tarjeta para cambiar de ciclo.");
   }
 
-  if (subscription.billing_interval === interval && !subscription.pending_interval) {
-    throw new Error("Tu suscripción ya usa ese ciclo de cobro.");
+  const { error } = await admin
+    .from("billing_memberships")
+    .update({
+      interval,
+      term_length_days: daysForInterval(interval),
+      metadata_json: { ...(current.metadata_json ?? {}), requestedInterval: interval }
+    })
+    .eq("id", current.id);
+
+  if (error) {
+    throw new Error(`Failed to change card billing interval: ${error.message}`);
   }
 
-  const stripe = getStripeServerClient();
-
-  if (subscription.billing_interval === "year" && interval === "month") {
-    const updated = await stripe.subscriptions.update(subscription.stripe_subscription_id, {
-      cancel_at_period_end: true,
-      metadata: {
-        ...(subscription.metadata_json ?? {}),
-        dvanguard_pending_interval: "month"
-      }
-    });
-
-    await admin
-      .from("billing_subscriptions")
-      .update({ pending_interval: "month", cancel_at_period_end: true, last_event_at: new Date().toISOString() })
-      .eq("user_id", userId);
-
-    await recordPlatformEvent(admin, {
-      eventType: "billing.interval_change_scheduled",
-      userId,
-      payload: {
-        from: "year",
-        to: "month",
-        currentPeriodEnd: toDateIso(getStripeSubscriptionTimestamp(updated, "current_period_end"))
-      }
-    }).catch(() => undefined);
-
-    return { mode: "scheduled" as const, subscription: updated };
-  }
-
-  const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripe_subscription_id);
-  const itemId = stripeSubscription.items.data[0]?.id;
-  if (!itemId) {
-    throw new Error("Subscription item not found");
-  }
-
-  const updated = await stripe.subscriptionItems.update(itemId, {
-    price: getStripePriceId(interval),
-    proration_behavior: "create_prorations",
-    payment_behavior: "allow_incomplete"
-  });
-
-  const refreshed = await stripe.subscriptions.retrieve(subscription.stripe_subscription_id, {
-    expand: ["default_payment_method"]
-  });
-  refreshed.metadata = {
-    ...refreshed.metadata,
-    dvanguard_pending_interval: ""
-  };
-  await stripe.subscriptions.update(subscription.stripe_subscription_id, {
-    metadata: refreshed.metadata,
-    cancel_at_period_end: false
-  });
-
-  await syncSubscriptionFromStripe(
-    admin,
-    {
-      ...refreshed,
-      items: {
-        ...refreshed.items,
-        data: refreshed.items.data.map((item) => (item.id === updated.id ? updated : item))
-      },
-      cancel_at_period_end: false,
-      metadata: {
-        ...refreshed.metadata,
-        dvanguard_pending_interval: ""
-      }
-    } as Stripe.Subscription
-  );
-
-  await admin.from("billing_subscriptions").update({ pending_interval: null }).eq("user_id", userId);
-
-  await recordPlatformEvent(admin, {
-    eventType: "billing.interval_changed",
-    userId,
-    payload: {
-      from: subscription.billing_interval,
-      to: interval,
-      mode: "immediate"
-    }
-  }).catch(() => undefined);
-
-  return { mode: "immediate" as const };
+  return { mode: "scheduled" as const };
 }
 
-export async function maybeCreatePendingReplacementSubscription(admin: SupabaseClient, stripeSubscriptionId: string) {
-  const local = await getBillingSubscriptionRecordByStripeId(admin, stripeSubscriptionId);
-  if (!local?.pending_interval) {
-    return null;
+export async function syncBillingTransactionFromWompi(admin: SupabaseClient, transactionId: string) {
+  const rawTx = sanitizeMetadata(await getWompiTransaction(transactionId));
+  const reference = typeof rawTx.reference === "string" ? rawTx.reference : null;
+  if (!reference) {
+    throw new Error("La transacción de Wompi no incluye referencia.");
   }
 
-  const stripe = getStripeServerClient();
-  const customer = await stripe.customers.retrieve(local.stripe_customer_id);
-  if (customer.deleted) {
-    return null;
+  const { data: local, error } = await admin
+    .from("billing_transactions")
+    .select("id, user_id, membership_id, method, interval")
+    .or(`external_transaction_id.eq.${transactionId},reference.eq.${reference}`)
+    .maybeSingle();
+
+  if (error || !local) {
+    throw new Error(error?.message ?? "No encontramos la transacción local para sincronizar.");
   }
 
-  const defaultPaymentMethodId =
-    typeof customer.invoice_settings.default_payment_method === "string"
-      ? customer.invoice_settings.default_payment_method
-      : customer.invoice_settings.default_payment_method?.id ?? null;
+  const rawStatus = typeof rawTx.status === "string" ? rawTx.status : "PENDING";
+  const approvedAt = rawStatus === "APPROVED" ? parseApprovedAt(rawTx) : null;
+  const paymentKind = mapPaymentKind(local.method);
 
-  if (!defaultPaymentMethodId) {
-    await admin.from("billing_subscriptions").update({ pending_interval: null }).eq("user_id", local.user_id);
-    return null;
+  await admin
+    .from("billing_transactions")
+    .update({
+      external_transaction_id: typeof rawTx.id === "string" ? rawTx.id : transactionId,
+      status: rawStatus,
+      checkout_url: toCheckoutUrl(rawTx),
+      paid_at: approvedAt,
+      approved_at: approvedAt,
+      raw_payload: rawTx
+    })
+    .eq("id", local.id);
+
+  if (rawStatus === "APPROVED") {
+    const membershipId = await createOrExtendMembershipForApprovedTransaction(admin, {
+      userId: local.user_id,
+      method: paymentKind,
+      interval: mapInterval(local.interval),
+      rail: paymentKind === "card" ? "card_subscription" : "manual_term_purchase",
+      transactionId: local.id
+    });
+    await admin.from("billing_transactions").update({ membership_id: membershipId }).eq("id", local.id);
+  } else if (local.membership_id) {
+    await admin.from("billing_memberships").update({ status: wompiStatusToBillingStatus(rawStatus) }).eq("id", local.membership_id);
   }
 
-  const created = await stripe.subscriptions.create({
-    customer: local.stripe_customer_id,
-    default_payment_method: defaultPaymentMethodId,
-    items: [{ price: getStripePriceId(local.pending_interval) }],
-    metadata: {
-      user_id: local.user_id,
-      plan_code: PRO_PLAN,
-      billing_interval: local.pending_interval
-    },
-    expand: ["default_payment_method"]
-  });
+  await applyBillingAccessRules(admin, local.user_id);
 
-  await syncSubscriptionFromStripe(admin, created);
-  await admin.from("billing_subscriptions").update({ pending_interval: null }).eq("user_id", local.user_id);
-
-  await recordPlatformEvent(admin, {
-    eventType: "billing.interval_change_completed",
-    userId: local.user_id,
-    payload: {
-      to: local.pending_interval,
-      previousSubscriptionId: stripeSubscriptionId,
-      subscriptionId: created.id
-    }
-  }).catch(() => undefined);
-
-  return created;
+  return {
+    reference,
+    status: rawStatus
+  };
 }
