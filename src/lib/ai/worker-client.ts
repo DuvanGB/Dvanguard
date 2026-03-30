@@ -10,6 +10,8 @@ type TriggerVisualWorkerInput = {
   briefDraft?: BusinessBriefDraft;
   callbackBaseUrl: string;
   currentSiteSummary?: string;
+  designUpgradeObjective?: string;
+  regenerationIntent?: "visual_improvement";
 };
 
 type TriggerRefineWorkerInput = {
@@ -37,7 +39,9 @@ export async function triggerVisualGenerationWorker(input: TriggerVisualWorkerIn
       templateId: input.templateId ?? null,
       briefDraft: input.briefDraft ?? null,
       callbackBaseUrl: input.callbackBaseUrl,
-      currentSiteSummary: input.currentSiteSummary ?? null
+      currentSiteSummary: input.currentSiteSummary ?? null,
+      designUpgradeObjective: input.designUpgradeObjective ?? null,
+      regenerationIntent: input.regenerationIntent ?? null
     })
   });
 

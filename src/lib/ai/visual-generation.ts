@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { buildHeroHeadline, buildHeroSubheadline } from "@/lib/hero-copy";
+import { normalizeWhatsappPhone } from "@/lib/whatsapp";
 import {
   type CanvasBlock,
   type CanvasLayoutRect,
@@ -242,26 +244,34 @@ export function summarizeSiteSpecForRegeneration(input: { siteSpec?: SiteSpecV3 
   if (!home) return "";
 
   const sectionSummary = home.sections.map((section) => {
-    const blockSummary = section.blocks
-      .slice(0, 6)
-      .map((block) => {
-        if (block.type === "text") return `text:${block.content.text.slice(0, 60)}`;
-        if (block.type === "button") return `button:${block.content.label}`;
-        if (block.type === "product") return `product:${block.content.name}`;
-        if (block.type === "image") return `image:${block.content.alt ?? "asset"}`;
-        return block.type;
-      })
-      .join(" | ");
-    return `${section.type}(${section.variant}) => ${blockSummary}`;
+    const counters = section.blocks.reduce(
+      (acc, block) => {
+        acc.total += 1;
+        if (block.type === "text") acc.text += 1;
+        if (block.type === "button") acc.buttons += 1;
+        if (block.type === "image") acc.images += 1;
+        if (block.type === "product") acc.products += 1;
+        return acc;
+      },
+      { total: 0, text: 0, buttons: 0, images: 0, products: 0 }
+    );
+    return `${section.type}(${section.variant}) => bloques:${counters.total}, textos:${counters.text}, botones:${counters.buttons}, imágenes:${counters.images}, productos:${counters.products}`;
   });
 
+  const weakSignals: string[] = [];
+  const hero = home.sections.find((section) => section.type === "hero");
+  if (hero?.variant === "simple" || hero?.variant === "minimal") weakSignals.push("hero actual probablemente conservador; busca mayor impacto visual y jerarquía.");
+  if ((input.assetUrls?.length ?? 0) > 0) weakSignals.push("hay media existente; reutilízala para enriquecer hero, ritmo y contraste.");
+  if (home.sections.length <= 3) weakSignals.push("la estructura es compacta; mejora composición interna sin añadir ruido.");
+
   return [
-    "Sitio actual para regeneración:",
+    "Contexto de sitio actual para rediseño progresivo:",
     `Header: ${siteSpec.header?.variant ?? "none"}`,
     `Secciones actuales: ${home.sections.map((section) => section.type).join(", ")}`,
     ...sectionSummary,
-    input.assetUrls?.length ? `Assets existentes: ${input.assetUrls.length}` : null,
-    "Mantén la estructura y el contenido existente; propón una UI más fuerte con nueva composición visual, tema y ritmo."
+    input.assetUrls?.length ? `Assets existentes reutilizables: ${input.assetUrls.length}` : null,
+    weakSignals.length ? `Oportunidades de mejora: ${weakSignals.join(" ")}` : null,
+    "Preserva el contenido, labels, contacto y media existentes. Rediseña composición, hero, ritmo, tipografía, contraste y jerarquía para que la siguiente propuesta se sienta más premium, ordenada y profesional que la actual."
   ]
     .filter(Boolean)
     .join("\n");
@@ -597,13 +607,23 @@ function buildSeedSection(input: {
           bgColor: "#0f172a",
           opacity: 0.38
         }),
-        textBlock(`${id}-headline`, input.businessName, rect(8, 14, 48, 16, 3), rect(8, 14, 84, 16, 3), {
+        textBlock(`${id}-headline`, buildHeroHeadline({
+          businessName: input.businessName,
+          offerSummary: input.offerSummary,
+          targetAudience: input.targetAudience,
+          businessType: input.siteType
+        }), rect(8, 14, 48, 16, 3), rect(8, 14, 84, 16, 3), {
           fontSize: 50,
           fontWeight: 700
         }),
         textBlock(
           `${id}-subheadline`,
-          `${input.offerSummary} Para ${input.targetAudience.toLowerCase()}.`,
+          buildHeroSubheadline({
+            businessName: input.businessName,
+            offerSummary: input.offerSummary,
+            targetAudience: input.targetAudience,
+            businessType: input.siteType
+          }),
           rect(8, 34, 50, 12, 3),
           rect(8, 32, 84, 12, 3),
           {
@@ -720,7 +740,7 @@ function heroEditorial(brief: BusinessBriefDraft | undefined, theme: Partial<Sit
         fontSize: 64,
         fontWeight: 700,
         color: "#f8fafc"
-      }, { text: brief?.business_name }),
+      }, { text: buildHeroTitle(brief) }),
       compose("subheadline", true, rect(6, 40, 38, 12, 3), rect(8, 36, 84, 12, 3), { fontSize: 19, color: "#d4d4d8" }, { text: buildHeroSubtitle(brief) }),
       compose("hero-image", true, rect(58, 10, 34, 72, 2), rect(8, 58, 84, 28, 2), { radius: 0 }, { fit: "cover" })
     ]
@@ -739,7 +759,7 @@ function heroSplitTech(brief: BusinessBriefDraft | undefined, theme: Partial<Sit
         fontSize: 54,
         fontWeight: 700,
         color: themeTextPrimary(theme)
-      }, { text: brief?.business_name }),
+      }, { text: buildHeroTitle(brief) }),
       compose("subheadline", true, rect(8, 36, 42, 12, 3), rect(8, 32, 84, 12, 3), { fontSize: 18, color: "#334155" }, { text: buildHeroSubtitle(brief) }),
       compose("hero-image", true, rect(58, 16, 30, 52, 2), rect(12, 58, 76, 22, 2), { radius: 22 }, { fit: "cover" })
     ]
@@ -759,7 +779,7 @@ function heroStackedSoft(brief: BusinessBriefDraft | undefined, theme: Partial<S
         fontWeight: 700,
         textAlign: "center",
         color: themeTextPrimary(theme)
-      }, { text: brief?.business_name }),
+      }, { text: buildHeroTitle(brief) }),
       compose("subheadline", true, rect(20, 32, 60, 12, 3), rect(8, 30, 84, 12, 3), {
         fontSize: 18,
         textAlign: "center",
@@ -782,7 +802,7 @@ function heroSplitService(brief: BusinessBriefDraft | undefined, theme: Partial<
       compose("headline", true, rect(48, 16, 42, 14, 3), rect(8, 14, 84, 16, 3), {
         fontSize: 48,
         fontWeight: 700
-      }, { text: brief?.business_name }),
+      }, { text: buildHeroTitle(brief) }),
       compose("subheadline", true, rect(48, 34, 38, 12, 3), rect(8, 32, 84, 12, 3), { fontSize: 18, color: "#475569" }, { text: buildHeroSubtitle(brief) })
     ]
   };
@@ -797,7 +817,7 @@ function heroFullBleedBrand(brief: BusinessBriefDraft | undefined, theme: Partia
       compose("hero-bg", true, rect(0, 0, 100, 100, 1), rect(0, 0, 100, 100, 1), undefined, { fit: "cover" }),
       compose("hero-overlay", true, rect(0, 0, 100, 100, 2), rect(0, 0, 100, 100, 2), { bgColor: themePrimary(theme), opacity: 0.28 }),
       compose("headline", true, rect(7, 18, 46, 18, 3), rect(8, 14, 84, 16, 3), { fontSize: 60, fontWeight: 700, color: "#ffffff" }, {
-        text: brief?.business_name
+        text: buildHeroTitle(brief)
       }),
       compose("subheadline", true, rect(7, 40, 34, 12, 3), rect(8, 32, 84, 12, 3), { fontSize: 18, color: "#e2e8f0" }, {
         text: buildHeroSubtitle(brief)
@@ -814,7 +834,7 @@ function heroCompactSale(brief: BusinessBriefDraft | undefined, theme: Partial<S
     height_ratio: { desktop: 0.56, mobile: 1.02 },
     blocks: [
       compose("headline", true, rect(10, 16, 42, 14, 3), rect(8, 12, 84, 16, 3), { fontSize: 50, fontWeight: 700, color: themeTextPrimary(theme) }, {
-        text: brief?.business_name
+        text: buildHeroTitle(brief)
       }),
       compose("subheadline", true, rect(10, 34, 38, 10, 3), rect(8, 30, 84, 12, 3), { fontSize: 17, color: "#475569" }, {
         text: buildHeroSubtitle(brief)
@@ -835,7 +855,7 @@ function heroCenteredClean(brief: BusinessBriefDraft | undefined, theme: Partial
         fontWeight: 700,
         textAlign: "center",
         color: themeTextPrimary(theme)
-      }, { text: brief?.business_name }),
+      }, { text: buildHeroTitle(brief) }),
       compose("subheadline", true, rect(18, 34, 64, 10, 3), rect(8, 32, 84, 12, 3), {
         fontSize: 17,
         textAlign: "center",
@@ -854,7 +874,7 @@ function heroImageLead(brief: BusinessBriefDraft | undefined, theme: Partial<Sit
     blocks: [
       compose("hero-image", true, rect(8, 14, 38, 58, 1), rect(12, 54, 76, 24, 1), { radius: 20 }, { fit: "cover" }),
       compose("headline", true, rect(52, 18, 36, 14, 3), rect(8, 14, 84, 16, 3), { fontSize: 46, fontWeight: 700, color: themeTextPrimary(theme) }, {
-        text: brief?.business_name
+        text: buildHeroTitle(brief)
       }),
       compose("subheadline", true, rect(52, 36, 32, 12, 3), rect(8, 32, 84, 12, 3), { fontSize: 17, color: "#475569" }, {
         text: buildHeroSubtitle(brief)
@@ -1475,7 +1495,22 @@ function inferIndustryProfile(
 
 function buildHeroSubtitle(brief?: BusinessBriefDraft) {
   if (!brief) return "Propuesta clara, visual y lista para convertir.";
-  return `${brief.offer_summary} Para ${brief.target_audience.toLowerCase()}.`.slice(0, 220);
+  return buildHeroSubheadline({
+    businessName: brief.business_name,
+    offerSummary: brief.offer_summary,
+    targetAudience: brief.target_audience,
+    businessType: brief.business_type
+  });
+}
+
+function buildHeroTitle(brief?: BusinessBriefDraft) {
+  if (!brief) return "Haz que tu propuesta se entienda al instante";
+  return buildHeroHeadline({
+    businessName: brief.business_name,
+    offerSummary: brief.offer_summary,
+    targetAudience: brief.target_audience,
+    businessType: brief.business_type
+  });
 }
 
 function enforceDefaultSectionOrder(order: SiteSectionV3["type"][]) {
@@ -1483,15 +1518,6 @@ function enforceDefaultSectionOrder(order: SiteSectionV3["type"][]) {
   const leading = unique.filter((section) => !STRUCTURAL_TRAILING_SECTIONS.includes(section));
   const trailing = STRUCTURAL_TRAILING_SECTIONS.filter((section) => unique.includes(section));
   return [...leading, ...trailing];
-}
-
-function normalizeWhatsappPhone(value?: string) {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const normalized = trimmed.startsWith("+") ? trimmed : `+${trimmed}`;
-  if (!/^\+\d{8,15}$/.test(normalized)) return undefined;
-  return normalized.replace(/\D/g, "");
 }
 
 function cardQuoteStyle(fontSize = 16): Partial<CanvasBlock["style"]> {

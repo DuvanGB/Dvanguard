@@ -28,7 +28,7 @@ const bodySchema = z.object({
 export async function POST(request: NextRequest) {
   const { user, supabase } = await requireApiUser();
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
   const rate = enforceRateLimit({
@@ -38,13 +38,13 @@ export async function POST(request: NextRequest) {
   });
 
   if (!rate.allowed) {
-    return NextResponse.json({ error: "Too Many Requests" }, { status: 429 });
+    return NextResponse.json({ error: "Demasiadas solicitudes" }, { status: 429 });
   }
 
   const body = await request.json().catch(() => ({}));
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
+    return NextResponse.json({ error: "Datos inválidos", issues: parsed.error.issues }, { status: 400 });
   }
 
   const { siteId, inputMode, briefDraft, templateId, recommendedTemplateId, refineConfidence, warnings, generationMode = "new" } = parsed.data;
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     .is("deleted_at", null)
     .maybeSingle();
   if (!site) {
-    return NextResponse.json({ error: "Site not found" }, { status: 404 });
+    return NextResponse.json({ error: "Sitio no encontrado" }, { status: 404 });
   }
   if (briefDraft.business_name && briefDraft.business_name.trim() && briefDraft.business_name.trim() !== site.name) {
     await supabase.from("sites").update({ name: briefDraft.business_name.trim() }).eq("id", siteId);
@@ -92,9 +92,13 @@ export async function POST(request: NextRequest) {
           assetUrls: (assetRows ?? []).map((item) => item.public_url).filter((value): value is string => Boolean(value))
         })
       : "";
+  const designUpgradeObjective =
+    generationMode === "regenerate"
+      ? "Haz que esta nueva iteración se sienta más premium, atractiva y organizada que la versión actual. Conserva el contenido y la media existente, pero mejora hero, jerarquía, composición, contraste, ritmo y sistema visual."
+      : undefined;
   const effectivePrompt =
     generationMode === "regenerate" && currentSiteSummary
-      ? `${prompt}\n\n${currentSiteSummary}\n\nObjetivo: regenerar una mejor propuesta visual manteniendo contenido, media y estructura del sitio actual.`
+      ? `${prompt}\n\n${currentSiteSummary}\n\nObjetivo de mejora visual: ${designUpgradeObjective}`
       : prompt;
 
   if (templateId) {
@@ -127,7 +131,9 @@ export async function POST(request: NextRequest) {
     warningsCount: warnings?.length ?? 0,
     generationMode,
     currentSiteSpec: generationMode === "regenerate" ? siteContext?.spec : undefined,
-    currentSiteSummary
+    currentSiteSummary,
+    designUpgradeObjective,
+    regenerationIntent: generationMode === "regenerate" ? "visual_improvement" : undefined
   });
 
   if (result.ok) {

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AdminPaginationSummary } from "@/components/admin/admin-pagination-summary";
 import { SiteModerationActions } from "@/components/admin/site-moderation-actions";
 import { listAdminSites } from "@/lib/data/admin/sites";
+import { formatDateLatam, getSiteTypeLabel } from "@/lib/locale-latam";
 
 function buildQuery(searchParams: Record<string, string | undefined>, page: number) {
   const query = new URLSearchParams();
@@ -63,8 +64,8 @@ export default async function AdminSitesPage({
             Tipo
             <select name="type" defaultValue={params.type ?? ""}>
               <option value="">Todos</option>
-              <option value="informative">informative</option>
-              <option value="commerce_lite">commerce_lite</option>
+              <option value="informative">{getSiteTypeLabel("informative")}</option>
+              <option value="commerce_lite">{getSiteTypeLabel("commerce_lite")}</option>
             </select>
           </label>
           <label>
@@ -93,14 +94,14 @@ export default async function AdminSitesPage({
                     </small>
                   </div>
                   <div className="admin-badges">
-                    <span className="admin-badge">{item.site_type}</span>
+                    <span className="admin-badge">{getSiteTypeLabel(item.site_type)}</span>
                     <span className="admin-badge">{item.status}</span>
                   </div>
                 </div>
 
                 <div className="admin-site-card-meta">
                   <span>Owner: {item.owner_email ?? "-"}</span>
-                  <span>Creado: {new Date(item.created_at).toLocaleDateString()}</span>
+                  <span>Creado: {formatDateLatam(item.created_at)}</span>
                 </div>
 
                 <div className="dashboard-site-metrics">

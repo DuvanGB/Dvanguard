@@ -6,8 +6,10 @@ import { useRouter } from "next/navigation";
 
 import { ModuleTour } from "@/components/guided/module-tour";
 import { SiteRenderer } from "@/components/runtime/site-renderer";
+import { getSiteTypeLabel } from "@/lib/locale-latam";
 import type { BusinessBriefDraft, HeroSuggestion, MissingBriefField, OnboardingInputMode } from "@/lib/onboarding/types";
 import type { SiteSpecV3 } from "@/lib/site-spec-v3";
+import { normalizeWhatsappPhone, validateWhatsappPhone } from "@/lib/whatsapp";
 
 type RefineResponse = {
   briefDraft: BusinessBriefDraft;
@@ -17,6 +19,9 @@ type RefineResponse = {
   provider?: "llm" | "heuristic";
   followUpQuestion?: string | null;
   missingFields: MissingBriefField[];
+  offerSummarySuggestion?: string | null;
+  offerSummaryConfidence?: number | null;
+  offerSummaryNeedsApproval?: boolean;
   heroSuggestion?: HeroSuggestion | null;
   heroConfidence?: number | null;
   error?: string;
@@ -66,6 +71,8 @@ type ChatMessage = {
   content: string;
 };
 
+type RefineApprovalState = "pending" | "accepted" | "editing" | "enrich_chat";
+
 export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale, generationMode = "new", initialSpec }: Props) {
   const router = useRouter();
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
@@ -85,8 +92,12 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
   const [completenessScore, setCompletenessScore] = useState<number | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [missingFields, setMissingFields] = useState<MissingBriefField[]>([]);
+  const [offerSummarySuggestion, setOfferSummarySuggestion] = useState<string | null>(null);
+  const [offerSummaryConfidence, setOfferSummaryConfidence] = useState<number | null>(null);
+  const [offerSummaryNeedsApproval, setOfferSummaryNeedsApproval] = useState(false);
   const [heroSuggestion, setHeroSuggestion] = useState<HeroSuggestion | null>(null);
   const [heroConfidence, setHeroConfidence] = useState<number | null>(null);
+  const [refineApprovalState, setRefineApprovalState] = useState<RefineApprovalState>("pending");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [followUpQuestion, setFollowUpQuestion] = useState<string | null>(null);
   const [followUpInput, setFollowUpInput] = useState("");
@@ -102,7 +113,8 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
 
   const canRefine = useMemo(() => rawInput.trim().length >= 10 && rawInput.length <= maxInputChars, [rawInput, maxInputChars]);
   const canSendFollowUp = Boolean(followUpQuestion && followUpInput.trim().length >= 2 && !loadingRefine);
-  const canGenerate = Boolean(briefDraft && !loadingGenerate);
+  const whatsappPhoneValid = !whatsappPhoneInput.trim().length || validateWhatsappPhone(whatsappPhoneInput);
+  const canGenerate = Boolean(briefDraft && !loadingGenerate && refineApprovalState === "accepted" && whatsappPhoneValid);
 
   useEffect(() => {
     const ctor = getRecognitionCtor();
@@ -124,10 +136,20 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
     setWhatsappMessageInput(bootstrap.briefDraft.whatsapp_message ?? "");
     setWarnings(["Estamos partiendo del contenido actual de tu sitio para proponer una nueva dirección visual sin perder tu información."]);
     setMissingFields([]);
+    setOfferSummarySuggestion(null);
+    setOfferSummaryConfidence(null);
+    setOfferSummaryNeedsApproval(true);
     setHeroSuggestion(buildHeroSuggestionClient(bootstrap.briefDraft));
     setHeroConfidence(0.82);
     setFollowUpQuestion(null);
-    setChatMessages([]);
+    setRefineApprovalState("pending");
+    setChatMessages([
+      {
+        role: "assistant",
+        content:
+          "Ya preparé una primera propuesta de resumen y hero sobre tu sitio actual. Revísala y confírmala antes de generar; si no te convence, la enriquecemos por chat."
+      }
+    ]);
     setStep(2);
   }, [generationMode, initialSpec, siteName]);
 
@@ -165,9 +187,58 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
     return {
       ...currentBrief,
       business_name: currentBrief.business_name.trim() || siteName?.trim() || currentBrief.business_name,
-      whatsapp_phone: whatsappPhoneInput.trim() || undefined,
+      whatsapp_phone: normalizeWhatsappPhone(whatsappPhoneInput) || undefined,
       whatsapp_message: whatsappMessageInput.trim() || undefined
     };
+  }
+
+  function refreshHeroFromDraft(nextDraft: BusinessBriefDraft) {
+    const nextHero = buildHeroSuggestionClient(nextDraft);
+    setHeroSuggestion(nextHero);
+    setHeroConfidence(computeHeroConfidenceClient(nextDraft, nextHero));
+  }
+
+  function handleApplyOfferSummarySuggestion() {
+    if (!briefDraft || !offerSummarySuggestion) return;
+    const nextDraft = { ...briefDraft, offer_summary: offerSummarySuggestion };
+    setBriefDraft(nextDraft);
+    setOfferSummaryNeedsApproval(false);
+    setRefineApprovalState("accepted");
+    refreshHeroFromDraft(nextDraft);
+  }
+
+  function handleAcceptCurrentSummary() {
+    if (!briefDraft) return;
+    const normalizedPhone = normalizeWhatsappPhone(whatsappPhoneInput);
+    setWhatsappPhoneInput(normalizedPhone);
+    setOfferSummaryNeedsApproval(false);
+    setRefineApprovalState("accepted");
+    refreshHeroFromDraft({
+      ...briefDraft,
+      whatsapp_phone: normalizedPhone || undefined,
+      whatsapp_message: whatsappMessageInput.trim() || undefined
+    });
+  }
+
+  function handleStartEnrichment() {
+    if (!briefDraft) return;
+    const question =
+      followUpQuestion ||
+      `Antes de mejorar el hero de ${briefDraft.business_name}, dime qué debería entender un cliente en los primeros 3 segundos al entrar a la página.`;
+    setRefineApprovalState("enrich_chat");
+    setFollowUpQuestion(question);
+    setChatMessages((prev) =>
+      prev.length && prev[prev.length - 1]?.content === question ? prev : [...prev, { role: "assistant", content: question }]
+    );
+  }
+
+  async function handleConfirmAndGenerate() {
+    if (!briefDraft) return;
+    handleAcceptCurrentSummary();
+    await Promise.resolve();
+    setTimeout(() => {
+      void handleGenerate();
+    }, 0);
   }
 
   function applyRefineDraft(nextDraft: BusinessBriefDraft) {
@@ -182,8 +253,13 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
       primary_cta: preservedPrimaryCta,
       whatsapp_message: preservedWhatsappMessage || undefined
     });
-    setWhatsappPhoneInput(siteBoundDraft.whatsapp_phone ?? "");
+    setWhatsappPhoneInput(normalizeWhatsappPhone(siteBoundDraft.whatsapp_phone ?? ""));
     setWhatsappMessageInput(preservedWhatsappMessage);
+    refreshHeroFromDraft({
+      ...siteBoundDraft,
+      primary_cta: preservedPrimaryCta,
+      whatsapp_message: preservedWhatsappMessage || undefined
+    });
   }
 
   async function pollJob(currentJobId: string) {
@@ -314,10 +390,19 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
       setCompletenessScore(typeof data.completenessScore === "number" ? data.completenessScore : null);
       setWarnings(data.warnings ?? []);
       setMissingFields(data.missingFields ?? []);
-      setHeroSuggestion(data.heroSuggestion ?? null);
-      setHeroConfidence(typeof data.heroConfidence === "number" ? data.heroConfidence : null);
+      setOfferSummarySuggestion(data.offerSummarySuggestion ?? null);
+      setOfferSummaryConfidence(typeof data.offerSummaryConfidence === "number" ? data.offerSummaryConfidence : null);
+      setOfferSummaryNeedsApproval(Boolean(data.offerSummaryNeedsApproval && data.offerSummarySuggestion));
+      setRefineApprovalState("pending");
       setFollowUpQuestion(data.followUpQuestion ?? null);
-      setChatMessages(data.followUpQuestion ? [{ role: "assistant", content: data.followUpQuestion }] : []);
+      setChatMessages([
+        {
+          role: "assistant",
+          content:
+            "Te propongo este resumen y este hero como base. Antes de generar, confirma si te gusta la propuesta o seguimos enriqueciéndola."
+        },
+        ...(data.followUpQuestion ? [{ role: "assistant" as const, content: data.followUpQuestion }] : [])
+      ]);
       setFollowUpInput("");
       setStep(2);
       setLoadingRefine(false);
@@ -351,11 +436,28 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
       setCompletenessScore(typeof data.completenessScore === "number" ? data.completenessScore : null);
       setWarnings(data.warnings ?? []);
       setMissingFields(data.missingFields ?? []);
-      setHeroSuggestion(data.heroSuggestion ?? null);
-      setHeroConfidence(typeof data.heroConfidence === "number" ? data.heroConfidence : null);
+      setOfferSummarySuggestion(data.offerSummarySuggestion ?? null);
+      setOfferSummaryConfidence(typeof data.offerSummaryConfidence === "number" ? data.offerSummaryConfidence : null);
+      setOfferSummaryNeedsApproval(Boolean(data.offerSummaryNeedsApproval && data.offerSummarySuggestion));
+      setRefineApprovalState("pending");
+      if (data.offerSummarySuggestion) {
+        const nextDraft = {
+          ...data.briefDraft,
+          offer_summary: data.offerSummarySuggestion
+        };
+        applyRefineDraft(nextDraft);
+      }
       setFollowUpQuestion(data.followUpQuestion ?? null);
       if (data.followUpQuestion) {
         setChatMessages((prev) => [...prev, { role: "assistant", content: data.followUpQuestion ?? "" }]);
+      } else {
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: "Con esto ya mejoramos la propuesta. Revísala y confirma si quieres generar o seguir ajustando."
+          }
+        ]);
       }
       setLoadingRefine(false);
     } catch {
@@ -366,6 +468,14 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
 
   async function handleGenerate() {
     if (!briefDraft) return;
+    if (refineApprovalState !== "accepted") {
+      setError("Antes de generar, confirma el resumen de oferta y la propuesta de hero.");
+      return;
+    }
+    if (!whatsappPhoneValid) {
+      setError("Revisa el número de WhatsApp antes de generar. Debe verse como +573001234567.");
+      return;
+    }
 
     setLoadingGenerate(true);
     setError(null);
@@ -510,8 +620,12 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
 
       {step === 2 && briefDraft ? (
         <section className="card stack">
-          <h2>Refinemos la información clave</h2>
-          <p>La idea aquí es reunir lo mínimo necesario para que la generación visual salga mejor desde el primer intento.</p>
+          <h2>{generationMode === "regenerate" ? "Rediseñemos tu sitio actual" : "Refinemos la información clave"}</h2>
+          <p>
+            {generationMode === "regenerate"
+              ? "Vamos a conservar tu información actual y usarla como base para proponer una versión más rica, más profesional y mejor organizada del sitio."
+              : "La idea aquí es reunir lo mínimo necesario para que la generación visual salga mejor desde el primer intento."}
+          </p>
           {confidence !== null ? <small>Confianza estimada: {Math.round(confidence * 100)}%</small> : null}
           {completenessScore !== null ? <small>Completitud del brief: {Math.round(completenessScore)}%</small> : null}
 
@@ -548,8 +662,8 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
                     )
                   }
                 >
-                  <option value="informative">informative</option>
-                  <option value="commerce_lite">commerce_lite</option>
+                  <option value="informative">{getSiteTypeLabel("informative")}</option>
+                  <option value="commerce_lite">{getSiteTypeLabel("commerce_lite")}</option>
                 </select>
               </label>
 
@@ -558,15 +672,63 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
                 <textarea
                   rows={4}
                   value={briefDraft.offer_summary}
-                  onChange={(event) => setBriefDraft((prev) => (prev ? { ...prev, offer_summary: event.target.value } : prev))}
+                  onChange={(event) => {
+                    if (!briefDraft) return;
+                    const nextValue = event.target.value;
+                    const nextDraft = { ...briefDraft, offer_summary: nextValue };
+                    setRefineApprovalState("editing");
+                    setOfferSummaryNeedsApproval(true);
+                    setBriefDraft(nextDraft);
+                    refreshHeroFromDraft(nextDraft);
+                  }}
                 />
               </label>
+
+              {offerSummarySuggestion ? (
+                <div className="onboarding-ai-suggestion">
+                  <div className="stack" style={{ gap: "0.28rem" }}>
+                    <strong>Sugerencia IA para el resumen</strong>
+                    <small className="muted">
+                      {generationMode === "regenerate"
+                        ? "La usamos solo para mejorar copy y hero. No reemplaza el contenido ya cargado de tu sitio."
+                        : "Te proponemos una redacción más comercial del resumen de oferta. Tú decides si usarla."}
+                    </small>
+                    {offerSummaryConfidence !== null ? <small>Confianza de la sugerencia: {Math.round(offerSummaryConfidence * 100)}%</small> : null}
+                  </div>
+                  <p>{offerSummarySuggestion}</p>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <button type="button" className="btn-secondary" onClick={handleApplyOfferSummarySuggestion}>
+                    Usar sugerencia y confirmar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                        setRefineApprovalState("editing");
+                        setOfferSummaryNeedsApproval(true);
+                      }}
+                    >
+                      Editar mi resumen
+                    </button>
+                  </div>
+                  {offerSummaryNeedsApproval ? (
+                    <small className="muted">Tu resumen actual todavía suena más a instrucción que a propuesta comercial. La sugerencia puede ayudarte a mejorar el hero.</small>
+                  ) : null}
+                </div>
+              ) : null}
 
               <label>
                 Público objetivo
                 <input
                   value={briefDraft.target_audience}
-                  onChange={(event) => setBriefDraft((prev) => (prev ? { ...prev, target_audience: event.target.value } : prev))}
+                  onChange={(event) => {
+                    if (!briefDraft) return;
+                    const nextDraft = { ...briefDraft, target_audience: event.target.value };
+                    setRefineApprovalState("editing");
+                    setOfferSummaryNeedsApproval(true);
+                    setBriefDraft(nextDraft);
+                    refreshHeroFromDraft(nextDraft);
+                  }}
                 />
               </label>
 
@@ -575,18 +737,29 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
                 <input
                   value={briefDraft.primary_cta}
                   onChange={(event) => {
+                    if (!briefDraft) return;
                     setCtaManuallyEdited(true);
-                    setBriefDraft((prev) => (prev ? { ...prev, primary_cta: event.target.value } : prev));
+                    const nextDraft = { ...briefDraft, primary_cta: event.target.value };
+                    setRefineApprovalState("editing");
+                    setOfferSummaryNeedsApproval(true);
+                    setBriefDraft(nextDraft);
+                    refreshHeroFromDraft(nextDraft);
                   }}
                 />
               </label>
 
               <label>
                 Número WhatsApp (con país)
-                <input value={whatsappPhoneInput} onChange={(event) => setWhatsappPhoneInput(event.target.value)} placeholder="+573001234567" />
+                <input
+                  value={whatsappPhoneInput}
+                  onChange={(event) => setWhatsappPhoneInput(normalizeWhatsappPhone(event.target.value))}
+                  placeholder="+573001234567"
+                />
               </label>
-              {whatsappPhoneInput.trim().length > 0 && !/^\+\d{8,15}$/.test(whatsappPhoneInput.trim()) ? (
+              {whatsappPhoneInput.trim().length > 0 && !whatsappPhoneValid ? (
                 <small className="muted">Formato esperado: +573001234567</small>
+              ) : whatsappPhoneInput.trim().length > 0 ? (
+                <small className="muted">Lo normalizamos automáticamente quitando espacios y símbolos no válidos.</small>
               ) : null}
 
               <label>
@@ -605,13 +778,43 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
 
             <div className="card stack onboarding-chat-card">
               <strong>Asistente de refine</strong>
-              <p>Si hace falta más contexto, la IA te hará preguntas cortas para mejorar la generación.</p>
+              <p>
+                {generationMode === "regenerate"
+                  ? "Usaremos el contenido actual del sitio para rediseñarlo. Si hace falta una dirección más clara para el hero o la propuesta comercial, la IA te hará una pregunta corta."
+                  : "Si hace falta más contexto, la IA te hará preguntas cortas para mejorar la generación."}
+              </p>
 
               {missingFields.length ? (
                 <small>Campos aún débiles: {missingFields.join(", ")}</small>
               ) : (
-                <small>Ya tenemos suficiente información para generar una propuesta sólida.</small>
+                <small>
+                  {generationMode === "regenerate"
+                    ? "Ya tenemos base suficiente para proponer una iteración visual más fuerte sin perder tu contenido."
+                    : "Ya tenemos suficiente información para proponerte una base sólida. El siguiente paso es confirmarla contigo."}
+                </small>
               )}
+
+              <div className="onboarding-ai-suggestion">
+                <div className="stack" style={{ gap: "0.28rem" }}>
+                  <strong>Confirma esta dirección antes de generar</strong>
+                  <small className="muted">
+                    {refineApprovalState === "accepted"
+                      ? "Ya confirmaste el resumen y el hero. Puedes generar cuando quieras."
+                      : "Queremos evitar que el sitio salga con un hero literal o una promesa floja. Revisa la propuesta y confírmala, o sigue enriqueciéndola por chat."}
+                  </small>
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <button type="button" className="btn-secondary" onClick={handleAcceptCurrentSummary}>
+                    Confirmar propuesta actual
+                  </button>
+                  <button type="button" className="btn-secondary" onClick={handleStartEnrichment}>
+                    Seguir enriqueciendo por chat
+                  </button>
+                  <button type="button" className="btn-primary" onClick={() => void handleConfirmAndGenerate()} disabled={!whatsappPhoneValid || loadingGenerate}>
+                    Confirmar y regenerar
+                  </button>
+                </div>
+              </div>
 
               <div className="card stack" style={{ gap: "0.5rem" }}>
                 <strong>Propuesta de hero</strong>
@@ -649,7 +852,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
                     </div>
                   ))
                 ) : (
-                  <div className="onboarding-chat-empty">No hay preguntas pendientes. Puedes generar cuando quieras.</div>
+                  <div className="onboarding-chat-empty">Todavía falta tu confirmación del resumen y del hero antes de generar.</div>
                 )}
               </div>
 
@@ -672,7 +875,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
               Volver
             </button>
             <button type="button" className="btn-primary" onClick={handleGenerate} disabled={!canGenerate}>
-              {loadingGenerate ? "Generando..." : "Generar propuesta IA"}
+              {loadingGenerate ? "Generando..." : refineApprovalState === "accepted" ? "Generar propuesta IA" : "Confirma la propuesta para generar"}
             </button>
           </div>
         </section>
@@ -822,17 +1025,25 @@ function buildBriefFromExistingSite(siteSpec: SiteSpecV3, siteName?: string) {
   const home = siteSpec.pages.find((page) => page.slug === "/") ?? siteSpec.pages[0];
   const textBlocks = home?.sections.flatMap((section) => section.blocks.filter((block) => block.type === "text")) ?? [];
   const buttonBlocks = home?.sections.flatMap((section) => section.blocks.filter((block) => block.type === "button")) ?? [];
-  const headline = textBlocks[0]?.type === "text" ? textBlocks[0].content.text.trim() : "";
-  const supporting = textBlocks
-    .slice(1, 4)
-    .map((block) => (block.type === "text" ? block.content.text.trim() : ""))
-    .filter(Boolean)
-    .join(" ");
+  const headline =
+    textBlocks
+      .map((block) => (block.type === "text" ? block.content.text.trim() : ""))
+      .find((value) => value && value.length <= 120 && !looksLikeIntentPromptClient(value) && !containsProductPlaceholderNamesClient(value)) ?? "";
   const firstButton = buttonBlocks[0];
   const whatsapp = siteSpec.integrations.whatsapp;
-
-  const offerSummary = [headline, supporting].filter(Boolean).join(". ").slice(0, 420) || "Presentación del negocio y su propuesta principal.";
-  const rawInput = [siteName ?? headline, offerSummary, siteSpec.site_type === "commerce_lite" ? "Sitio comercial con catálogo." : "Sitio informativo."]
+  const conciseOffer =
+    siteSpec.site_type === "commerce_lite"
+      ? headline && !containsProductPlaceholderNamesClient(headline)
+        ? headline
+        : "Catálogo claro de productos con atención directa, estructura ordenada y contacto rápido por WhatsApp."
+      : headline && headline.length <= 120 && !looksLikeIntentPromptClient(headline)
+        ? headline
+        : "Presentación clara del negocio con una propuesta profesional y contacto directo.";
+  const rawInput = [
+    siteName ?? headline,
+    conciseOffer,
+    siteSpec.site_type === "commerce_lite" ? "Rediseño de sitio comercial con catálogo y contacto." : "Rediseño de sitio informativo con foco en credibilidad y contacto."
+  ]
     .filter(Boolean)
     .join(" ");
 
@@ -841,7 +1052,7 @@ function buildBriefFromExistingSite(siteSpec: SiteSpecV3, siteName?: string) {
     briefDraft: {
       business_name: siteName?.trim() || headline || "Mi negocio",
       business_type: siteSpec.site_type,
-      offer_summary: offerSummary,
+      offer_summary: conciseOffer,
       target_audience: siteSpec.site_type === "commerce_lite" ? "Clientes interesados en comprar online o por WhatsApp." : "Clientes potenciales que buscan información y contacto.",
       tone: "profesional y claro",
       primary_cta:
@@ -871,20 +1082,103 @@ function suggestWhatsappMessageClient(input: {
 }
 
 function buildHeroSuggestionClient(brief: BusinessBriefDraft): HeroSuggestion {
-  const headline =
-    brief.business_type === "commerce_lite"
-      ? `Descubre ${brief.business_name}`
-      : `${brief.business_name}: ${brief.offer_summary.split(/[,.]/)[0] ?? "tu propuesta"}`;
+  const normalizedOffer = normalizeCommercialOfferSummaryClient({
+    offerSummary: brief.offer_summary,
+    businessName: brief.business_name,
+    businessType: brief.business_type,
+    targetAudience: brief.target_audience
+  });
+  const headline = deriveHeroHeadlineClient(brief, normalizedOffer);
 
   return {
-    headline: headline.slice(0, 120),
-    subheadline: `${brief.offer_summary}${brief.offer_summary.endsWith(".") ? "" : "."} Pensado para ${brief.target_audience.toLowerCase()}.`.slice(0, 220),
+    headline: headline.slice(0, 120).trimEnd(),
+    subheadline: `${normalizedOffer}${normalizedOffer.endsWith(".") ? "" : "."} Pensado para ${brief.target_audience.toLowerCase()}.`.slice(0, 220),
     primary_cta: brief.primary_cta,
     hero_direction:
       brief.business_type === "commerce_lite"
         ? "Hero comercial con beneficio principal visible y CTA de contacto inmediato."
         : "Hero de credibilidad con promesa clara, apoyo visual limpio y CTA principal único."
   };
+}
+
+function normalizeCommercialOfferSummaryClient(input: {
+  offerSummary: string;
+  businessName: string;
+  businessType: BusinessBriefDraft["business_type"];
+  targetAudience: string;
+}) {
+  const compact = input.offerSummary.trim().replace(/\s+/g, " ");
+  if (compact && !looksLikeIntentPromptClient(compact) && !containsProductPlaceholderNamesClient(compact)) return compact;
+  if (input.businessType === "commerce_lite") {
+    return `${input.businessName} ofrece una selección clara de productos para ${input.targetAudience.toLowerCase()}, con atención ágil y contacto directo para cerrar ventas.`;
+  }
+  return `${input.businessName} presenta una propuesta clara para ${input.targetAudience.toLowerCase()}, con beneficios entendibles y contacto directo para avanzar rápido.`;
+}
+
+function looksLikeIntentPromptClient(value: string) {
+  const lower = value.trim().toLowerCase();
+  return /^(necesito|quiero|busco|me gustar[ií]a|deseo|crear|hacer|montar|armar)\b/.test(lower) ||
+    /quiero una p[aá]gina|necesito una web|crear un negocio|crear una tienda|hacer una web/.test(lower);
+}
+
+function computeHeroConfidenceClient(brief: BusinessBriefDraft, hero: HeroSuggestion | null) {
+  if (!hero) return 0.4;
+  let score = 0.6;
+  if (brief.offer_summary.trim().length >= 60) score += 0.12;
+  if (brief.target_audience.trim().length >= 20) score += 0.08;
+  if (brief.primary_cta.trim().length >= 4) score += 0.05;
+  if (brief.whatsapp_phone) score += 0.03;
+  return Math.max(0, Math.min(1, score));
+}
+
+function deriveHeroHeadlineClient(brief: BusinessBriefDraft, normalizedOffer: string) {
+  const focus = extractCommercialFocusClient(normalizedOffer);
+  if (brief.business_type === "commerce_lite") {
+    if (focus) return `${capitalizePhraseClient(focus)} con atención ágil`;
+    return "Compra con claridad y atención rápida";
+  }
+  if (focus) return `${capitalizePhraseClient(focus)} con una propuesta clara`;
+  return "Haz que tu propuesta se entienda al instante";
+}
+
+function extractCommercialFocusClient(value: string) {
+  const compact = value.trim().replace(/\s+/g, " ");
+  const lowered = compact.toLowerCase();
+  const patterns = [
+    /venta de ([a-záéíóúñ0-9\s]{4,80}?)(?: para| con|\.|,|$)/i,
+    /ofrece(?: una)? ([a-záéíóúñ0-9\s]{4,80}?)(?: para| con|\.|,|$)/i,
+    /cat[aá]logo de ([a-záéíóúñ0-9\s]{4,80}?)(?: para| con|\.|,|$)/i,
+    /soluciones de ([a-záéíóúñ0-9\s]{4,80}?)(?: para| con|\.|,|$)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = compact.match(pattern);
+    if (match?.[1]) {
+      const candidate = sanitizeFocusClient(match[1]);
+      if (candidate) return candidate;
+    }
+  }
+
+  if (/equipos de oficina/i.test(lowered)) return "equipos de oficina";
+  if (/asesor[ií]a/i.test(lowered)) return "asesoría profesional";
+  return null;
+}
+
+function sanitizeFocusClient(value: string) {
+  const compact = value
+    .replace(/\b(producto|productos|servicio|servicios|negocio)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!compact || compact.length < 4 || containsProductPlaceholderNamesClient(compact)) return null;
+  return compact;
+}
+
+function capitalizePhraseClient(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function containsProductPlaceholderNamesClient(value: string) {
+  return /\bproducto\s*(estrella|\d+)\b/i.test(value);
 }
 
 function getRecognitionCtor(): RecognitionCtor | null {

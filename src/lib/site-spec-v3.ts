@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { buildHeroHeadline, buildHeroSubheadline } from "@/lib/hero-copy";
 import type { BusinessBriefDraft } from "@/lib/onboarding/types";
 import { getTemplateById } from "@/lib/templates/catalog";
 import { pickTemplateOrFallback } from "@/lib/templates/selector";
@@ -11,6 +12,7 @@ import {
   type TemplateId,
   type TemplateLayoutBlueprint
 } from "@/lib/templates/types";
+import { normalizeWhatsappPhone } from "@/lib/whatsapp";
 
 const colorToken = z
   .string()
@@ -756,9 +758,21 @@ function resolveTextForBlock(input: {
   const quotes = getTestimonialQuotes();
 
   if (sectionType === "hero") {
-    if (blockId.includes("headline")) return businessName;
+    if (blockId.includes("headline")) {
+      return buildHeroHeadline({
+        businessName,
+        offerSummary,
+        targetAudience,
+        businessType: siteType
+      });
+    }
     if (blockId.includes("subheadline")) {
-      return `${offerSummary} Para ${targetAudience.toLowerCase()}.`;
+      return buildHeroSubheadline({
+        businessName,
+        offerSummary,
+        targetAudience,
+        businessType: siteType
+      });
     }
     if (blockId.includes("eyebrow")) return "Nuevo";
   }
@@ -1058,15 +1072,6 @@ export function buildFallbackSiteSpecV3(
   });
 }
 
-function normalizeWhatsappPhone(value?: string) {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const normalized = trimmed.startsWith("+") ? trimmed : `+${trimmed}`;
-  if (!/^\+\d{8,15}$/.test(normalized)) return undefined;
-  return normalized.replace(/\D/g, "");
-}
-
 export function stabilizeSiteSpecForMobile(spec: SiteSpecV3): SiteSpecV3 {
   const next = structuredClone(spec);
   next.pages = next.pages.map((page) => ({
@@ -1342,14 +1347,24 @@ function buildSection(input: {
       blocks: [
         textBlock({
           id: `${id}-headline`,
-          text: input.businessName,
+          text: buildHeroHeadline({
+            businessName: input.businessName,
+            offerSummary: input.offerSummary,
+            targetAudience: input.targetAudience,
+            businessType: input.siteType
+          }),
           desktop: rect(56, 72, 520, 80, 2),
           mobile: rect(24, 58, 320, 84, 2),
           style: { fontSize: 44, fontWeight: 700, color: "#0f172a" }
         }),
         textBlock({
           id: `${id}-subheadline`,
-          text: `${input.offerSummary} Para ${input.targetAudience.toLowerCase()}.`,
+          text: buildHeroSubheadline({
+            businessName: input.businessName,
+            offerSummary: input.offerSummary,
+            targetAudience: input.targetAudience,
+            businessType: input.siteType
+          }),
           desktop: rect(56, 170, 560, 90, 2),
           mobile: rect(24, 152, 320, 92, 2),
           style: { fontSize: 19, color: "#334155" }

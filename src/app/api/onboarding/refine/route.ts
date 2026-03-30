@@ -22,7 +22,7 @@ const bodySchema = z.object({
 export async function POST(request: NextRequest) {
   const { user, supabase } = await requireApiUser();
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
   const rate = enforceRateLimit({
@@ -32,13 +32,13 @@ export async function POST(request: NextRequest) {
   });
 
   if (!rate.allowed) {
-    return NextResponse.json({ error: "Too Many Requests" }, { status: 429 });
+    return NextResponse.json({ error: "Demasiadas solicitudes" }, { status: 429 });
   }
 
   const body = await request.json().catch(() => ({}));
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
+    return NextResponse.json({ error: "Datos inválidos", issues: parsed.error.issues }, { status: 400 });
   }
 
   const { siteId, rawInput, inputMode, voiceEvent } = parsed.data;
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     .is("deleted_at", null)
     .maybeSingle();
   if (!site) {
-    return NextResponse.json({ error: "Site not found" }, { status: 404 });
+    return NextResponse.json({ error: "Sitio no encontrado" }, { status: 404 });
   }
 
   try {
@@ -106,7 +106,9 @@ export async function POST(request: NextRequest) {
         warningsCount: refined.warnings.length,
         provider: refined.provider,
         missingFields: refined.missingFields,
-        heroConfidence: refined.heroConfidence ?? null
+        heroConfidence: refined.heroConfidence ?? null,
+        offerSummaryConfidence: refined.offerSummaryConfidence ?? null,
+        offerSummaryNeedsApproval: refined.offerSummaryNeedsApproval ?? false
       }
     });
   } catch {
@@ -121,6 +123,9 @@ export async function POST(request: NextRequest) {
     provider: refined.provider,
     followUpQuestion: refined.followUpQuestion ?? null,
     missingFields: refined.missingFields,
+    offerSummarySuggestion: refined.offerSummarySuggestion ?? null,
+    offerSummaryConfidence: refined.offerSummaryConfidence ?? null,
+    offerSummaryNeedsApproval: refined.offerSummaryNeedsApproval ?? false,
     heroSuggestion: refined.heroSuggestion ?? null,
     heroConfidence: refined.heroConfidence ?? null
   });

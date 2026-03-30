@@ -8,6 +8,7 @@ import { SiteDomainManager } from "@/components/sites/site-domain-manager";
 import { requireUser } from "@/lib/auth";
 import { getUsageSnapshot } from "@/lib/billing/usage";
 import { getOwnerSiteAnalytics } from "@/lib/data/dashboard/analytics";
+import { formatDateLatam } from "@/lib/locale-latam";
 import { listTrashedSitesForOwner, purgeExpiredDeletedSites } from "@/lib/sites-trash";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
@@ -118,11 +119,11 @@ export default async function DashboardPage() {
           <section className="dashboard-upgrade-banner">
             <div className="stack">
               <h2>Has alcanzado el límite de tu plan Gratis</h2>
-              <p>Activa o gestiona Pro desde billing para ampliar cupos de IA y sitios publicados activos.</p>
+              <p>Activa o gestiona Pro desde suscripción para ampliar cupos de IA y sitios publicados activos.</p>
             </div>
             <div>
               <Link href="/billing" className="btn-primary">
-                Ir a billing
+                Ir a suscripción
               </Link>
             </div>
           </section>
@@ -131,8 +132,8 @@ export default async function DashboardPage() {
         {usage.access_state === "grace_period" && usage.grace_until ? (
           <section className="dashboard-upgrade-banner">
             <div className="stack">
-              <h2>Tu cuenta está en gracia por billing</h2>
-              <p>Conservas temporalmente tus sitios publicados hasta el {new Date(usage.grace_until).toLocaleDateString()} mientras regularizas tu suscripción.</p>
+              <h2>Tu cuenta está en gracia por suscripción</h2>
+              <p>Conservas temporalmente tus sitios publicados hasta el {formatDateLatam(usage.grace_until)} mientras regularizas tu suscripción.</p>
             </div>
             <div>
               <Link href="/billing" className="btn-primary">

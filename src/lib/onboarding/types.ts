@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { normalizeWhatsappPhone, validateWhatsappPhone } from "@/lib/whatsapp";
+
 export const onboardingInputModeSchema = z.enum(["text", "voice"]);
 export type OnboardingInputMode = z.infer<typeof onboardingInputModeSchema>;
 
@@ -12,8 +14,15 @@ export const missingBriefFieldSchema = z.enum([
 ]);
 
 const optionalE164Phone = z.preprocess(
-  (value) => (typeof value === "string" && value.trim().length === 0 ? undefined : value),
-  z.string().regex(/^\+\d{8,15}$/, "Formato esperado: +573001234567").optional()
+  (value) => {
+    if (typeof value !== "string") return value;
+    const normalized = normalizeWhatsappPhone(value);
+    return normalized.length ? normalized : undefined;
+  },
+  z
+    .string()
+    .refine((value) => validateWhatsappPhone(value), "Formato esperado: +573001234567")
+    .optional()
 );
 
 export const businessBriefDraftSchema = z.object({
@@ -47,6 +56,9 @@ export const refineResponseSchema = z.object({
   provider: z.enum(["llm", "heuristic"]),
   followUpQuestion: z.string().max(240).nullable().optional(),
   missingFields: z.array(missingBriefFieldSchema).default([]),
+  offerSummarySuggestion: z.string().min(12).max(600).nullable().optional(),
+  offerSummaryConfidence: z.number().min(0).max(1).nullable().optional(),
+  offerSummaryNeedsApproval: z.boolean().optional(),
   heroSuggestion: heroSuggestionSchema.nullable().optional(),
   heroConfidence: z.number().min(0).max(1).nullable().optional()
 });

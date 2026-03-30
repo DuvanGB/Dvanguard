@@ -4,6 +4,7 @@ import { BillingPageClient } from "@/components/billing/billing-page-client";
 import { requireUser } from "@/lib/auth";
 import { getBillingSummary, listBillingTransactions } from "@/lib/billing/subscription";
 import { env } from "@/lib/env";
+import { formatDateLatam } from "@/lib/locale-latam";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export default async function BillingPage({
@@ -24,16 +25,16 @@ export default async function BillingPage({
     notices.push("Procesamos el estado más reciente del pago. Si tu banco todavía no confirma, verás el acceso actualizarse apenas llegue el evento.");
   }
   if (summary.accessState === "grace_period" && summary.graceUntil) {
-    notices.push(`Tienes una gracia activa hasta ${new Date(summary.graceUntil).toLocaleDateString("es-CO")}.`);
+    notices.push(`Tienes una gracia activa hasta ${formatDateLatam(summary.graceUntil)}.`);
   }
   if (summary.accessState === "enforcement_applied") {
     notices.push("Tu cuenta ya fue ajustada al límite Free. Mantuvimos publicado solo el sitio más visitado.");
   }
   if (summary.paymentMethodKind && summary.rail === "manual_term_purchase" && summary.currentPeriodEnd) {
-    notices.push(`Tu acceso manual vence el ${new Date(summary.currentPeriodEnd).toLocaleDateString("es-CO")}.`);
+    notices.push(`Tu acceso manual vence el ${formatDateLatam(summary.currentPeriodEnd)}.`);
   }
   if (summary.switchToCardAt) {
-    notices.push(`El paso a tarjeta quedó programado para ${new Date(summary.switchToCardAt).toLocaleDateString("es-CO")}.`);
+    notices.push(`El paso a tarjeta quedó programado para ${formatDateLatam(summary.switchToCardAt)}.`);
   }
 
   return (
@@ -41,7 +42,7 @@ export default async function BillingPage({
       <div className="dashboard-container stack">
         <section className="dashboard-hero">
           <div className="stack" style={{ gap: "0.35rem" }}>
-            <small className="dashboard-chip">Billing</small>
+            <small className="dashboard-chip">Suscripción</small>
             <h1>Suscripción y facturación</h1>
             <p>Gestiona Pro con Wompi usando tarjeta, PSE, Nequi o transferencia bancaria sin salir de DVanguard.</p>
             <div className="dashboard-hero-actions">

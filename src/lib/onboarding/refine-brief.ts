@@ -9,6 +9,7 @@ import {
   type OnboardingInputMode,
   type RefineResponse
 } from "@/lib/onboarding/types";
+import { extractWhatsappPhone } from "@/lib/whatsapp";
 
 type RefineBriefInput = {
   rawInput: string;
@@ -27,7 +28,12 @@ export async function refineBusinessBrief(input: RefineBriefInput): Promise<Refi
   });
 
   if (workerAttempt.ok) {
-    const normalized = normalizeWorkerRefineResponse(workerAttempt.data, normalizedInput, input.currentBrief ?? null);
+    const normalized = normalizeWorkerRefineResponse(
+      workerAttempt.data,
+      normalizedInput,
+      input.currentBrief ?? null,
+      input.followUpAnswer ?? null
+    );
     if (normalized) {
       return normalized;
     }
@@ -43,7 +49,8 @@ export async function refineBusinessBrief(input: RefineBriefInput): Promise<Refi
 function normalizeWorkerRefineResponse(
   payload: unknown,
   rawInput: string,
-  currentBrief?: Partial<BusinessBriefDraft> | null
+  currentBrief?: Partial<BusinessBriefDraft> | null,
+  followUpAnswer?: string | null
 ): RefineResponse | null {
   if (!payload || typeof payload !== "object") return null;
 
@@ -55,6 +62,9 @@ function normalizeWorkerRefineResponse(
     provider?: unknown;
     followUpQuestion?: unknown;
     missingFields?: unknown;
+    offerSummarySuggestion?: unknown;
+    offerSummaryConfidence?: unknown;
+    offerSummaryNeedsApproval?: unknown;
     heroSuggestion?: unknown;
     heroConfidence?: unknown;
   };
@@ -63,21 +73,39 @@ function normalizeWorkerRefineResponse(
   const mergedDraft = mergeCurrentBrief(
     parsedBrief.success ? parsedBrief.data : null,
     currentBrief,
-    rawInput
+    rawInput,
+    followUpAnswer ?? null
   );
   const parsed = businessBriefDraftSchema.safeParse(mergedDraft);
   if (!parsed.success) return null;
 
   const missingFields = normalizeMissingFields(candidate.missingFields, parsed.data);
-  const heroSuggestion = normalizeHeroSuggestion(candidate.heroSuggestion, parsed.data);
+  const offerSummaryInsight = normalizeOfferSummaryInsight(
+    {
+      suggestion: candidate.offerSummarySuggestion,
+      confidence: candidate.offerSummaryConfidence,
+      needsApproval: candidate.offerSummaryNeedsApproval
+    },
+    {
+      briefDraft: parsed.data,
+      rawInput,
+      currentBrief,
+      followUpAnswer: followUpAnswer ?? null
+    }
+  );
+  const heroSourceDraft =
+    offerSummaryInsight.offerSummaryNeedsApproval && offerSummaryInsight.offerSummarySuggestion
+      ? { ...parsed.data, offer_summary: offerSummaryInsight.offerSummarySuggestion }
+      : parsed.data;
+  const heroSuggestion = normalizeHeroSuggestion(candidate.heroSuggestion, heroSourceDraft);
   const heroConfidence = heroSuggestion
     ? typeof candidate.heroConfidence === "number"
       ? clamp01(candidate.heroConfidence)
-      : computeHeroConfidence(parsed.data, heroSuggestion, missingFields)
+      : computeHeroConfidence(heroSourceDraft, heroSuggestion, missingFields)
     : 0;
   const effectiveFollowUpQuestion =
     heroConfidence < 0.75
-      ? buildHeroFollowUpQuestion(parsed.data, missingFields)
+      ? buildHeroFollowUpQuestion(heroSourceDraft, missingFields)
       : typeof candidate.followUpQuestion === "string" && candidate.followUpQuestion.trim()
         ? candidate.followUpQuestion.trim()
         : buildFollowUpQuestion(missingFields);
@@ -92,6 +120,9 @@ function normalizeWorkerRefineResponse(
     provider: candidate.provider === "heuristic" ? "heuristic" : "llm",
     followUpQuestion: effectiveFollowUpQuestion,
     missingFields,
+    offerSummarySuggestion: offerSummaryInsight.offerSummarySuggestion,
+    offerSummaryConfidence: offerSummaryInsight.offerSummaryConfidence,
+    offerSummaryNeedsApproval: offerSummaryInsight.offerSummaryNeedsApproval,
     heroSuggestion: heroConfidence >= 0.75 ? heroSuggestion : null,
     heroConfidence
   };
@@ -109,8 +140,18 @@ function buildFallbackRefineResponse(input: {
   );
   const warnings = buildActionableWarnings(input.rawInput, briefDraft);
   const missingFields = collectMissingFields(briefDraft);
-  const heroSuggestion = buildHeroSuggestion(briefDraft);
-  const heroConfidence = computeHeroConfidence(briefDraft, heroSuggestion, missingFields);
+  const offerSummaryInsight = buildOfferSummaryInsight({
+    briefDraft,
+    rawInput: input.rawInput,
+    currentBrief: input.currentBrief ?? null,
+    followUpAnswer: input.followUpAnswer ?? null
+  });
+  const heroSourceDraft =
+    offerSummaryInsight.offerSummaryNeedsApproval && offerSummaryInsight.offerSummarySuggestion
+      ? { ...briefDraft, offer_summary: offerSummaryInsight.offerSummarySuggestion }
+      : briefDraft;
+  const heroSuggestion = buildHeroSuggestion(heroSourceDraft);
+  const heroConfidence = computeHeroConfidence(heroSourceDraft, heroSuggestion, missingFields);
 
   return {
     briefDraft,
@@ -118,8 +159,11 @@ function buildFallbackRefineResponse(input: {
     completenessScore: computeCompletenessScore(briefDraft, input.rawInput),
     warnings,
     provider: "heuristic",
-    followUpQuestion: heroConfidence < 0.75 ? buildHeroFollowUpQuestion(briefDraft, missingFields) : buildFollowUpQuestion(missingFields),
+    followUpQuestion: heroConfidence < 0.75 ? buildHeroFollowUpQuestion(heroSourceDraft, missingFields) : buildFollowUpQuestion(missingFields),
     missingFields,
+    offerSummarySuggestion: offerSummaryInsight.offerSummarySuggestion,
+    offerSummaryConfidence: offerSummaryInsight.offerSummaryConfidence,
+    offerSummaryNeedsApproval: offerSummaryInsight.offerSummaryNeedsApproval,
     heroSuggestion: heroConfidence >= 0.75 ? heroSuggestion : null,
     heroConfidence
   };
@@ -221,13 +265,22 @@ function buildHeuristicBrief(
 function mergeCurrentBrief(
   nextBrief: BusinessBriefDraft | null,
   currentBrief: Partial<BusinessBriefDraft> | null | undefined,
-  rawInput: string
+  rawInput: string,
+  followUpAnswer?: string | null
 ): BusinessBriefDraft {
   const businessTypeFallback = /(tienda|catalog|catálogo|vender|venta|producto|stock|carrito)/i.test(rawInput) ? "commerce_lite" : "informative";
+  const editableOfferSummary =
+    currentBrief?.offer_summary?.trim() ||
+    deriveEditableOfferSummary({
+      rawInput,
+      currentBrief,
+      generatedOfferSummary: nextBrief?.offer_summary,
+      followUpAnswer: followUpAnswer ?? null
+    });
   const fallback = nextBrief ?? {
     business_name: inferBusinessName(rawInput),
     business_type: businessTypeFallback,
-    offer_summary: suggestOfferSummary({
+    offer_summary: editableOfferSummary || suggestOfferSummary({
       rawInput,
       businessName: inferBusinessName(rawInput),
       businessType: businessTypeFallback,
@@ -247,7 +300,7 @@ function mergeCurrentBrief(
   const merged = {
     business_name: nextBrief?.business_name?.trim() || currentBrief?.business_name?.trim() || fallback.business_name,
     business_type: nextBrief?.business_type || currentBrief?.business_type || fallback.business_type,
-    offer_summary: nextBrief?.offer_summary?.trim() || currentBrief?.offer_summary?.trim() || fallback.offer_summary,
+    offer_summary: editableOfferSummary || fallback.offer_summary,
     target_audience: nextBrief?.target_audience?.trim() || currentBrief?.target_audience?.trim() || fallback.target_audience,
     tone: nextBrief?.tone?.trim() || currentBrief?.tone?.trim() || fallback.tone,
     primary_cta: nextBrief?.primary_cta?.trim() || currentBrief?.primary_cta?.trim() || fallback.primary_cta,
@@ -274,6 +327,91 @@ function mergeCurrentBrief(
   }
 
   return merged;
+}
+
+function normalizeOfferSummaryInsight(
+  input: {
+    suggestion?: unknown;
+    confidence?: unknown;
+    needsApproval?: unknown;
+  },
+  context: {
+    briefDraft: BusinessBriefDraft;
+    rawInput: string;
+    currentBrief?: Partial<BusinessBriefDraft> | null;
+    followUpAnswer?: string | null;
+  }
+) {
+  const fallback = buildOfferSummaryInsight(context);
+  const suggestion =
+    typeof input.suggestion === "string" && input.suggestion.trim().length >= 12
+      ? input.suggestion.trim()
+      : fallback.offerSummarySuggestion;
+  const confidence =
+    typeof input.confidence === "number"
+      ? clamp01(input.confidence)
+      : fallback.offerSummaryConfidence;
+  const needsApproval =
+    typeof input.needsApproval === "boolean"
+      ? input.needsApproval
+      : fallback.offerSummaryNeedsApproval;
+
+  return {
+    offerSummarySuggestion: suggestion,
+    offerSummaryConfidence: suggestion ? confidence : null,
+    offerSummaryNeedsApproval: Boolean(suggestion && needsApproval)
+  };
+}
+
+function buildOfferSummaryInsight(input: {
+  briefDraft: BusinessBriefDraft;
+  rawInput: string;
+  currentBrief?: Partial<BusinessBriefDraft> | null;
+  followUpAnswer?: string | null;
+}) {
+  const currentEditable =
+    input.currentBrief?.offer_summary?.trim() ||
+    deriveEditableOfferSummary({
+      rawInput: input.rawInput,
+      currentBrief: input.currentBrief ?? null,
+      generatedOfferSummary: input.briefDraft.offer_summary,
+      followUpAnswer: input.followUpAnswer ?? null
+    });
+  const generated = normalizeCommercialOfferSummary({
+    offerSummary: input.briefDraft.offer_summary,
+    businessName: input.briefDraft.business_name,
+    businessType: input.briefDraft.business_type,
+    targetAudience: input.briefDraft.target_audience
+  });
+
+  if (!generated) {
+    return {
+      offerSummarySuggestion: null,
+      offerSummaryConfidence: null,
+      offerSummaryNeedsApproval: false
+    };
+  }
+
+  const needsApproval =
+    !currentEditable ||
+    looksLikeIntentPrompt(currentEditable) ||
+    isLowQualityOfferSummary(currentEditable) ||
+    normalizeComparableText(currentEditable) !== normalizeComparableText(generated);
+
+  if (!needsApproval) {
+    return {
+      offerSummarySuggestion: null,
+      offerSummaryConfidence: null,
+      offerSummaryNeedsApproval: false
+    };
+  }
+
+  const confidence = currentEditable && looksLikeIntentPrompt(currentEditable) ? 0.86 : 0.78;
+  return {
+    offerSummarySuggestion: generated,
+    offerSummaryConfidence: clamp01(confidence),
+    offerSummaryNeedsApproval: true
+  };
 }
 
 function normalizeMissingFields(input: unknown, brief: BusinessBriefDraft): MissingBriefField[] {
@@ -349,7 +487,7 @@ function suggestOfferSummary(input: {
   targetAudience: string;
 }) {
   const trimmed = input.rawInput.trim();
-  if (trimmed.length >= 36) {
+  if (trimmed.length >= 36 && !looksLikeIntentPrompt(trimmed)) {
     const compact = trimmed.replace(/\s+/g, " ").trim();
     return compact.length > 220 ? `${compact.slice(0, 217)}...` : compact;
   }
@@ -359,6 +497,72 @@ function suggestOfferSummary(input: {
   }
 
   return `${input.businessName} presenta su oferta principal para ${input.targetAudience.toLowerCase()}, con una propuesta clara para generar confianza y facilitar el contacto.`;
+}
+
+function deriveEditableOfferSummary(input: {
+  rawInput: string;
+  currentBrief?: Partial<BusinessBriefDraft> | null;
+  generatedOfferSummary?: string | null;
+  followUpAnswer?: string | null;
+}) {
+  if (input.followUpAnswer?.trim()) {
+    const current = input.currentBrief?.offer_summary?.trim() ?? "";
+    if (!current || looksLikeIntentPrompt(current) || isLowQualityOfferSummary(current)) {
+      return input.followUpAnswer.trim().slice(0, 600);
+    }
+  }
+  if (input.currentBrief?.offer_summary?.trim()) return input.currentBrief.offer_summary.trim();
+  if (input.followUpAnswer?.trim()) return input.followUpAnswer.trim().slice(0, 600);
+
+  const compactRaw = input.rawInput.trim().replace(/\s+/g, " ");
+  if (compactRaw.length >= 12 && !looksLikeIntentPrompt(compactRaw) && !containsProductPlaceholderNames(compactRaw)) {
+    return compactRaw.length > 600 ? compactRaw.slice(0, 597).trimEnd() + "..." : compactRaw;
+  }
+
+  return input.generatedOfferSummary?.trim() || "Presentación principal del negocio.";
+}
+
+function normalizeCommercialOfferSummary(input: {
+  offerSummary: string;
+  businessName: string;
+  businessType: BusinessBriefDraft["business_type"];
+  targetAudience: string;
+}) {
+  const compact = input.offerSummary.trim().replace(/\s+/g, " ");
+  if (!compact) return null;
+
+  if (!looksLikeIntentPrompt(compact) && !isLowQualityOfferSummary(compact)) {
+    return compact.length > 600 ? compact.slice(0, 597).trimEnd() + "..." : compact;
+  }
+
+  if (input.businessType === "commerce_lite") {
+    return `${input.businessName} ofrece una selección clara de productos para ${input.targetAudience.toLowerCase()}, con atención ágil, catálogo fácil de recorrer y contacto directo para cerrar ventas.`;
+  }
+
+  return `${input.businessName} presenta una propuesta clara para ${input.targetAudience.toLowerCase()}, con beneficios entendibles, confianza visual y un contacto directo para avanzar rápido.`;
+}
+
+function looksLikeIntentPrompt(value: string) {
+  const lower = value.trim().toLowerCase();
+  return /^(necesito|quiero|busco|me gustar[ií]a|deseo|crear|hacer|montar|armar)\b/.test(lower) ||
+    /quiero una p[aá]gina|necesito una web|crear un negocio|crear una tienda|hacer una web/.test(lower);
+}
+
+function isLowQualityOfferSummary(value: string) {
+  const compact = value.trim();
+  if (compact.length < 36) return true;
+  const lower = compact.toLowerCase();
+  return containsProductPlaceholderNames(compact) || (!containsValueProposition(lower) && compact.split(/\s+/).length < 9);
+}
+
+function normalizeComparableText(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function suggestPrimaryCta(input: {
@@ -442,28 +646,26 @@ function containsValueProposition(lower: string) {
   return lower.includes("rápido") || lower.includes("garant") || lower.includes("calidad") || lower.includes("a domicilio") || lower.includes("personalizado") || lower.includes("24/7") || lower.includes("únic") || lower.includes("especial");
 }
 
-function extractWhatsappPhone(input: string) {
-  const match = input.match(/\+\d{8,15}/);
-  return match?.[0];
-}
-
 function normalizeHeroSuggestion(input: unknown, brief: BusinessBriefDraft): HeroSuggestion | null {
   const parsed = heroSuggestionSchema.safeParse(input);
-  if (parsed.success) return parsed.data;
+  if (parsed.success && !heroSuggestionNeedsReset(parsed.data, brief)) return parsed.data;
   return buildHeroSuggestion(brief);
 }
 
 function buildHeroSuggestion(brief: BusinessBriefDraft): HeroSuggestion {
   const audience = brief.target_audience.trim();
-  const offer = brief.offer_summary.trim();
+  const offer =
+    normalizeCommercialOfferSummary({
+      offerSummary: brief.offer_summary,
+      businessName: brief.business_name,
+      businessType: brief.business_type,
+      targetAudience: audience
+    }) ?? brief.offer_summary.trim();
   const cta = brief.primary_cta.trim();
-  const opening =
-    brief.business_type === "commerce_lite"
-      ? `Descubre ${brief.business_name}`
-      : `${brief.business_name}: ${offer.split(/[,.]/)[0]?.trim() ?? "tu propuesta"}`;
+  const opening = deriveHeroHeadline(brief, offer);
 
   return {
-    headline: opening.length > 78 ? opening.slice(0, 78) : opening,
+    headline: opening.length > 78 ? opening.slice(0, 78).trimEnd() : opening,
     subheadline:
       offer.length > 150
         ? offer.slice(0, 147).trimEnd() + "..."
@@ -499,6 +701,67 @@ function buildHeroFollowUpQuestion(brief: BusinessBriefDraft, missingFields: Mis
   }
 
   return `Ya tenemos base del brief, pero todavía no tengo suficiente confianza para proponerte un hero fuerte para ${brief.business_name}. Cuéntame en una frase qué promesa principal quieres que vea la gente apenas entra a la página.`;
+}
+
+function heroSuggestionNeedsReset(hero: HeroSuggestion, brief: BusinessBriefDraft) {
+  return (
+    looksLikeIntentPrompt(hero.headline) ||
+    normalizeComparableText(hero.headline).startsWith(normalizeComparableText(brief.business_name)) ||
+    containsProductPlaceholderNames(hero.headline) ||
+    containsProductPlaceholderNames(hero.subheadline)
+  );
+}
+
+function deriveHeroHeadline(brief: BusinessBriefDraft, offer: string) {
+  const focus = extractCommercialFocus(offer);
+  if (brief.business_type === "commerce_lite") {
+    if (focus) return `${capitalizePhrase(focus)} con atención ágil`;
+    return "Compra con claridad y atención rápida";
+  }
+
+  if (focus) return `${capitalizePhrase(focus)} con una propuesta clara`;
+  return "Haz que tu propuesta se entienda al instante";
+}
+
+function extractCommercialFocus(offer: string) {
+  const compact = offer.trim().replace(/\s+/g, " ");
+  const lowered = compact.toLowerCase();
+  const patterns = [
+    /venta de ([a-záéíóúñ0-9\s]{4,80}?)(?: para| con|\.|,|$)/i,
+    /ofrece(?: una)? ([a-záéíóúñ0-9\s]{4,80}?)(?: para| con|\.|,|$)/i,
+    /cat[aá]logo de ([a-záéíóúñ0-9\s]{4,80}?)(?: para| con|\.|,|$)/i,
+    /soluciones de ([a-záéíóúñ0-9\s]{4,80}?)(?: para| con|\.|,|$)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = compact.match(pattern);
+    if (match?.[1]) {
+      const candidate = sanitizeFocus(match[1]);
+      if (candidate) return candidate;
+    }
+  }
+
+  if (/equipos de oficina/i.test(lowered)) return "equipos de oficina";
+  if (/ropa deportiva/i.test(lowered)) return "ropa deportiva";
+  if (/asesor[ií]a/i.test(lowered)) return "asesoría profesional";
+  return null;
+}
+
+function sanitizeFocus(value: string) {
+  const compact = value
+    .replace(/\b(producto|productos|servicio|servicios|negocio)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!compact || compact.length < 4 || containsProductPlaceholderNames(compact)) return null;
+  return compact;
+}
+
+function capitalizePhrase(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function containsProductPlaceholderNames(value: string) {
+  return /\bproducto\s*(estrella|\d+)\b/i.test(value);
 }
 
 function clampScore(value: number) {

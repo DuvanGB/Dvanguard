@@ -25,6 +25,8 @@ type StartGenerationInput = {
   generationMode?: "new" | "regenerate";
   currentSiteSpec?: SiteSpecV3;
   currentSiteSummary?: string;
+  designUpgradeObjective?: string;
+  regenerationIntent?: "visual_improvement";
 };
 
 type StartGenerationResult =
@@ -117,7 +119,9 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
           refine_confidence: input.refineConfidence ?? null,
           warnings_count: input.warningsCount ?? 0,
           generation_mode: input.generationMode ?? "new",
-          current_site_summary: input.currentSiteSummary ?? null
+          current_site_summary: input.currentSiteSummary ?? null,
+          design_upgrade_objective: input.designUpgradeObjective ?? null,
+          regeneration_intent: input.regenerationIntent ?? null
         }
       },
       status: "queued",
@@ -144,7 +148,9 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
     templateId: input.templateId,
     briefDraft: input.briefDraft,
     callbackBaseUrl: env.appUrl,
-    currentSiteSummary: input.currentSiteSummary
+    currentSiteSummary: input.currentSiteSummary,
+    designUpgradeObjective: input.designUpgradeObjective,
+    regenerationIntent: input.regenerationIntent
   });
 
   if (!workerTrigger.ok) {

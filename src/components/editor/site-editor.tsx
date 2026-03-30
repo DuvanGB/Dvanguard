@@ -9,8 +9,20 @@ import { SiteHeader, getSiteHeaderPreviewHeight } from "@/components/runtime/sit
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
 import { CANVAS_BASE_WIDTH, applyEditableThemePatch, deriveVisualThemeFromLegacy, fontFamilies, getEditableThemeSnapshot, normalizeSiteSpecV3, stabilizeSiteSpecForMobile } from "@/lib/site-spec-v3";
 import { resolveFontStack } from "@/lib/design-fonts";
-import { getBodyFontFamily } from "@/lib/site-theme";
+import { formatCurrencyLatam, formatDateLatam } from "@/lib/locale-latam";
+import {
+  getBlockRadius,
+  getBodyFontFamily,
+  getButtonAppearance,
+  getCardSurface,
+  getHeadingFontFamily,
+  getLetterSpacingValue,
+  getSectionAppearance,
+  getSectionPadding,
+  getTextScale
+} from "@/lib/site-theme";
 import type { TemplateDefinition, TemplateId } from "@/lib/templates/types";
+import { normalizeWhatsappPhone } from "@/lib/whatsapp";
 
 type Props = {
   siteId: string;
@@ -1805,9 +1817,10 @@ function addSection(type: SiteSectionV3["type"]) {
                 />
               ) : null}
               {visibleSections
-                .map((section) => {
+                .map((section, sectionIndex) => {
                   const sectionWidth = canvasWidth;
                   const sectionHeight = getSectionHeightPx(section, viewport, sectionWidth);
+                  const sectionAppearance = getSectionAppearance(siteSpec.theme, section, sectionIndex);
 
                   return (
                     <article
@@ -1817,7 +1830,9 @@ function addSection(type: SiteSectionV3["type"]) {
                       }`}
                       style={{
                         minHeight: sectionHeight,
-                        height: sectionHeight
+                        height: sectionHeight,
+                        background: sectionAppearance.background,
+                        borderBottomColor: sectionAppearance.borderColor
                       }}
                       onDragOver={(event) => {
                         if (!draggingBlockType) return;
@@ -1851,6 +1866,20 @@ function addSection(type: SiteSectionV3["type"]) {
                           const rect = rectPercentToPx(getBlockRect(block, viewport), sectionWidth, sectionHeight);
                           const isSelected = selected?.sectionId === section.id && selected?.blockId === block.id;
                           const visualHeight = block.type === "text" ? getTextBlockMinHeightPx(block, rect.w, rect.h) : rect.h;
+                          const cardSurface = getCardSurface(siteSpec.theme);
+                          const buttonAppearance = getButtonAppearance(siteSpec.theme);
+                          const basePadding = getSectionPadding(siteSpec.theme);
+                          const textScale = getTextScale(siteSpec.theme);
+                          const defaultFontFamily =
+                            block.type === "text" && /headline|title|name/i.test(block.id)
+                              ? getHeadingFontFamily(siteSpec.theme)
+                              : block.type === "button"
+                                ? getHeadingFontFamily(siteSpec.theme)
+                                : getBodyFontFamily(siteSpec.theme);
+                          const blockColor =
+                            block.type === "product"
+                              ? cardSurface.color
+                              : block.style.color ?? siteSpec.theme.palette.text_primary;
 
                           return (
                             <div
@@ -1863,22 +1892,26 @@ function addSection(type: SiteSectionV3["type"]) {
                                 height: visualHeight,
                                 minHeight: visualHeight,
                                 zIndex: rect.z,
-                                borderRadius: block.style.radius ?? 0,
-                                color: block.style.color,
-                                background: block.style.bgColor,
+                                borderRadius:
+                                  block.type === "product"
+                                    ? getBlockRadius(siteSpec.theme, block.style.radius ?? 16)
+                                    : block.style.radius ?? 0,
+                                color: blockColor,
+                                background: block.type === "product" ? undefined : block.style.bgColor,
                                 borderStyle: block.style.borderWidth ? "solid" : undefined,
                                 borderWidth: block.style.borderWidth,
                                 borderColor: block.style.borderColor,
                                 opacity: block.style.opacity,
-                                fontSize: block.style.fontSize,
+                                fontSize: block.style.fontSize ? block.style.fontSize * textScale : undefined,
                                 fontWeight: block.style.fontWeight,
-                                fontFamily: resolveFontStack(block.style.fontFamily ?? editableTheme.font_body),
+                                fontFamily: resolveFontStack(block.style.fontFamily ?? defaultFontFamily),
                                 textAlign: block.style.textAlign as "left" | "center" | "right" | undefined,
-                                padding: block.type === "text" ? 8 : 0,
+                                letterSpacing: getLetterSpacingValue(siteSpec.theme),
+                                padding: block.type === "text" ? basePadding : 0,
                                 overflow: "visible",
                                 whiteSpace: block.type === "text" ? "pre-wrap" : undefined,
                                 overflowWrap: block.type === "text" ? "anywhere" : undefined,
-                                lineHeight: block.type === "text" ? 1.15 : undefined
+                                lineHeight: block.type === "text" ? (siteSpec.theme.typography.scale === "editorial" ? 1.05 : 1.15) : undefined
                               }}
                               onMouseDown={(event) => startDragging(event, section.id, block, "move")}
                               onClick={(event) => {
@@ -1896,12 +1929,74 @@ function addSection(type: SiteSectionV3["type"]) {
                                   style={{ width: "100%", height: "100%", objectFit: block.content.fit ?? "contain" }}
                                 />
                               ) : null}
-                              {block.type === "button" ? <button type="button">{block.content.label}</button> : null}
+                              {block.type === "button" ? (
+                                <button
+                                  type="button"
+                                  style={{
+                                    ...buttonAppearance,
+                                    width: "100%",
+                                    height: "100%",
+                                    display: "grid",
+                                    placeItems: "center",
+                                    cursor: "pointer"
+                                  }}
+                                >
+                                  {block.content.label}
+                                </button>
+                              ) : null}
                               {block.type === "product" ? (
-                                <div className="canvas-product">
-                                  <div className="canvas-product-image" />
-                                  <strong>{block.content.name}</strong>
-                                  {block.content.price !== undefined ? <span>${block.content.price}</span> : null}
+                                <div
+                                  className="canvas-product"
+                                  style={{
+                                    ...cardSurface,
+                                    padding: basePadding,
+                                    borderColor: block.style.borderColor ?? cardSurface.borderColor,
+                                    borderWidth: block.style.borderWidth ?? 1,
+                                    borderStyle: "solid",
+                                    borderRadius: getBlockRadius(siteSpec.theme, block.style.radius ?? 16)
+                                  }}
+                                >
+                                  <div
+                                    className="canvas-product-image"
+                                    style={{
+                                      borderRadius: getBlockRadius(siteSpec.theme, 12),
+                                      overflow: "hidden"
+                                    }}
+                                  >
+                                    <img
+                                      src={block.content.image_url || "https://placehold.co/640x420?text=Producto"}
+                                      alt={block.content.name}
+                                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                    />
+                                  </div>
+                                  <strong style={{ fontSize: 18 * textScale, fontFamily: getHeadingFontFamily(siteSpec.theme), color: cardSurface.color }}>
+                                    {block.content.name}
+                                  </strong>
+                                  {block.content.description ? (
+                                    <span style={{ fontSize: 14 * textScale, color: siteSpec.theme.palette.text_muted }}>{block.content.description}</span>
+                                  ) : null}
+                                  <div className="canvas-product-footer">
+                                    {block.content.price !== undefined ? (
+                                      <span style={{ fontWeight: 700, color: cardSurface.color }}>
+                                        {formatEditorPrice(block.content.price, block.content.currency)}
+                                      </span>
+                                    ) : (
+                                      <span style={{ fontWeight: 700, color: cardSurface.color }}>Consultar</span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      style={{
+                                        ...buttonAppearance,
+                                        width: "auto",
+                                        height: "auto",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center"
+                                      }}
+                                    >
+                                      Agregar
+                                    </button>
+                                  </div>
                                 </div>
                               ) : null}
                               {block.type === "shape" ? <div className="canvas-shape" /> : null}
@@ -2086,7 +2181,7 @@ function addSection(type: SiteSectionV3["type"]) {
                               <option value="">Usar imagen de librería...</option>
                               {assets.map((asset) => (
                                 <option key={asset.id} value={asset.id}>
-                                  {asset.kind === "uploaded" ? "Archivo" : "URL"} • {new Date(asset.created_at).toLocaleDateString()}
+                                  {asset.kind === "uploaded" ? "Archivo" : "URL"} • {formatDateLatam(asset.created_at)}
                                 </option>
                               ))}
                             </select>
@@ -2225,7 +2320,7 @@ function addSection(type: SiteSectionV3["type"]) {
                                         whatsapp: {
                                           ...(prev.integrations.whatsapp ?? {}),
                                           enabled: true,
-                                          phone: event.target.value,
+                                          phone: normalizeWhatsappPhone(event.target.value),
                                           cta_label: selectedBlock.content.label
                                         }
                                       }
@@ -2373,7 +2468,7 @@ function addSection(type: SiteSectionV3["type"]) {
                               <option value="">Usar imagen de librería...</option>
                               {assets.map((asset) => (
                                 <option key={asset.id} value={asset.id}>
-                                  {asset.kind === "uploaded" ? "Archivo" : "URL"} • {new Date(asset.created_at).toLocaleDateString()}
+                                  {asset.kind === "uploaded" ? "Archivo" : "URL"} • {formatDateLatam(asset.created_at)}
                                 </option>
                               ))}
                             </select>
@@ -3025,6 +3120,16 @@ function clampZoomPercent(value: number) {
 function round(value: number, decimals = 3) {
   const factor = Math.pow(10, decimals);
   return Math.round(value * factor) / factor;
+}
+
+function formatEditorPrice(value?: number, currency?: string) {
+  if (value === undefined || value === null) return "Consultar";
+  const normalizedCurrency = currency?.trim() || "COP";
+  try {
+    return formatCurrencyLatam(value, normalizedCurrency);
+  } catch {
+    return `${normalizedCurrency} ${value}`;
+  }
 }
 
 // (image auto-fit removed: images should adapt to container size)

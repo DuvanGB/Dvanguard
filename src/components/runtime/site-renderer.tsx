@@ -7,6 +7,7 @@ import { buildFallbackSiteSpecV3, parseSiteSpecV3 } from "@/lib/site-spec-v3";
 import { getBodyFontFamily } from "@/lib/site-theme";
 import { SiteHeader } from "@/components/runtime/site-header";
 import { CanvasSection, type ProductCartItem } from "@/components/runtime/sections";
+import type { SiteThemeV31 } from "@/lib/site-spec-v3";
 
 export type EditorViewport = "desktop" | "mobile";
 
@@ -153,6 +154,7 @@ export function SiteRenderer({ spec, viewport, trackEvents = false, siteId, subd
         ))}
       {cartVisible ? (
         <CartDock
+          theme={normalized.theme}
           items={cart.items}
           open={cart.open}
           onToggle={() => cart.setOpen((prev) => !prev)}
@@ -490,6 +492,7 @@ function formatCurrency(value: number, currency: string) {
 }
 
 function CartDock(props: {
+  theme: SiteThemeV31;
   items: CartItem[];
   open: boolean;
   onToggle: () => void;
@@ -505,15 +508,30 @@ function CartDock(props: {
 }) {
   const total = props.items.reduce((sum, item) => sum + (item.price ?? 0) * item.quantity, 0);
   const currency = props.items.find((item) => item.currency)?.currency ?? "COP";
+  const cartFabStyle = {
+    background: props.theme.palette.accent,
+    color: getContrastColor(props.theme.palette.accent),
+    border: `1px solid ${props.theme.palette.accent}`
+  };
+  const cartCheckoutStyle = {
+    background: props.theme.palette.accent,
+    color: getContrastColor(props.theme.palette.accent),
+    borderColor: props.theme.palette.accent
+  };
+  const cartPanelStyle = {
+    background: props.theme.palette.surface,
+    borderColor: props.theme.palette.border,
+    color: props.theme.palette.text_primary
+  };
 
   return (
     <div className="cart-dock">
-      <button type="button" className="cart-fab" onClick={props.onToggle}>
+      <button type="button" className="cart-fab" onClick={props.onToggle} style={cartFabStyle}>
         Carrito ({props.items.reduce((sum, item) => sum + item.quantity, 0)})
       </button>
 
       {props.open ? (
-        <aside className="cart-panel">
+        <aside className="cart-panel" style={cartPanelStyle}>
           <div className="cart-panel-header">
             <strong>Tu carrito</strong>
             <button type="button" className="btn-secondary" onClick={props.onClose}>
@@ -550,7 +568,13 @@ function CartDock(props: {
             </div>
           ) : null}
 
-          <button type="button" className="btn-primary" onClick={props.onCheckout} disabled={!props.items.length}>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={props.onCheckout}
+            disabled={!props.items.length}
+            style={cartCheckoutStyle}
+          >
             Pagar por WhatsApp
           </button>
 
@@ -579,6 +603,16 @@ function CartDock(props: {
       ) : null}
     </div>
   );
+}
+
+function getContrastColor(color: string) {
+  const hex = color.replace("#", "");
+  const normalized = hex.length === 3 ? hex.split("").map((char) => char + char).join("") : hex;
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return luminance < 0.46 ? "#ffffff" : "#111827";
 }
 
 function getOrCreateClientId() {

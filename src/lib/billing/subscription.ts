@@ -22,6 +22,7 @@ import {
   isWompiConfigured
 } from "@/lib/billing/wompi";
 import { env } from "@/lib/env";
+import { formatDateLatam } from "@/lib/locale-latam";
 import { recordPlatformEvent } from "@/lib/platform-events";
 
 const GRACE_DAYS = 3;
@@ -523,7 +524,7 @@ async function sendManualReminderEmail(input: { to: string; endsAt: string; meth
       from: env.resendFromEmail,
       to: [input.to],
       subject: "Tu plan Pro está por vencer",
-      html: `<p>Tu acceso Pro pagado con ${label} vence el ${new Date(input.endsAt).toLocaleDateString("es-CO")}.</p><p>Puedes renovarlo desde tu panel o registrar una tarjeta para continuar sin interrupciones.</p>`
+      html: `<p>Tu acceso Pro pagado con ${label} vence el ${formatDateLatam(input.endsAt)}.</p><p>Puedes renovarlo desde tu panel o registrar una tarjeta para continuar sin interrupciones.</p>`
     })
   });
 
@@ -1069,7 +1070,7 @@ export async function applyBillingAccessRules(admin: SupabaseClient, userId: str
 
 export async function getBillingSummary(admin: SupabaseClient, userId: string, email?: string | null): Promise<BillingSummary> {
   await ensureUserPlan(admin, userId);
-  const [legal, acceptance, applied] = await Promise.all([
+  const [legal, acceptance, applied, defaultPaymentMethod] = await Promise.all([
     getBillingLegalStatus(admin, userId),
     isWompiConfigured()
       ? getWompiAcceptanceTokens().catch(() => ({
@@ -1084,11 +1085,28 @@ export async function getBillingSummary(admin: SupabaseClient, userId: string, e
           termsPermalink: null,
           personalDataPermalink: null
         }),
-    applyBillingAccessRules(admin, userId, email)
+    applyBillingAccessRules(admin, userId, email),
+    getDefaultPaymentMethod(admin, userId).catch(() => null)
   ]);
 
   const plan = (await ensureUserPlan(admin, userId)).plan_code as PlanCode;
   const subscription = applied.subscription;
+  const effectivePaymentMethod =
+    subscription?.payment_method_last4 || subscription?.payment_method_brand
+      ? {
+          brand: subscription.payment_method_brand,
+          last4: subscription.payment_method_last4,
+          expMonth: subscription.payment_method_exp_month,
+          expYear: subscription.payment_method_exp_year
+        }
+      : defaultPaymentMethod
+        ? {
+            brand: defaultPaymentMethod.brand,
+            last4: defaultPaymentMethod.last4,
+            expMonth: defaultPaymentMethod.exp_month,
+            expYear: defaultPaymentMethod.exp_year
+          }
+        : null;
 
   return {
     plan,
@@ -1109,14 +1127,7 @@ export async function getBillingSummary(admin: SupabaseClient, userId: string, e
       termsPermalink: acceptance.termsPermalink,
       personalDataPermalink: acceptance.personalDataPermalink
     },
-    paymentMethod: subscription?.payment_method_last4
-      ? {
-          brand: subscription.payment_method_brand,
-          last4: subscription.payment_method_last4,
-          expMonth: subscription.payment_method_exp_month,
-          expYear: subscription.payment_method_exp_year
-        }
-      : null
+    paymentMethod: effectivePaymentMethod
   };
 }
 
@@ -1368,6 +1379,129 @@ export async function switchManualMembershipToCard(
 
   return {
     switchToCardAt: current.current_period_end
+  };
+}
+
+export async function updateStoredCardPaymentMethod(
+  admin: SupabaseClient,
+  input: {
+    userId: string;
+    email: string;
+    token: string;
+  }
+) {
+  await requireBillingLegalAccepted(admin, input.userId);
+  const acceptance = await getWompiAcceptanceTokens();
+  if (!acceptance.acceptanceToken || !acceptance.personalDataAuthToken) {
+    throw new Error("No se pudieron obtener los contratos de aceptación de Wompi.");
+  }
+
+  const paymentSource = await createWompiPaymentSource({
+    token: input.token,
+    customerEmail: input.email,
+    acceptanceToken: acceptance.acceptanceToken,
+    acceptPersonalAuth: acceptance.personalDataAuthToken
+  });
+
+  const cardDetails = getCardPaymentMethodDetails(paymentSource as JsonRecord);
+  const persistedPaymentMethod = await persistPaymentMethod(admin, {
+    userId: input.userId,
+    wompiPaymentSourceId: Number(paymentSource.id),
+    brand: cardDetails.brand,
+    last4: cardDetails.last4,
+    expMonth: cardDetails.expMonth,
+    expYear: cardDetails.expYear
+  });
+
+  const current = await getBillingSubscriptionRecord(admin, input.userId);
+  if (current) {
+    if (current.rail === "card_subscription") {
+      const { error } = await admin
+        .from("billing_memberships")
+        .update({
+          payment_method_id: persistedPaymentMethod.id
+        })
+        .eq("id", current.id);
+
+      if (error) {
+        throw new Error(`No se pudo actualizar la tarjeta de la suscripción: ${error.message}`);
+      }
+    } else if (current.switch_to_card_at) {
+      const { error } = await admin
+        .from("billing_memberships")
+        .update({
+          switch_to_card_payment_method_id: persistedPaymentMethod.id
+        })
+        .eq("id", current.id);
+
+      if (error) {
+        throw new Error(`No se pudo actualizar la tarjeta programada: ${error.message}`);
+      }
+    }
+  }
+
+  return {
+    paymentMethod: persistedPaymentMethod
+  };
+}
+
+export async function removeStoredCardPaymentMethod(admin: SupabaseClient, userId: string) {
+  const currentMethod = await getDefaultPaymentMethod(admin, userId);
+  if (!currentMethod) {
+    throw new Error("No tienes una tarjeta guardada para eliminar.");
+  }
+
+  const current = await getBillingSubscriptionRecord(admin, userId);
+  let renewalCanceled = false;
+  let removedScheduledSwitch = false;
+
+  if (current?.rail === "card_subscription" && current.payment_method_id === currentMethod.id) {
+    const { error } = await admin
+      .from("billing_memberships")
+      .update({
+        renews_automatically: false,
+        payment_method_id: null,
+        next_charge_at: null
+      })
+      .eq("id", current.id);
+
+    if (error) {
+      throw new Error(`No se pudo desvincular la tarjeta de la suscripción: ${error.message}`);
+    }
+    renewalCanceled = true;
+  }
+
+  if (current?.switch_to_card_payment_method_id === currentMethod.id) {
+    const { error } = await admin
+      .from("billing_memberships")
+      .update({
+        switch_to_card_at: null,
+        switch_to_card_payment_method_id: null
+      })
+      .eq("id", current.id);
+
+    if (error) {
+      throw new Error(`No se pudo eliminar la tarjeta programada: ${error.message}`);
+    }
+    removedScheduledSwitch = true;
+  }
+
+  const { error } = await admin
+    .from("billing_payment_methods")
+    .update({
+      status: "removed",
+      is_default: false
+    })
+    .eq("id", currentMethod.id);
+
+  if (error) {
+    throw new Error(`No se pudo eliminar la tarjeta guardada: ${error.message}`);
+  }
+
+  return {
+    ok: true,
+    renewalCanceled,
+    removedScheduledSwitch
   };
 }
 

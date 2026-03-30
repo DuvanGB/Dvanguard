@@ -133,7 +133,9 @@ async function requestProposalFromModel(input) {
             "catalog: three-grid, mosaic, featured-left, featured-top, service-cards, service-strip; " +
             "testimonials: wall, spotlight, compact-band, quote-column; contact: CTA band, split contact, card CTA. " +
             "Cada bloque debe usar matchId existentes como hero-bg, hero-overlay, headline, subheadline, hero-image, " +
-            "title, product-1, product-2, product-3, card-1, image-1, name-1, desc-1, quote-1, description, contact-cta."
+            "title, product-1, product-2, product-3, card-1, image-1, name-1, desc-1, quote-1, description, contact-cta. " +
+            "Si llega contexto de un sitio existente, úsalo como contenido a preservar, no como texto para rehacer el brief. " +
+            "La propuesta debe sentirse mejor que la versión actual, no solo distinta por color."
         },
         {
           role: "user",
@@ -141,6 +143,8 @@ async function requestProposalFromModel(input) {
             `Prompt: ${String(input.prompt || "")}`,
             `Brief: ${JSON.stringify(input.briefDraft || {})}`,
             input.currentSiteSummary ? `Contexto sitio actual:\n${String(input.currentSiteSummary)}` : null,
+            input.designUpgradeObjective ? `Objetivo de mejora: ${String(input.designUpgradeObjective)}` : null,
+            input.regenerationIntent ? `Intención de regeneración: ${String(input.regenerationIntent)}` : null,
             "Quiero una sola propuesta visual fuerte, distinta por composición y jerarquía, no solo por color."
           ]
             .filter(Boolean)
@@ -570,10 +574,11 @@ async function requestRefineFromModel(input) {
           content:
             "Devuelve SOLO JSON válido con este contrato: " +
             "{briefDraft:{business_name,business_type,offer_summary,target_audience,tone,primary_cta,whatsapp_phone,whatsapp_message}," +
-            "confidence,completenessScore,warnings,followUpQuestion,missingFields,heroSuggestion:{headline,subheadline,primary_cta,hero_direction},heroConfidence}. " +
+            "confidence,completenessScore,warnings,followUpQuestion,missingFields,offerSummarySuggestion,offerSummaryConfidence,offerSummaryNeedsApproval,heroSuggestion:{headline,subheadline,primary_cta,hero_direction},heroConfidence}. " +
             "No incluyas section_preferences ni style_preset. " +
             "missingFields solo puede contener offer_summary,target_audience,whatsapp_phone,business_type. " +
             "tone es interno: puedes devolverlo, pero no hagas preguntas al usuario sobre estilo visual si faltan otros datos de negocio. " +
+            "Si el usuario escribe como intención ('necesito crear...', 'quiero vender...'), mantén un brief útil pero devuelve además offerSummarySuggestion más comercial para que la UI la sugiera sin imponerla. " +
             "Intenta siempre proponer heroSuggestion; si no tienes suficiente claridad, devuelve heroConfidence bajo y usa followUpQuestion para pedir la pieza faltante."
         },
         {
@@ -608,16 +613,29 @@ function buildHeuristicRefine(input) {
   const followUpAnswer = String(input.followUpAnswer || "").trim();
   const briefDraft = buildHeuristicBrief(rawInput, currentBrief, followUpAnswer);
   const missingFields = collectMissingFields(briefDraft);
+  const offerSummaryInsight = buildOfferSummaryInsight({
+    briefDraft,
+    rawInput,
+    currentBrief,
+    followUpAnswer
+  });
+  const heroSourceBrief =
+    offerSummaryInsight.offerSummaryNeedsApproval && offerSummaryInsight.offerSummarySuggestion
+      ? { ...briefDraft, offer_summary: offerSummaryInsight.offerSummarySuggestion }
+      : briefDraft;
   return {
     briefDraft,
     confidence: 0.6,
     completenessScore: computeCompletenessScore(briefDraft, rawInput),
     warnings: buildWarnings(rawInput, briefDraft),
     provider: "heuristic",
-    followUpQuestion: buildHeroConfidence(briefDraft, missingFields) < 0.75 ? buildHeroFollowUpQuestion(briefDraft, missingFields) : buildFollowUpQuestion(missingFields),
+    followUpQuestion: buildHeroConfidence(heroSourceBrief, missingFields) < 0.75 ? buildHeroFollowUpQuestion(heroSourceBrief, missingFields) : buildFollowUpQuestion(missingFields),
     missingFields,
-    heroSuggestion: buildHeroSuggestion(briefDraft),
-    heroConfidence: buildHeroConfidence(briefDraft, missingFields)
+    offerSummarySuggestion: offerSummaryInsight.offerSummarySuggestion,
+    offerSummaryConfidence: offerSummaryInsight.offerSummaryConfidence,
+    offerSummaryNeedsApproval: offerSummaryInsight.offerSummaryNeedsApproval,
+    heroSuggestion: buildHeroSuggestion(heroSourceBrief),
+    heroConfidence: buildHeroConfidence(heroSourceBrief, missingFields)
   };
 }
 
@@ -707,6 +725,42 @@ function mergeBrief(base, currentBrief) {
   };
 }
 
+function buildOfferSummaryInsight({ briefDraft, rawInput, currentBrief = null, followUpAnswer = "" }) {
+  const currentEditable =
+    currentBrief?.offer_summary ||
+    deriveEditableOfferSummary({
+      rawInput,
+      generatedOfferSummary: briefDraft.offer_summary,
+      followUpAnswer
+    });
+  const generated = normalizeCommercialOfferSummary({
+    offerSummary: briefDraft.offer_summary,
+    businessName: briefDraft.business_name,
+    businessType: briefDraft.business_type,
+    targetAudience: briefDraft.target_audience
+  });
+
+  if (!generated) {
+    return { offerSummarySuggestion: null, offerSummaryConfidence: null, offerSummaryNeedsApproval: false };
+  }
+
+  const needsApproval =
+    !currentEditable ||
+    looksLikeIntentPrompt(currentEditable) ||
+    isLowQualityOfferSummary(currentEditable) ||
+    normalizeComparableText(currentEditable) !== normalizeComparableText(generated);
+
+  if (!needsApproval) {
+    return { offerSummarySuggestion: null, offerSummaryConfidence: null, offerSummaryNeedsApproval: false };
+  }
+
+  return {
+    offerSummarySuggestion: generated,
+    offerSummaryConfidence: looksLikeIntentPrompt(currentEditable || "") ? 0.86 : 0.78,
+    offerSummaryNeedsApproval: true
+  };
+}
+
 function inferBusinessName(rawInput) {
   const trimmed = String(rawInput || "").trim();
   const firstSentence = trimmed.split(/[.!?\n]/)[0]?.trim() || trimmed;
@@ -754,13 +808,16 @@ function buildWarnings(rawInput, brief) {
 }
 
 function buildHeroSuggestion(brief) {
-  const headline =
-    brief.business_type === "commerce_lite"
-      ? `Descubre ${brief.business_name}`
-      : `${brief.business_name}: ${String(brief.offer_summary || "").split(/[,.]/)[0] || "tu propuesta"}`;
+  const offer = normalizeCommercialOfferSummary({
+    offerSummary: brief.offer_summary,
+    businessName: brief.business_name,
+    businessType: brief.business_type,
+    targetAudience: brief.target_audience
+  }) || brief.offer_summary;
+  const headline = deriveHeroHeadline(brief, String(offer || ""));
   return {
     headline: headline.slice(0, 120),
-    subheadline: `${brief.offer_summary}${String(brief.offer_summary || "").endsWith(".") ? "" : "."} Pensado para ${String(brief.target_audience || "").toLowerCase()}.`.slice(0, 220),
+    subheadline: `${offer}${String(offer || "").endsWith(".") ? "" : "."} Pensado para ${String(brief.target_audience || "").toLowerCase()}.`.slice(0, 220),
     primary_cta: brief.primary_cta || "Solicitar información",
     hero_direction:
       brief.business_type === "commerce_lite"
@@ -803,7 +860,7 @@ function computeCompletenessScore(brief, rawInput) {
 
 function suggestOfferSummary({ rawInput, businessName, businessType, targetAudience }) {
   const trimmed = String(rawInput || "").trim().replace(/\s+/g, " ");
-  if (trimmed.length >= 36) {
+  if (trimmed.length >= 36 && !looksLikeIntentPrompt(trimmed)) {
     return trimmed.length > 220 ? `${trimmed.slice(0, 217)}...` : trimmed;
   }
 
@@ -812,6 +869,98 @@ function suggestOfferSummary({ rawInput, businessName, businessType, targetAudie
   }
 
   return `${businessName} presenta su oferta principal para ${String(targetAudience || "clientes potenciales").toLowerCase()}, con una propuesta clara para generar confianza y facilitar el contacto.`;
+}
+
+function deriveEditableOfferSummary({ rawInput, generatedOfferSummary, followUpAnswer = "" }) {
+  if (String(followUpAnswer || "").trim()) return String(followUpAnswer || "").trim().slice(0, 600);
+  const compactRaw = String(rawInput || "").trim().replace(/\s+/g, " ");
+  if (compactRaw.length >= 12 && !looksLikeIntentPrompt(compactRaw) && !containsProductPlaceholderNames(compactRaw)) {
+    return compactRaw.length > 600 ? `${compactRaw.slice(0, 597).trimEnd()}...` : compactRaw;
+  }
+  return String(generatedOfferSummary || "").trim() || "Presentación principal del negocio.";
+}
+
+function normalizeCommercialOfferSummary({ offerSummary, businessName, businessType, targetAudience }) {
+  const compact = String(offerSummary || "").trim().replace(/\s+/g, " ");
+  if (!compact) return null;
+  if (!looksLikeIntentPrompt(compact) && !isLowQualityOfferSummary(compact)) return compact.length > 600 ? `${compact.slice(0, 597).trimEnd()}...` : compact;
+  if (businessType === "commerce_lite") {
+    return `${businessName} ofrece una selección clara de productos para ${String(targetAudience || "clientes potenciales").toLowerCase()}, con atención ágil, catálogo fácil de recorrer y contacto directo para cerrar ventas.`;
+  }
+  return `${businessName} presenta una propuesta clara para ${String(targetAudience || "clientes potenciales").toLowerCase()}, con beneficios entendibles, confianza visual y un contacto directo para avanzar rápido.`;
+}
+
+function looksLikeIntentPrompt(value) {
+  const lower = String(value || "").trim().toLowerCase();
+  return /^(necesito|quiero|busco|me gustaria|me gustaría|deseo|crear|hacer|montar|armar)\b/.test(lower) ||
+    /quiero una p[aá]gina|necesito una web|crear un negocio|crear una tienda|hacer una web/.test(lower);
+}
+
+function isLowQualityOfferSummary(value) {
+  const compact = String(value || "").trim();
+  if (compact.length < 36) return true;
+  const lower = compact.toLowerCase();
+  return containsProductPlaceholderNames(compact) || (!containsValueProposition(lower) && compact.split(/\s+/).length < 9);
+}
+
+function deriveHeroHeadline(brief, offer) {
+  const focus = extractCommercialFocus(offer);
+  if (brief.business_type === "commerce_lite") {
+    if (focus) return `${capitalizePhrase(focus)} con atención ágil`;
+    return "Compra con claridad y atención rápida";
+  }
+  if (focus) return `${capitalizePhrase(focus)} con una propuesta clara`;
+  return "Haz que tu propuesta se entienda al instante";
+}
+
+function extractCommercialFocus(value) {
+  const compact = String(value || "").trim().replace(/\s+/g, " ");
+  const lowered = compact.toLowerCase();
+  const patterns = [
+    /venta de ([a-záéíóúñ0-9\s]{4,80}?)(?: para| con|\.|,|$)/i,
+    /ofrece(?: una)? ([a-záéíóúñ0-9\s]{4,80}?)(?: para| con|\.|,|$)/i,
+    /cat[aá]logo de ([a-záéíóúñ0-9\s]{4,80}?)(?: para| con|\.|,|$)/i,
+    /soluciones de ([a-záéíóúñ0-9\s]{4,80}?)(?: para| con|\.|,|$)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = compact.match(pattern);
+    if (match?.[1]) {
+      const candidate = sanitizeFocus(match[1]);
+      if (candidate) return candidate;
+    }
+  }
+
+  if (/equipos de oficina/i.test(lowered)) return "equipos de oficina";
+  if (/asesor[ií]a/i.test(lowered)) return "asesoría profesional";
+  return null;
+}
+
+function sanitizeFocus(value) {
+  const compact = String(value || "")
+    .replace(/\b(producto|productos|servicio|servicios|negocio)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!compact || compact.length < 4 || containsProductPlaceholderNames(compact)) return null;
+  return compact;
+}
+
+function capitalizePhrase(value) {
+  return String(value || "").charAt(0).toUpperCase() + String(value || "").slice(1);
+}
+
+function containsProductPlaceholderNames(value) {
+  return /\bproducto\s*(estrella|\d+)\b/i.test(String(value || ""));
+}
+
+function normalizeComparableText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function suggestPrimaryCta({ businessType, rawInput, offerSummary, hasWhatsappPhone }) {

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import type { BillingSummary, BillingInterval } from "@/lib/billing/types";
 import type { BillingTransactionRecord } from "@/lib/billing/subscription";
+import { formatCurrencyLatam, formatDateLatam } from "@/lib/locale-latam";
 
 type Props = {
   summary: BillingSummary;
@@ -34,20 +35,11 @@ type ManualFormState = {
 };
 
 function formatDate(value: string | null) {
-  if (!value) return "-";
-  return new Date(value).toLocaleDateString("es-CO", {
-    year: "numeric",
-    month: "short",
-    day: "numeric"
-  });
+  return formatDateLatam(value);
 }
 
 function formatMoney(amountInCents: number, currency = "COP") {
-  return new Intl.NumberFormat("es-CO", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0
-  }).format((amountInCents ?? 0) / 100);
+  return formatCurrencyLatam((amountInCents ?? 0) / 100, currency);
 }
 
 function paymentMethodLabel(summary: BillingSummary) {
@@ -221,6 +213,63 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
     }
   }
 
+  async function handleStoredCardUpdate() {
+    setMessage(null);
+    const legalOk = await ensureLegalAccepted();
+    if (!legalOk) return;
+
+    if (!cardReady) {
+      setMessage("Completa los datos de la nueva tarjeta antes de actualizar la información guardada.");
+      return;
+    }
+
+    try {
+      const token = await tokenizeCard(wompiPublicKey, cardForm);
+      const response = await fetch("/api/billing/payment-method", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token })
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setMessage(payload.error ?? "No se pudo actualizar la tarjeta guardada.");
+        return;
+      }
+
+      refresh("La tarjeta guardada quedó actualizada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo tokenizar la nueva tarjeta.");
+    }
+  }
+
+  async function handleStoredCardDelete() {
+    setMessage(null);
+    const response = await fetch("/api/billing/payment-method", { method: "DELETE" });
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      renewalCanceled?: boolean;
+      removedScheduledSwitch?: boolean;
+    };
+
+    if (!response.ok) {
+      setMessage(payload.error ?? "No se pudo eliminar la tarjeta guardada.");
+      return;
+    }
+
+    if (payload.renewalCanceled) {
+      refresh("Eliminamos la tarjeta y cancelamos la renovación automática futura. Mantienes tu acceso actual hasta el final del periodo.");
+      return;
+    }
+
+    if (payload.removedScheduledSwitch) {
+      refresh("Eliminamos la tarjeta guardada y también quitamos el paso automático a tarjeta que estaba programado.");
+      return;
+    }
+
+    refresh("La tarjeta guardada fue eliminada.");
+  }
+
   async function handleManualCheckout(method: "pse" | "nequi" | "bank_transfer") {
     setMessage(null);
     const legalOk = await ensureLegalAccepted();
@@ -316,6 +365,11 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
                 ? `Expira ${String(summary.paymentMethod.expMonth).padStart(2, "0")}/${summary.paymentMethod.expYear}`
                 : "Si compras con tarjeta, la usamos también para renovaciones."}
             </p>
+            {summary.paymentMethod ? (
+              <small className="muted">
+                Si reemplazas la tarjeta, la nueva queda como método principal. Si la eliminas y dependías de ella para renovar, la renovación automática se cancela.
+              </small>
+            ) : null}
           </article>
         </div>
 
@@ -406,6 +460,14 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
           <button type="button" className="btn-secondary" disabled={!cardReady || isPending} onClick={() => void handleCardAction("year")}>
             Pagar anual con tarjeta
           </button>
+          <button type="button" className="btn-secondary" disabled={!cardReady || isPending} onClick={() => void handleStoredCardUpdate()}>
+            Actualizar tarjeta guardada
+          </button>
+          {summary.paymentMethod ? (
+            <button type="button" className="btn-secondary btn-danger-soft" disabled={isPending} onClick={() => void handleStoredCardDelete()}>
+              Eliminar tarjeta
+            </button>
+          ) : null}
           {summary.rail === "card_subscription" && summary.renewsAutomatically ? (
             <button type="button" className="btn-secondary btn-danger-soft" onClick={() => void cancelAutoRenew()}>
               Cancelar renovación
