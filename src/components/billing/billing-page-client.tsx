@@ -13,6 +13,7 @@ type Props = {
   notices: string[];
   wompiPublicKey: string;
   userEmail: string;
+  copy: Record<string, string>;
 };
 
 type CardFormState = {
@@ -105,7 +106,7 @@ async function tokenizeCard(publicKey: string, form: CardFormState) {
   return payload.data.id;
 }
 
-export function BillingPageClient({ summary, transactions, notices, wompiPublicKey, userEmail }: Props) {
+export function BillingPageClient({ summary, transactions, notices, wompiPublicKey, userEmail, copy }: Props) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -333,8 +334,8 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
 
       <section className="card stack">
         <div className="stack" style={{ gap: "0.25rem" }}>
-          <h2>Primer paso legal</h2>
-          <p className="muted">Antes de pagar, necesitamos registrar tu aceptación de DVanguard y mostrarte los contratos de Wompi.</p>
+          <h2>{copy["billing.legal.title"]}</h2>
+          <p className="muted">{copy["billing.legal.description"]}</p>
         </div>
 
         <label className="billing-legal-check">
@@ -368,8 +369,8 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
 
       <section className="card stack">
         <div className="stack" style={{ gap: "0.25rem" }}>
-          <h2>Tarjeta: suscripción mensual o anual</h2>
-          <p className="muted">La tarjeta sí queda lista para renovar automáticamente. Úsala si quieres continuidad sin repetir el pago cada mes.</p>
+          <h2>{copy["billing.card.title"]}</h2>
+          <p className="muted">{copy["billing.card.description"]}</p>
         </div>
 
         <div className="catalog-grid">
@@ -426,8 +427,8 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
 
       <section className="card stack">
         <div className="stack" style={{ gap: "0.25rem" }}>
-          <h2>PSE, Nequi y banco: compra de tiempo</h2>
-          <p className="muted">Estos medios no suscriben. Compran un periodo mensual de Pro y luego decides si renovar manualmente o pasar a tarjeta.</p>
+          <h2>{copy["billing.manual.title"]}</h2>
+          <p className="muted">{copy["billing.manual.description"]}</p>
         </div>
 
         <div className="catalog-grid">
@@ -479,9 +480,9 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
 
       {summary.rail === "manual_term_purchase" && summary.currentPeriodEnd ? (
         <section className="card stack">
-          <h2>Pasar a tarjeta al vencimiento</h2>
+          <h2>{copy["billing.switch.title"]}</h2>
           <p className="muted">
-            Tienes tiempo Pro manual activo hasta el {formatDate(summary.currentPeriodEnd)}. Si quieres, registra la tarjeta ahora y la dejamos programada para activarse al vencer ese periodo.
+            {copy["billing.switch.description"]} Tienes tiempo Pro manual activo hasta el {formatDate(summary.currentPeriodEnd)}.
           </p>
           <button type="button" className="btn-secondary" disabled={!cardReady} onClick={() => void handleCardAction("month", true)}>
             Registrar tarjeta para renovar al vencimiento
@@ -491,8 +492,8 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
 
       <section className="card stack">
         <div className="stack" style={{ gap: "0.25rem" }}>
-          <h2>Historial de movimientos</h2>
-          <p className="muted">Aquí verás cargos recurrentes, compras manuales y estados de confirmación.</p>
+          <h2>{copy["billing.transactions.title"]}</h2>
+          <p className="muted">{copy["billing.transactions.description"]}</p>
         </div>
 
         {transactions.length ? (

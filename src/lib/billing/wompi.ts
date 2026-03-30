@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { env } from "@/lib/env";
+import { getDefaultProPlanCode, getPlanDefinition } from "@/lib/billing/plans";
 import type { BillingInterval, BillingPaymentMethodKind } from "@/lib/billing/types";
 
 type JsonRecord = Record<string, unknown>;
@@ -109,12 +111,23 @@ export async function getWompiAcceptanceTokens(): Promise<WompiMerchantAcceptanc
   };
 }
 
-export function getPlanAmountInCents(interval: BillingInterval) {
-  return interval === "year" ? 449_000_00 : 49_000_00;
+export async function getPlanAmountInCents(admin: SupabaseClient, interval: BillingInterval) {
+  const proPlanCode = await getDefaultProPlanCode(admin);
+  const plan = await getPlanDefinition(admin, proPlanCode);
+  const amountInCents = interval === "year" ? plan.yearlyPriceCents : plan.monthlyPriceCents;
+
+  if (!amountInCents || amountInCents <= 0) {
+    throw new Error(`Missing visible price for plan ${proPlanCode} (${interval}).`);
+  }
+
+  return amountInCents;
 }
 
-export function getManualAmountInCents(_kind: Exclude<BillingPaymentMethodKind, "card">) {
-  return getPlanAmountInCents("month");
+export async function getManualAmountInCents(
+  admin: SupabaseClient,
+  _kind: Exclude<BillingPaymentMethodKind, "card">
+) {
+  return getPlanAmountInCents(admin, "month");
 }
 
 export function buildWompiReference(prefix: string, userId: string) {

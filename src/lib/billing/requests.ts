@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { PRO_PLAN } from "@/lib/billing/plans";
+import { getDefaultProPlanCode } from "@/lib/billing/plans";
 import type { PlanCode, ProRequestStatus } from "@/lib/billing/types";
 
 export async function createProRequest(admin: SupabaseClient, userId: string) {
@@ -82,9 +82,10 @@ export async function reviewProRequest(
   }
 
   if (input.decision === "approved") {
+    const proPlanCode = await getDefaultProPlanCode(admin);
     await assignUserPlan(admin, {
       userId: request.user_id,
-      planCode: PRO_PLAN,
+      planCode: proPlanCode,
       assignedBy: input.adminId
     });
   }

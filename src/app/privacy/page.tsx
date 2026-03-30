@@ -1,23 +1,24 @@
-export default function PrivacyPage() {
+import { MarkdownLite } from "@/components/content/markdown-lite";
+import { getPublishedLegalDocument } from "@/lib/legal-documents";
+import { getSupabaseAdminClient } from "@/lib/supabase/server";
+
+export default async function PrivacyPage() {
+  const admin = getSupabaseAdminClient();
+  const { version } = await getPublishedLegalDocument(admin, "privacy");
+
   return (
     <main className="dashboard-shell">
       <div className="dashboard-container stack">
         <section className="card stack">
           <small className="dashboard-chip">Legal</small>
-          <h1>Privacidad</h1>
-          <p>
-            DVanguard usa tu correo, datos básicos de perfil y la información que ingresas en onboarding, editor y billing para
-            operar la plataforma, generar propuestas visuales, gestionar accesos Pro y darte soporte.
-          </p>
-          <p>
-            Cuando decides pagar, ciertos datos viajan a Wompi para tokenización, validación y procesamiento del medio de pago.
-            Si activas recordatorios de vencimiento o compras manuales, podemos enviarte correos transaccionales para avisarte
-            sobre renovaciones o expiración del acceso Pro.
-          </p>
-          <p>
-            No vendemos tus datos personales. Conservamos registros operativos mínimos de pagos, membresías y eventos para
-            auditoría, soporte y prevención de fraude.
-          </p>
+          <div className="stack" style={{ gap: "0.35rem" }}>
+            <h1>{version.title}</h1>
+            <p className="muted">
+              Versión {version.version_label}
+              {version.published_at ? ` · Publicado el ${new Date(version.published_at).toLocaleDateString("es-CO")}` : ""}
+            </p>
+          </div>
+          <MarkdownLite markdown={version.body_markdown} className="stack" stripFirstHeading />
         </section>
       </div>
     </main>

@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-const TRASH_RETENTION_DAYS = 7;
-const TRASH_RETENTION_MS = TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+import { getTrashPolicyConfig } from "@/lib/platform-config";
 
 export type TrashedSiteRecord = {
   site_id: string;
@@ -14,18 +13,30 @@ export type TrashedSiteRecord = {
   days_remaining: number;
 };
 
-export function getTrashPurgeAt(deletedAt: string | Date) {
-  const base = typeof deletedAt === "string" ? new Date(deletedAt) : deletedAt;
-  return new Date(base.getTime() + TRASH_RETENTION_MS);
+async function getTrashRetentionMs(admin: SupabaseClient) {
+  const { retentionDays } = await getTrashPolicyConfig(admin);
+  return retentionDays * 24 * 60 * 60 * 1000;
 }
 
-export function getTrashDaysRemaining(deletedAt: string | Date, now = new Date()) {
-  const purgeAt = getTrashPurgeAt(deletedAt);
+function computeTrashPurgeAt(deletedAt: string | Date, retentionMs: number) {
+  const base = typeof deletedAt === "string" ? new Date(deletedAt) : deletedAt;
+  return new Date(base.getTime() + retentionMs);
+}
+
+export async function getTrashPurgeAt(admin: SupabaseClient, deletedAt: string | Date) {
+  const retentionMs = await getTrashRetentionMs(admin);
+  return computeTrashPurgeAt(deletedAt, retentionMs);
+}
+
+export async function getTrashDaysRemaining(admin: SupabaseClient, deletedAt: string | Date, now = new Date()) {
+  const retentionMs = await getTrashRetentionMs(admin);
+  const purgeAt = computeTrashPurgeAt(deletedAt, retentionMs);
   return Math.max(0, Math.ceil((purgeAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)));
 }
 
 export async function purgeExpiredDeletedSites(admin: SupabaseClient, ownerId?: string) {
-  const thresholdIso = new Date(Date.now() - TRASH_RETENTION_MS).toISOString();
+  const retentionMs = await getTrashRetentionMs(admin);
+  const thresholdIso = new Date(Date.now() - retentionMs).toISOString();
   let query = admin.from("sites").select("id, owner_id").not("deleted_at", "is", null).lte("deleted_at", thresholdIso);
 
   if (ownerId) {
@@ -63,20 +74,22 @@ export async function listTrashedSitesForOwner(admin: SupabaseClient, ownerId: s
   }
 
   const now = new Date();
-  return (data ?? []).flatMap((site) => {
-    if (!site.deleted_at) return [];
-    const purgeAt = getTrashPurgeAt(site.deleted_at);
-    return [
-      {
-        site_id: site.id,
-        name: site.name,
-        subdomain: site.subdomain,
-        site_type: site.site_type === "commerce_lite" ? "commerce_lite" : "informative",
-        status: site.status === "published" ? "published" : site.status === "archived" ? "archived" : "draft",
-        deleted_at: site.deleted_at,
-        purge_at: purgeAt.toISOString(),
-        days_remaining: getTrashDaysRemaining(site.deleted_at, now)
-      }
-    ];
-  });
+  const retentionMs = await getTrashRetentionMs(admin);
+  const items: TrashedSiteRecord[] = [];
+  for (const site of data ?? []) {
+    if (!site.deleted_at) continue;
+    const purgeAt = computeTrashPurgeAt(site.deleted_at, retentionMs);
+    items.push({
+      site_id: site.id,
+      name: site.name,
+      subdomain: site.subdomain,
+      site_type: site.site_type === "commerce_lite" ? "commerce_lite" : "informative",
+      status: site.status === "published" ? "published" : site.status === "archived" ? "archived" : "draft",
+      deleted_at: site.deleted_at,
+      purge_at: purgeAt.toISOString(),
+      days_remaining: Math.max(0, Math.ceil((purgeAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)))
+    });
+  }
+
+  return items;
 }

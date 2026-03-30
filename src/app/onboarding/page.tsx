@@ -4,8 +4,8 @@ import { redirect } from "next/navigation";
 import { OnboardingSiteSelector, type OnboardingSiteListItem } from "@/components/forms/onboarding-site-selector";
 import { OnboardingWizard } from "@/components/forms/onboarding-wizard";
 import { requireUser } from "@/lib/auth";
-import { env } from "@/lib/env";
 import { recordPlatformEvent } from "@/lib/platform-events";
+import { getOnboardingPlatformConfig } from "@/lib/platform-config";
 import { normalizeSiteSpecV3, type SiteSpecV3 } from "@/lib/site-spec-v3";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
@@ -17,6 +17,7 @@ export default async function OnboardingPage({
   const { user, supabase } = await requireUser();
   const params = await searchParams;
   const admin = getSupabaseAdminClient();
+  const onboardingConfig = await getOnboardingPlatformConfig(admin);
 
   const siteId = params.siteId;
   const source = params.source;
@@ -135,8 +136,8 @@ export default async function OnboardingPage({
       <OnboardingWizard
         siteId={site.id}
         siteName={site.name}
-        maxInputChars={env.onboardingMaxInputChars}
-        voiceLocale={env.voiceLocale}
+        maxInputChars={onboardingConfig.maxInputChars}
+        voiceLocale={onboardingConfig.voiceLocale}
         generationMode={source === "regenerate" ? "regenerate" : "new"}
         initialSpec={initialSpec}
       />

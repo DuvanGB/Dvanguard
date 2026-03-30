@@ -4,6 +4,7 @@ import { BillingPageClient } from "@/components/billing/billing-page-client";
 import { requireUser } from "@/lib/auth";
 import { getBillingSummary, listBillingTransactions } from "@/lib/billing/subscription";
 import { env } from "@/lib/env";
+import { getPlatformCopyMap } from "@/lib/platform-config";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export default async function BillingPage({
@@ -14,9 +15,24 @@ export default async function BillingPage({
   const params = await searchParams;
   const { user } = await requireUser();
   const admin = getSupabaseAdminClient();
-  const [summary, transactions] = await Promise.all([
+  const [summary, transactions, copy] = await Promise.all([
     getBillingSummary(admin, user.id, user.email ?? null),
-    listBillingTransactions(admin, user.id)
+    listBillingTransactions(admin, user.id),
+    getPlatformCopyMap(admin, [
+      "billing.hero.eyebrow",
+      "billing.hero.title",
+      "billing.hero.description",
+      "billing.legal.title",
+      "billing.legal.description",
+      "billing.card.title",
+      "billing.card.description",
+      "billing.manual.title",
+      "billing.manual.description",
+      "billing.switch.title",
+      "billing.switch.description",
+      "billing.transactions.title",
+      "billing.transactions.description"
+    ])
   ]);
 
   const notices: string[] = [];
@@ -41,9 +57,9 @@ export default async function BillingPage({
       <div className="dashboard-container stack">
         <section className="dashboard-hero">
           <div className="stack" style={{ gap: "0.35rem" }}>
-            <small className="dashboard-chip">Billing</small>
-            <h1>Suscripción y facturación</h1>
-            <p>Gestiona Pro con Wompi usando tarjeta, PSE, Nequi o transferencia bancaria sin salir de DVanguard.</p>
+            <small className="dashboard-chip">{copy["billing.hero.eyebrow"]}</small>
+            <h1>{copy["billing.hero.title"]}</h1>
+            <p>{copy["billing.hero.description"]}</p>
             <div className="dashboard-hero-actions">
               <Link href="/dashboard" className="btn-secondary">
                 Volver al dashboard
@@ -62,6 +78,7 @@ export default async function BillingPage({
           notices={notices}
           wompiPublicKey={env.wompiPublicKey}
           userEmail={user.email ?? ""}
+          copy={copy}
         />
       </div>
     </main>

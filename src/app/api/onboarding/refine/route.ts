@@ -2,22 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireApiUser } from "@/lib/auth";
-import { env } from "@/lib/env";
 import { getRequestClientKey } from "@/lib/http";
 import { refineBusinessBrief } from "@/lib/onboarding/refine-brief";
 import { businessBriefDraftSchema, onboardingInputModeSchema } from "@/lib/onboarding/types";
+import { getOnboardingPlatformConfig } from "@/lib/platform-config";
 import { recordPlatformEvent } from "@/lib/platform-events";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
-
-const bodySchema = z.object({
-  siteId: z.string().uuid(),
-  rawInput: z.string().min(10).max(env.onboardingMaxInputChars),
-  inputMode: onboardingInputModeSchema,
-  currentBrief: businessBriefDraftSchema.partial().optional(),
-  followUpAnswer: z.string().min(1).max(500).optional(),
-  voiceEvent: z.enum(["unsupported", "permission_denied"]).nullable().optional()
-});
 
 export async function POST(request: NextRequest) {
   const { user, supabase } = await requireApiUser();
@@ -36,13 +27,22 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => ({}));
+  const admin = getSupabaseAdminClient();
+  const { maxInputChars } = await getOnboardingPlatformConfig(admin);
+  const bodySchema = z.object({
+    siteId: z.string().uuid(),
+    rawInput: z.string().min(10).max(maxInputChars),
+    inputMode: onboardingInputModeSchema,
+    currentBrief: businessBriefDraftSchema.partial().optional(),
+    followUpAnswer: z.string().min(1).max(500).optional(),
+    voiceEvent: z.enum(["unsupported", "permission_denied"]).nullable().optional()
+  });
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid payload", issues: parsed.error.issues }, { status: 400 });
   }
 
   const { siteId, rawInput, inputMode, voiceEvent } = parsed.data;
-  const admin = getSupabaseAdminClient();
 
   const { data: site } = await supabase
     .from("sites")

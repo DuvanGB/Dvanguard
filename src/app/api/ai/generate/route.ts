@@ -11,22 +11,7 @@ import { enforceRateLimit } from "@/lib/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { getTemplateById } from "@/lib/templates/catalog";
 import { templateIds } from "@/lib/templates/types";
-import { env } from "@/lib/env";
-
-const bodySchema = z.object({
-  siteId: z.string().uuid(),
-  prompt: z.string().min(10).max(env.onboardingMaxInputChars).optional(),
-  briefDraft: businessBriefDraftSchema.optional(),
-  inputMode: onboardingInputModeSchema.optional(),
-  templateId: z.enum(templateIds).optional(),
-  recommendedTemplateId: z.enum(templateIds).optional(),
-  refineConfidence: z.number().min(0).max(1).optional(),
-  warnings: z.array(z.string()).max(20).optional()
-}).superRefine((value, ctx) => {
-  if (!value.prompt && !value.briefDraft) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "prompt or briefDraft is required" });
-  }
-});
+import { getOnboardingPlatformConfig } from "@/lib/platform-config";
 
 export async function POST(request: NextRequest) {
   const { user, supabase } = await requireApiUser();
@@ -45,7 +30,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Too Many Requests" }, { status: 429 });
   }
 
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
+  const admin = getSupabaseAdminClient();
+  const { maxInputChars } = await getOnboardingPlatformConfig(admin);
+  const bodySchema = z
+    .object({
+      siteId: z.string().uuid(),
+      prompt: z.string().min(10).max(maxInputChars).optional(),
+      briefDraft: businessBriefDraftSchema.optional(),
+      inputMode: onboardingInputModeSchema.optional(),
+      templateId: z.enum(templateIds).optional(),
+      recommendedTemplateId: z.enum(templateIds).optional(),
+      refineConfidence: z.number().min(0).max(1).optional(),
+      warnings: z.array(z.string()).max(20).optional()
+    })
+    .superRefine((value, ctx) => {
+      if (!value.prompt && !value.briefDraft) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "prompt or briefDraft is required" });
+      }
+    });
   const parsed = bodySchema.safeParse(body);
 
   if (!parsed.success) {
@@ -74,7 +77,6 @@ export async function POST(request: NextRequest) {
   }
 
   const promptToUse = briefDraft ? buildPromptFromBrief(briefDraft, { templateId }) : prompt!;
-  const admin = getSupabaseAdminClient();
 
   if (templateId) {
     try {

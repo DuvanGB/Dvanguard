@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { FREE_PLAN, PRO_PLAN, ensureUserPlan, getPlanLimits } from "@/lib/billing/plans";
+import { ensureUserPlan, getDefaultPlanCodes, getPlanLimits } from "@/lib/billing/plans";
 import type {
   BillingAccessState,
   BillingInterval,
@@ -22,11 +22,9 @@ import {
   isWompiConfigured
 } from "@/lib/billing/wompi";
 import { env } from "@/lib/env";
+import { getPublishedLegalDocument } from "@/lib/legal-documents";
+import { getBillingPolicyConfig } from "@/lib/platform-config";
 import { recordPlatformEvent } from "@/lib/platform-events";
-
-const GRACE_DAYS = 3;
-const ENFORCEMENT_LOOKBACK_DAYS = 30;
-const MANUAL_REMINDER_DAYS = 7;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -104,8 +102,13 @@ function normalizeAccessState(value: string | null | undefined): BillingAccessSt
   return "within_limit";
 }
 
-function getGraceUntilIso(now = new Date()) {
-  return new Date(now.getTime() + GRACE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+function isPlanCode(value: unknown): value is PlanCode {
+  return value === "free" || value === "pro";
+}
+
+async function getGraceUntilIso(admin: SupabaseClient, now = new Date()) {
+  const { graceDays } = await getBillingPolicyConfig(admin);
+  return new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
 function addDaysIso(startIso: string, days: number) {
@@ -257,12 +260,17 @@ async function persistPaymentMethod(
 }
 
 export async function getBillingLegalStatus(admin: SupabaseClient, userId: string): Promise<BillingLegalAcceptanceStatus> {
+  const [{ version: termsVersion }, { version: privacyVersion }] = await Promise.all([
+    getPublishedLegalDocument(admin, "terms"),
+    getPublishedLegalDocument(admin, "privacy")
+  ]);
+
   const { data, error } = await admin
     .from("billing_legal_acceptances")
     .select("accepted_at, terms_version, privacy_version")
     .eq("user_id", userId)
-    .eq("terms_version", env.billingTermsVersion)
-    .eq("privacy_version", env.billingPrivacyVersion)
+    .eq("terms_version", termsVersion.version_label)
+    .eq("privacy_version", privacyVersion.version_label)
     .order("accepted_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -274,18 +282,22 @@ export async function getBillingLegalStatus(admin: SupabaseClient, userId: strin
   return {
     accepted: Boolean(data),
     acceptedAt: data?.accepted_at ?? null,
-    termsVersion: env.billingTermsVersion,
-    privacyVersion: env.billingPrivacyVersion
+    termsVersion: termsVersion.version_label,
+    privacyVersion: privacyVersion.version_label
   };
 }
 
 export async function acceptBillingLegalTerms(admin: SupabaseClient, userId: string) {
+  const [{ version: termsVersion }, { version: privacyVersion }] = await Promise.all([
+    getPublishedLegalDocument(admin, "terms"),
+    getPublishedLegalDocument(admin, "privacy")
+  ]);
   const timestamp = nowIso();
   const { error } = await admin.from("billing_legal_acceptances").upsert(
     {
       user_id: userId,
-      terms_version: env.billingTermsVersion,
-      privacy_version: env.billingPrivacyVersion,
+      terms_version: termsVersion.version_label,
+      privacy_version: privacyVersion.version_label,
       accepted_at: timestamp
     },
     { onConflict: "user_id,terms_version,privacy_version" }
@@ -298,8 +310,8 @@ export async function acceptBillingLegalTerms(admin: SupabaseClient, userId: str
   return {
     accepted: true,
     acceptedAt: timestamp,
-    termsVersion: env.billingTermsVersion,
-    privacyVersion: env.billingPrivacyVersion
+    termsVersion: termsVersion.version_label,
+    privacyVersion: privacyVersion.version_label
   } satisfies BillingLegalAcceptanceStatus;
 }
 
@@ -387,7 +399,7 @@ export async function getBillingSubscriptionRecord(admin: SupabaseClient, userId
     provider: "wompi",
     rail: row.rail === "manual_term_purchase" ? "manual_term_purchase" : "card_subscription",
     payment_method_kind: mapPaymentKind(row.payment_method_kind),
-    plan_code: row.plan_code === PRO_PLAN ? PRO_PLAN : FREE_PLAN,
+    plan_code: isPlanCode(row.plan_code) ? row.plan_code : "free",
     billing_interval: mapInterval(row.interval),
     term_length_days: Number(row.term_length_days ?? 30),
     status: normalizeBillingStatus(typeof row.status === "string" ? row.status : null),
@@ -427,7 +439,8 @@ export async function assignPlanDirectly(admin: SupabaseClient, input: { userId:
 }
 
 export async function getMostVisitedPublishedSiteId(admin: SupabaseClient, userId: string) {
-  const fromIso = new Date(Date.now() - ENFORCEMENT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const { enforcementLookbackDays } = await getBillingPolicyConfig(admin);
+  const fromIso = new Date(Date.now() - enforcementLookbackDays * 24 * 60 * 60 * 1000).toISOString();
 
   const { data: sites, error: sitesError } = await admin
     .from("sites")
@@ -533,9 +546,10 @@ async function sendManualReminderEmail(input: { to: string; endsAt: string; meth
 async function maybeSendManualReminder(admin: SupabaseClient, membership: BillingSubscriptionRecord, email: string | null | undefined) {
   if (!email || membership.rail !== "manual_term_purchase" || !membership.current_period_end || membership.reminder_sent_at) return;
 
+  const { manualReminderDays } = await getBillingPolicyConfig(admin);
   const remainingMs = new Date(membership.current_period_end).getTime() - Date.now();
   const remainingDays = remainingMs / (24 * 60 * 60 * 1000);
-  if (remainingDays > MANUAL_REMINDER_DAYS || remainingDays < 0) return;
+  if (remainingDays > manualReminderDays || remainingDays < 0) return;
 
   const sent = await sendManualReminderEmail({
     to: email,
@@ -609,6 +623,7 @@ async function createOrExtendMembershipForApprovedTransaction(
   }
 ) {
   const latest = await getBillingSubscriptionRecord(admin, input.userId);
+  const { proPlanCode } = await getDefaultPlanCodes(admin);
   const now = nowIso();
   const durationDays = input.method === "card" ? daysForInterval(input.interval ?? "month") : 30;
   const baseStart =
@@ -624,7 +639,7 @@ async function createOrExtendMembershipForApprovedTransaction(
         provider: "wompi",
         rail: input.rail,
         payment_method_kind: input.method,
-        plan_code: PRO_PLAN,
+        plan_code: proPlanCode,
         interval: input.interval,
         term_length_days: durationDays,
         status: "active",
@@ -657,7 +672,7 @@ async function createOrExtendMembershipForApprovedTransaction(
       provider: "wompi",
       rail: input.rail,
       payment_method_kind: input.method,
-      plan_code: PRO_PLAN,
+      plan_code: proPlanCode,
       interval: input.interval,
       term_length_days: durationDays,
       status: "active",
@@ -690,6 +705,7 @@ async function markMembershipPaymentPending(
   }
 ) {
   const existing = await getBillingSubscriptionRecord(admin, input.userId);
+  const { proPlanCode } = await getDefaultPlanCodes(admin);
   if (existing) {
     await admin
       .from("billing_memberships")
@@ -713,7 +729,7 @@ async function markMembershipPaymentPending(
       provider: "wompi",
       rail: input.rail,
       payment_method_kind: input.method,
-      plan_code: PRO_PLAN,
+      plan_code: proPlanCode,
       interval: input.interval,
       term_length_days: input.method === "card" ? daysForInterval(input.interval ?? "month") : 30,
       status: "payment_pending",
@@ -758,7 +774,7 @@ async function createStoredCardCharge(admin: SupabaseClient, input: { userId: st
   }
 
   const reference = buildWompiReference("pro-card", input.userId);
-  const amountInCents = getPlanAmountInCents(input.interval);
+  const amountInCents = await getPlanAmountInCents(admin, input.interval);
   const rawTx = await createWompiTransaction({
     reference,
     amountInCents,
@@ -800,7 +816,7 @@ async function renewCardMembershipIfDue(admin: SupabaseClient, membership: Billi
   if (!acceptance.acceptanceToken || !acceptance.personalDataAuthToken) return;
 
   const reference = buildWompiReference("renew-card", membership.user_id);
-  const amountInCents = getPlanAmountInCents(membership.billing_interval ?? "month");
+  const amountInCents = await getPlanAmountInCents(admin, membership.billing_interval ?? "month");
   const rawTx = await createWompiTransaction({
     reference,
     amountInCents,
@@ -885,7 +901,7 @@ async function maybeActivateScheduledCardSwitch(admin: SupabaseClient, membershi
   if (!acceptance.acceptanceToken || !acceptance.personalDataAuthToken) return;
 
   const reference = buildWompiReference("switch-card", membership.user_id);
-  const amountInCents = getPlanAmountInCents("month");
+  const amountInCents = await getPlanAmountInCents(admin, "month");
   const rawTx = await createWompiTransaction({
     reference,
     amountInCents,
@@ -955,17 +971,18 @@ async function runBillingAutomation(admin: SupabaseClient, userId: string, email
 }
 
 export async function applyBillingAccessRules(admin: SupabaseClient, userId: string, email?: string | null) {
+  const { freePlanCode, proPlanCode } = await getDefaultPlanCodes(admin);
   let subscription = await runBillingAutomation(admin, userId, email);
   if (!subscription) {
     const currentPlan = await ensureUserPlan(admin, userId);
-    if (currentPlan.plan_code === PRO_PLAN) {
+    if (currentPlan.plan_code === proPlanCode) {
       return {
         subscription: null,
         accessState: "within_limit" as BillingAccessState
       };
     }
 
-    await assignPlanDirectly(admin, { userId, planCode: FREE_PLAN });
+    await assignPlanDirectly(admin, { userId, planCode: freePlanCode });
     return {
       subscription: null,
       accessState: "within_limit" as BillingAccessState
@@ -979,7 +996,7 @@ export async function applyBillingAccessRules(admin: SupabaseClient, userId: str
     new Date(subscription.current_period_end ?? 0).getTime() > now;
 
   if (hasProAccess) {
-    await assignPlanDirectly(admin, { userId, planCode: PRO_PLAN });
+    await assignPlanDirectly(admin, { userId, planCode: proPlanCode });
 
     if (subscription.access_state !== "within_limit" || subscription.grace_until) {
       await admin.from("billing_memberships").update({ access_state: "within_limit", grace_until: null }).eq("id", subscription.id);
@@ -992,9 +1009,9 @@ export async function applyBillingAccessRules(admin: SupabaseClient, userId: str
     };
   }
 
-  await assignPlanDirectly(admin, { userId, planCode: FREE_PLAN });
+  await assignPlanDirectly(admin, { userId, planCode: freePlanCode });
 
-  const freeLimits = await getPlanLimits(admin, FREE_PLAN);
+  const freeLimits = await getPlanLimits(admin, freePlanCode);
   const { count: publishedCount, error: publishedError } = await admin
     .from("sites")
     .select("id", { count: "exact", head: true })
@@ -1019,7 +1036,7 @@ export async function applyBillingAccessRules(admin: SupabaseClient, userId: str
   const graceUntil = subscription.grace_until ? new Date(subscription.grace_until) : null;
   if (!graceUntil || Number.isNaN(graceUntil.getTime()) || graceUntil <= new Date()) {
     if (!graceUntil) {
-      const nextGrace = getGraceUntilIso();
+      const nextGrace = await getGraceUntilIso(admin);
       await admin.from("billing_memberships").update({ access_state: "grace_period", grace_until: nextGrace }).eq("id", subscription.id);
 
       await recordPlatformEvent(admin, {
@@ -1156,7 +1173,7 @@ export async function subscribeUserWithCard(
   });
 
   const reference = buildWompiReference(`pro-${input.interval}`, input.userId);
-  const amountInCents = getPlanAmountInCents(input.interval);
+  const amountInCents = await getPlanAmountInCents(admin, input.interval);
   const rawTx = await createWompiTransaction({
     reference,
     amountInCents,
@@ -1239,7 +1256,7 @@ export async function createManualBillingCheckout(
 
   const reference = buildWompiReference(`pro-${input.method}`, input.userId);
   const redirectUrl = `${env.appUrl}/billing?checkout=${input.method}_pending`;
-  const amountInCents = getManualAmountInCents(input.method);
+  const amountInCents = await getManualAmountInCents(admin, input.method);
 
   let paymentMethod: JsonRecord;
   if (input.method === "pse") {
