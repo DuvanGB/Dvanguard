@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 
+import { getViewportSectionHeightPx } from "@/lib/site-spec-v3";
 import type { CanvasBlock, SiteSectionV3, SiteThemeV31 } from "@/lib/site-spec-v3";
 import {
   getBlockRadius,
@@ -50,18 +51,36 @@ export function CanvasSection({
   selectedBlockId,
   editable
 }: SectionRenderProps) {
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const [sectionWidth, setSectionWidth] = useState(0);
   const visibleBlocks = useMemo(() => section.blocks.filter((block) => block.visible), [section.blocks]);
   const sectionRatio = viewport === "mobile" ? section.height_ratio.mobile : section.height_ratio.desktop;
   const appearance = getSectionAppearance(theme, section, sectionIndex);
+  const resolvedHeight = sectionWidth > 0 ? getViewportSectionHeightPx(section, viewport, sectionWidth) : null;
+
+  useEffect(() => {
+    if (!sectionRef.current) return;
+    const node = sectionRef.current;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setSectionWidth(entry.contentRect.width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <section
+      ref={sectionRef}
       data-section-id={section.id}
       id={section.id}
       style={{
         position: "relative",
         width: "100%",
-        aspectRatio: `${1}/${sectionRatio}`,
+        aspectRatio: resolvedHeight ? undefined : `${1}/${sectionRatio}`,
+        minHeight: resolvedHeight ? `${resolvedHeight}px` : undefined,
+        height: resolvedHeight ? `${resolvedHeight}px` : undefined,
         background: appearance.background,
         borderBottom: `1px solid ${appearance.borderColor}`,
         overflow: "hidden"

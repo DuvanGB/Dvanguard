@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import type { RegenerationContext } from "@/lib/ai/regeneration-context";
 import { buildVisualSeedSpec } from "@/lib/ai/visual-generation";
 import { runLocalVisualGenerationFallback } from "@/lib/ai/process-site-generation";
 import { triggerVisualGenerationWorker } from "@/lib/ai/worker-client";
@@ -25,6 +26,7 @@ type StartGenerationInput = {
   generationMode?: "new" | "regenerate";
   currentSiteSpec?: SiteSpecV3;
   currentSiteSummary?: string;
+  regenerationContext?: RegenerationContext;
 };
 
 type StartGenerationResult =
@@ -117,7 +119,8 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
           refine_confidence: input.refineConfidence ?? null,
           warnings_count: input.warningsCount ?? 0,
           generation_mode: input.generationMode ?? "new",
-          current_site_summary: input.currentSiteSummary ?? null
+          current_site_summary: input.currentSiteSummary ?? null,
+          regeneration_context: input.regenerationContext ?? null
         }
       },
       status: "queued",
@@ -144,7 +147,8 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
     templateId: input.templateId,
     briefDraft: input.briefDraft,
     callbackBaseUrl: env.appUrl,
-    currentSiteSummary: input.currentSiteSummary
+    currentSiteSummary: input.currentSiteSummary,
+    regenerationContext: input.regenerationContext
   });
 
   if (!workerTrigger.ok) {

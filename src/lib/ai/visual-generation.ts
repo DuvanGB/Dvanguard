@@ -1,6 +1,8 @@
 import { z } from "zod";
 
+import type { RegenerationContext } from "@/lib/ai/regeneration-context";
 import {
+  CANVAS_BASE_WIDTH,
   type CanvasBlock,
   type CanvasLayoutRect,
   type SiteSectionV3,
@@ -8,6 +10,7 @@ import {
   applyEditableThemePatch,
   deriveVisualThemeFromLegacy,
   getEditableThemeSnapshot,
+  getViewportSectionHeightPx,
   isSupportedFontFamily,
   normalizeFontFamilyToken,
   parseSiteSpecV3
@@ -15,6 +18,7 @@ import {
 import type { BusinessBriefDraft } from "@/lib/onboarding/types";
 import { buildSiteSpecV3FromBrief } from "@/lib/site-spec-v3";
 import type { HeaderVariant, TemplateId } from "@/lib/templates/types";
+import { normalizeWhatsappPhone as normalizeWhatsappPhoneValue } from "@/lib/whatsapp";
 
 export const visualGenerationStages = [
   "brief_analysis",
@@ -356,6 +360,8 @@ export function applyDesignPatchToSpec(seedSpec: SiteSpecV3, patch?: DesignPatch
     }));
   }
 
+  home.sections = home.sections.map(expandSectionRatiosToFitContent);
+
   const parsed = parseSiteSpecV3(next);
   return parsed.success ? parsed.data : seedSpec;
 }
@@ -390,11 +396,21 @@ export function compileLayoutProposalToDesignPatch(proposal: LayoutProposal): De
 export function buildHeuristicLayoutProposal(input: {
   prompt: string;
   briefDraft?: BusinessBriefDraft;
+  regenerationContext?: RegenerationContext;
 }): LayoutProposal {
+  const regeneration = input.regenerationContext;
   const brief = input.briefDraft;
-  const prompt = input.prompt.toLowerCase();
+  const prompt = [input.prompt, regeneration?.prompt ?? ""].filter(Boolean).join(" ").toLowerCase();
   const seed = hashString(
-    [brief?.business_name ?? "", brief?.offer_summary ?? "", brief?.tone ?? "", brief?.target_audience ?? "", prompt].join("|")
+    [
+      brief?.business_name ?? "",
+      brief?.offer_summary ?? "",
+      brief?.tone ?? "",
+      brief?.target_audience ?? "",
+      prompt,
+      regeneration?.previousTheme?.style_tokens.hero_treatment ?? "",
+      String(regeneration?.iterationNumber ?? 0)
+    ].join("|")
   );
   const siteType = brief?.business_type ?? inferSiteType(prompt);
   const premium = /premium|lujo|exclusiv|editorial|atelier|streetwear/i.test(prompt);
@@ -402,21 +418,22 @@ export function buildHeuristicLayoutProposal(input: {
   const sport = /deport|fitness|gym|gimnas|running/i.test(prompt);
   const tech = /tech|software|digital|app|saas|tecnolog/i.test(prompt);
   const health = /salud|clinica|wellness|spa|medic/i.test(prompt);
-  const industryProfile = inferIndustryProfile([brief?.tone ?? "", brief?.offer_summary ?? "", prompt].join(" "), {
+  const baseIndustryProfile = inferIndustryProfile([brief?.tone ?? "", brief?.offer_summary ?? "", prompt].join(" "), {
     premium,
     tech,
     health,
     fashion,
     sport
   });
+  const industryProfile = chooseIndustryProfileForRegeneration(baseIndustryProfile, regeneration);
   const sectionOrder =
     siteType === "commerce_lite"
       ? (["hero", "catalog", "testimonials", "contact"] as SiteSectionV3["type"][])
       : (["hero", "testimonials", "contact"] as SiteSectionV3["type"][]);
   const normalizedSectionOrder = enforceDefaultSectionOrder(sectionOrder);
 
-  const themeDirection = themeFromStyle(industryProfile);
-  const hero = pickBuilder(
+  const themeDirection = upgradeThemeForRegeneration(themeFromStyle(industryProfile), regeneration);
+  const heroBuilders =
     siteType === "commerce_lite"
       ? fashion || premium
         ? [heroFullBleedBrand, heroCompactSale, heroEditorial]
@@ -429,11 +446,8 @@ export function buildHeuristicLayoutProposal(input: {
         ? [heroSplitTech, heroCenteredClean, heroSplitService]
         : health
           ? [heroStackedSoft, heroCenteredClean, heroSplitService]
-          : [heroCenteredClean, heroSplitService, heroImageLead],
-    seed + 1
-  )(brief, themeDirection);
-
-  const catalog = pickBuilder(
+          : [heroCenteredClean, heroSplitService, heroImageLead];
+  const catalogBuilders =
     siteType === "commerce_lite"
       ? fashion || premium
         ? [catalogFeaturedCommerce, catalogFeaturedTopCommerce, catalogMosaicCommerce]
@@ -442,9 +456,10 @@ export function buildHeuristicLayoutProposal(input: {
           : [catalogGridCommerce, catalogFeaturedTopCommerce, catalogMosaicCommerce]
       : tech
         ? [catalogStripInformative, catalogServiceFocusInformative, catalogCardsInformative]
-        : [catalogCardsInformative, catalogServiceFocusInformative, catalogStripInformative],
-    seed + 7
-  )(themeDirection);
+        : [catalogCardsInformative, catalogServiceFocusInformative, catalogStripInformative];
+
+  const hero = pickBuilder(prioritizeHeroBuilders(heroBuilders, regeneration), seed + 1)(brief, themeDirection);
+  const catalog = pickBuilder(prioritizeCatalogBuilders(catalogBuilders, regeneration), seed + 7)(themeDirection);
 
   const testimonials = pickBuilder(
     premium || fashion
@@ -1255,6 +1270,148 @@ function themeFromStyle(profile: IndustryProfile): SiteSpecV3["theme"] {
   }
 }
 
+function chooseIndustryProfileForRegeneration(profile: IndustryProfile, regeneration?: RegenerationContext) {
+  if (!regeneration) return profile;
+
+  const families: Record<IndustryProfile, IndustryProfile[]> = {
+    restaurant: ["restaurant", "fashion", "modern"],
+    fashion: ["fashion", "modern"],
+    tech: ["tech", "modern"],
+    health: ["health", "modern"],
+    sport: ["sport", "tech", "modern"],
+    modern: ["modern", "tech", "fashion", "health"]
+  };
+  const candidates = families[profile] ?? [profile];
+  const previousProfile = regeneration.previousTheme ? detectThemeProfile(regeneration.previousTheme) : null;
+  const offset = Math.max(0, (regeneration.iterationNumber ?? 1) - 1) % candidates.length;
+  let candidate = candidates[offset] ?? profile;
+  if (previousProfile && candidate === previousProfile && candidates.length > 1) {
+    candidate = candidates[(offset + 1) % candidates.length] ?? profile;
+  }
+  return candidate;
+}
+
+function detectThemeProfile(theme: SiteSpecV3["theme"]): IndustryProfile {
+  const heading = theme.typography.heading_font;
+  if (heading === "Playfair Display") return "restaurant";
+  if (heading === "Cormorant Garamond") return "fashion";
+  if (heading === "Syne") return "tech";
+  if (heading === "DM Serif Display") return "health";
+  if (heading === "Bebas Neue") return "sport";
+  return "modern";
+}
+
+function upgradeThemeForRegeneration(theme: SiteSpecV3["theme"], regeneration?: RegenerationContext) {
+  if (!regeneration?.previousTheme) return theme;
+
+  const next = structuredClone(theme);
+  next.style_tokens.hero_treatment = nextHeroTreatment(
+    regeneration.previousTheme.style_tokens.hero_treatment,
+    next.style_tokens.hero_treatment,
+    regeneration.iterationNumber
+  );
+
+  if (sameHex(next.palette.background, regeneration.previousTheme.palette.background)) {
+    next.style_tokens.section_rhythm =
+      regeneration.previousTheme.style_tokens.section_rhythm === "layered"
+        ? "alternating"
+        : regeneration.previousTheme.style_tokens.section_rhythm === "alternating"
+          ? "layered"
+          : "alternating";
+  }
+
+  if (next.cta.variant === regeneration.previousTheme.cta.variant) {
+    next.cta.variant = rotateCtaVariant(regeneration.previousTheme.cta.variant);
+  }
+
+  if (
+    regeneration.iterationNumber >= 2 &&
+    next.typography.scale === regeneration.previousTheme.typography.scale
+  ) {
+    next.typography.scale = next.typography.scale === "balanced" ? "editorial" : "balanced";
+  }
+
+  return next;
+}
+
+function nextHeroTreatment(
+  previous: SiteSpecV3["theme"]["style_tokens"]["hero_treatment"],
+  candidate: SiteSpecV3["theme"]["style_tokens"]["hero_treatment"],
+  iterationNumber: number
+) {
+  const cycle: SiteSpecV3["theme"]["style_tokens"]["hero_treatment"][] = [
+    "split-asymmetric",
+    "centered-cinematic",
+    "editorial-overlap",
+    "fullbleed-dark",
+    "fullbleed-light"
+  ];
+  if (candidate !== previous) return candidate;
+  const index = cycle.indexOf(previous);
+  if (index === -1) return candidate;
+  return cycle[(index + Math.max(1, iterationNumber)) % cycle.length] ?? candidate;
+}
+
+function rotateCtaVariant(previous: SiteSpecV3["theme"]["cta"]["variant"]): SiteSpecV3["theme"]["cta"]["variant"] {
+  const variants: SiteSpecV3["theme"]["cta"]["variant"][] = ["filled", "pill", "ghost", "underline"];
+  const index = variants.indexOf(previous);
+  return variants[(index + 1) % variants.length] ?? "filled";
+}
+
+function prioritizeHeroBuilders<T extends (...args: any[]) => SectionComposition>(builders: T[], regeneration?: RegenerationContext) {
+  if (!regeneration?.previousTheme) return builders;
+  const heroTreatment = regeneration.previousTheme.style_tokens.hero_treatment;
+  if (heroTreatment === "split-asymmetric") {
+    return moveBuilderNamesToEnd(builders, ["heroSplitTech", "heroSplitService"]);
+  }
+  if (heroTreatment === "centered-cinematic") {
+    return moveBuilderNamesToEnd(builders, ["heroCenteredClean", "heroStackedSoft"]);
+  }
+  if (heroTreatment === "editorial-overlap") {
+    return moveBuilderNamesToEnd(builders, ["heroEditorial", "heroFullBleedBrand"]);
+  }
+  return builders;
+}
+
+function prioritizeCatalogBuilders<T extends (...args: any[]) => SectionComposition>(builders: T[], regeneration?: RegenerationContext) {
+  if (!regeneration) return builders;
+
+  const hasProductImages = regeneration.currentSiteContent.products.some((product) => product.hasImage);
+  let nextBuilders = builders;
+  if (hasProductImages) {
+    nextBuilders = moveBuilderNamesToFront(nextBuilders, [
+      "catalogFeaturedCommerce",
+      "catalogFeaturedTopCommerce",
+      "catalogMosaicCommerce"
+    ]);
+  }
+
+  const previousVariant = regeneration.currentSiteContent.sectionVariants.catalog;
+  if (previousVariant === "grid") {
+    nextBuilders = moveBuilderNamesToEnd(nextBuilders, ["catalogGridCommerce"]);
+  } else if (previousVariant === "list") {
+    nextBuilders = moveBuilderNamesToEnd(nextBuilders, ["catalogFeaturedCommerce", "catalogFeaturedTopCommerce"]);
+  }
+
+  return nextBuilders;
+}
+
+function moveBuilderNamesToFront<T extends (...args: any[]) => SectionComposition>(builders: T[], names: string[]) {
+  const preferred = builders.filter((builder) => names.includes(builder.name));
+  const rest = builders.filter((builder) => !names.includes(builder.name));
+  return [...preferred, ...rest];
+}
+
+function moveBuilderNamesToEnd<T extends (...args: any[]) => SectionComposition>(builders: T[], names: string[]) {
+  const rest = builders.filter((builder) => !names.includes(builder.name));
+  const moved = builders.filter((builder) => names.includes(builder.name));
+  return [...rest, ...moved];
+}
+
+function sameHex(left?: string, right?: string) {
+  return (left ?? "").toLowerCase() === (right ?? "").toLowerCase();
+}
+
 function normalizeThemePatch(patch: NonNullable<DesignPatch["themePatch"]>, currentTheme: SiteSpecV3["theme"]) {
   const next = structuredClone(currentTheme);
   if (patch.palette) {
@@ -1275,6 +1432,21 @@ function normalizeThemePatch(patch: NonNullable<DesignPatch["themePatch"]>, curr
     next.cta = { ...next.cta, ...patch.cta };
   }
   return next;
+}
+
+function expandSectionRatiosToFitContent(section: SiteSectionV3): SiteSectionV3 {
+  const desktopHeight = getViewportSectionHeightPx(section, "desktop", CANVAS_BASE_WIDTH.desktop);
+  const mobileHeight = getViewportSectionHeightPx(section, "mobile", CANVAS_BASE_WIDTH.mobile);
+  const desktopRatio = Math.round((desktopHeight / CANVAS_BASE_WIDTH.desktop) * 10000) / 10000;
+  const mobileRatio = Math.round((mobileHeight / CANVAS_BASE_WIDTH.mobile) * 10000) / 10000;
+
+  return {
+    ...section,
+    height_ratio: {
+      desktop: Math.max(section.height_ratio.desktop, desktopRatio),
+      mobile: Math.max(section.height_ratio.mobile, mobileRatio)
+    }
+  };
 }
 
 function themePrimary(theme: Partial<SiteSpecV3["theme"]>) {
@@ -1486,12 +1658,7 @@ function enforceDefaultSectionOrder(order: SiteSectionV3["type"][]) {
 }
 
 function normalizeWhatsappPhone(value?: string) {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const normalized = trimmed.startsWith("+") ? trimmed : `+${trimmed}`;
-  if (!/^\+\d{8,15}$/.test(normalized)) return undefined;
-  return normalized.replace(/\D/g, "");
+  return normalizeWhatsappPhoneValue(value);
 }
 
 function cardQuoteStyle(fontSize = 16): Partial<CanvasBlock["style"]> {

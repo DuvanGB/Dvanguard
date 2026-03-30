@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
 
 import { incrementAiGenerationUsage } from "@/lib/billing/usage";
+import type { RegenerationContext } from "@/lib/ai/regeneration-context";
 import { generateSiteSpecFromPrompt } from "@/lib/ai/generate-site-spec";
 import {
   applyDesignPatchToSpec,
@@ -61,6 +62,7 @@ type JobInputJson = {
   meta?: {
     template_id?: TemplateId | null;
     generation_mode?: "new" | "regenerate" | null;
+    regeneration_context?: RegenerationContext | null;
     [key: string]: unknown;
   };
 };
@@ -299,7 +301,8 @@ export async function runLocalVisualGenerationFallback(input: {
   const jobInput = ((job.input_json as JobInputJson | null) ?? {}) as JobInputJson;
   const layoutProposal = buildHeuristicLayoutProposal({
     prompt: jobInput.prompt ?? "",
-    briefDraft: jobInput.briefDraft ?? undefined
+    briefDraft: jobInput.briefDraft ?? undefined,
+    regenerationContext: jobInput.meta?.regeneration_context ?? undefined
   });
   const designPatch = compileLayoutProposalToDesignPatch(layoutProposal);
 

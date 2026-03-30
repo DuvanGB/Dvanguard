@@ -105,6 +105,9 @@ async function runVisualGeneration(input) {
 }
 
 async function requestProposalFromModel(input) {
+  const regeneration = input.regenerationContext || null;
+  const isRegeneration = Boolean(input.isRegeneration || regeneration?.isRegeneration);
+
   if (!promptAvailable(input.prompt)) {
     return buildHeuristicLayoutProposal(input);
   }
@@ -120,20 +123,33 @@ async function requestProposalFromModel(input) {
         {
           role: "system",
           content:
-            "Devuelve SOLO JSON válido para una homepage usando este contrato: " +
-            "{design_direction:{name,description},header_variant,section_order,section_compositions,theme_direction:{palette,typography,style_tokens,cta}}. " +
-            "No generes HTML. section_compositions solo puede usar hero, catalog, testimonials, contact. " +
-            "La estructura debe dejar siempre testimonials como penúltima sección y contact como última sección cuando ambas existan. " +
-            "Tu trabajo es proponer composición interna de bloques dentro de cada sección. " +
-            "Habla lenguaje de dirección visual profesional: paletas coherentes por industria, parejas tipográficas con personalidad, ritmo visual, tratamiento de hero e imágenes, CTA distintivo. " +
-            "Nunca uses defaults genéricos como #082f49 o #0ea5e9. " +
-            "Usa referencias como moda=pálidos neutros+acento refinado con Cormorant Garamond/Mulish, tech=fondos profundos+acento púrpura con Syne/Manrope, salud=verdes suaves con DM Serif Display/DM Sans, deporte=negro+amarillo con Bebas Neue/Inter, restaurante=cálidos oscuros con Playfair Display/Lato, moderno=Outfit/DM Sans. " +
-            "theme_direction debe incluir palette:{background,surface,border,primary,accent,text_primary,text_muted}, typography:{heading_font,body_font,scale,heading_weight,letter_spacing}, style_tokens:{spacing_scale,border_style,section_rhythm,hero_treatment,image_treatment}, cta:{variant,size,uppercase}. " +
-            "Usa familias distintas por sección, por ejemplo hero: editorial, split-brand, compact-sale, centered-clean, image-left; " +
-            "catalog: three-grid, mosaic, featured-left, featured-top, service-cards, service-strip; " +
-            "testimonials: wall, spotlight, compact-band, quote-column; contact: CTA band, split contact, card CTA. " +
-            "Cada bloque debe usar matchId existentes como hero-bg, hero-overlay, headline, subheadline, hero-image, " +
-            "title, product-1, product-2, product-3, card-1, image-1, name-1, desc-1, quote-1, description, contact-cta."
+            (
+              isRegeneration
+                ? "Estás REGENERANDO una homepage existente. Devuelve SOLO JSON válido para una homepage usando este contrato: " +
+                  "{design_direction:{name,description},header_variant,section_order,section_compositions,theme_direction:{palette,typography,style_tokens,cta}}. " +
+                  "No generes HTML. section_compositions solo puede usar hero, catalog, testimonials, contact. " +
+                  "La estructura debe dejar siempre testimonials como penúltima sección y contact como última sección cuando ambas existan. " +
+                  "Conserva contenido, productos, testimonios, CTA, imágenes y estructura base existentes, pero supera visualmente la versión actual. " +
+                  "NO repitas el mismo hero_treatment ni una paleta demasiado cercana al previousTheme. " +
+                  "Refina la jerarquía usando los textos reales disponibles: headline más impactante, subheadline más claro, catálogo mejor presentado, CTA más intencional. " +
+                  "Si iterationNumber=1 entrega una propuesta sólida y profesional; si iterationNumber=2 hazla más audaz y con más personalidad; si iterationNumber>=3 empújala a una dirección más editorial manteniendo legibilidad. " +
+                  "theme_direction debe incluir palette:{background,surface,border,primary,accent,text_primary,text_muted}, typography:{heading_font,body_font,scale,heading_weight,letter_spacing}, style_tokens:{spacing_scale,border_style,section_rhythm,hero_treatment,image_treatment}, cta:{variant,size,uppercase}. " +
+                  "Cada bloque debe usar matchId existentes como hero-bg, hero-overlay, headline, subheadline, hero-image, title, product-1, product-2, product-3, card-1, image-1, name-1, desc-1, quote-1, description, contact-cta."
+                : "Devuelve SOLO JSON válido para una homepage usando este contrato: " +
+                  "{design_direction:{name,description},header_variant,section_order,section_compositions,theme_direction:{palette,typography,style_tokens,cta}}. " +
+                  "No generes HTML. section_compositions solo puede usar hero, catalog, testimonials, contact. " +
+                  "La estructura debe dejar siempre testimonials como penúltima sección y contact como última sección cuando ambas existan. " +
+                  "Tu trabajo es proponer composición interna de bloques dentro de cada sección. " +
+                  "Habla lenguaje de dirección visual profesional: paletas coherentes por industria, parejas tipográficas con personalidad, ritmo visual, tratamiento de hero e imágenes, CTA distintivo. " +
+                  "Nunca uses defaults genéricos como #082f49 o #0ea5e9. " +
+                  "Usa referencias como moda=pálidos neutros+acento refinado con Cormorant Garamond/Mulish, tech=fondos profundos+acento púrpura con Syne/Manrope, salud=verdes suaves con DM Serif Display/DM Sans, deporte=negro+amarillo con Bebas Neue/Inter, restaurante=cálidos oscuros con Playfair Display/Lato, moderno=Outfit/DM Sans. " +
+                  "theme_direction debe incluir palette:{background,surface,border,primary,accent,text_primary,text_muted}, typography:{heading_font,body_font,scale,heading_weight,letter_spacing}, style_tokens:{spacing_scale,border_style,section_rhythm,hero_treatment,image_treatment}, cta:{variant,size,uppercase}. " +
+                  "Usa familias distintas por sección, por ejemplo hero: editorial, split-brand, compact-sale, centered-clean, image-left; " +
+                  "catalog: three-grid, mosaic, featured-left, featured-top, service-cards, service-strip; " +
+                  "testimonials: wall, spotlight, compact-band, quote-column; contact: CTA band, split contact, card CTA. " +
+                  "Cada bloque debe usar matchId existentes como hero-bg, hero-overlay, headline, subheadline, hero-image, " +
+                  "title, product-1, product-2, product-3, card-1, image-1, name-1, desc-1, quote-1, description, contact-cta."
+            )
         },
         {
           role: "user",
@@ -141,6 +157,7 @@ async function requestProposalFromModel(input) {
             `Prompt: ${String(input.prompt || "")}`,
             `Brief: ${JSON.stringify(input.briefDraft || {})}`,
             input.currentSiteSummary ? `Contexto sitio actual:\n${String(input.currentSiteSummary)}` : null,
+            regeneration ? `Contexto estructurado de regeneración:\n${JSON.stringify(regeneration)}` : null,
             "Quiero una sola propuesta visual fuerte, distinta por composición y jerarquía, no solo por color."
           ]
             .filter(Boolean)
@@ -181,9 +198,15 @@ async function postProgress(callbackUrl, payload) {
 }
 
 function buildHeuristicLayoutProposal(input) {
-  const prompt = String(input.prompt || "").toLowerCase();
+  const regeneration = input.regenerationContext || null;
+  const prompt = [String(input.prompt || ""), String(regeneration?.prompt || "")]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
   const brief = input.briefDraft || {};
-  const seed = hashString([brief.business_name || "", brief.offer_summary || "", brief.tone || "", prompt].join("|"));
+  const seed = hashString(
+    [brief.business_name || "", brief.offer_summary || "", brief.tone || "", prompt, regeneration?.previousTheme?.style_tokens?.hero_treatment || "", String(regeneration?.iterationNumber || 0)].join("|")
+  );
   const siteType = String(brief.business_type || "").includes("commerce") || /tienda|producto|catalog|venta/.test(prompt)
     ? "commerce_lite"
     : "informative";
@@ -192,14 +215,15 @@ function buildHeuristicLayoutProposal(input) {
   const sport = /deport|fitness|gym|gimnas|running/.test(prompt);
   const tech = /tech|software|digital|app|saas|gadgets|tecnolog/.test(prompt);
   const health = /salud|clinica|wellness|spa|medic/.test(prompt);
-  const stylePreset = inferIndustryProfile([brief.tone || "", brief.offer_summary || "", prompt].join(" "), {
+  const basePreset = inferIndustryProfile([brief.tone || "", brief.offer_summary || "", prompt].join(" "), {
     tech,
     sport,
     health,
     fashion,
     premium
   });
-  const theme = themeFor(stylePreset);
+  const stylePreset = chooseIndustryProfileForRegeneration(basePreset, regeneration);
+  const theme = upgradeThemeForRegeneration(themeFor(stylePreset), regeneration);
 
   const sectionOrder =
     siteType === "commerce_lite"
@@ -245,8 +269,8 @@ function buildHeuristicLayoutProposal(input) {
         ? [contactSplit, contactMinimal, contactBand]
         : [contactMinimal, contactSplit, contactBand];
 
-  const hero = pickBuilder(heroBuilders, seed + 1)(brief, theme);
-  const catalog = pickBuilder(catalogBuilders, seed + 7)(theme);
+  const hero = pickBuilder(prioritizeHeroBuilders(heroBuilders, regeneration), seed + 1)(brief, theme);
+  const catalog = pickBuilder(prioritizeCatalogBuilders(catalogBuilders, regeneration), seed + 7)(theme);
   const testimonials = pickBuilder(testimonialBuilders, seed + 13)(theme);
   const contact = pickBuilder(contactBuilders, seed + 19)(theme);
 
@@ -511,6 +535,125 @@ function themeFor(profile) {
   };
 }
 
+function chooseIndustryProfileForRegeneration(profile, regeneration) {
+  if (!regeneration) return profile;
+  const families = {
+    restaurant: ["restaurant", "fashion", "modern"],
+    fashion: ["fashion", "modern"],
+    tech: ["tech", "modern"],
+    health: ["health", "modern"],
+    sport: ["sport", "tech", "modern"],
+    modern: ["modern", "tech", "fashion", "health"]
+  };
+  const candidates = families[profile] || [profile];
+  const previousProfile = regeneration.previousTheme ? detectThemeProfile(regeneration.previousTheme) : null;
+  const offset = Math.max(0, Number(regeneration.iterationNumber || 1) - 1) % candidates.length;
+  let candidate = candidates[offset] || profile;
+  if (previousProfile && candidate === previousProfile && candidates.length > 1) {
+    candidate = candidates[(offset + 1) % candidates.length] || profile;
+  }
+  return candidate;
+}
+
+function detectThemeProfile(theme) {
+  const heading = theme?.typography?.heading_font;
+  if (heading === "Playfair Display") return "restaurant";
+  if (heading === "Cormorant Garamond") return "fashion";
+  if (heading === "Syne") return "tech";
+  if (heading === "DM Serif Display") return "health";
+  if (heading === "Bebas Neue") return "sport";
+  return "modern";
+}
+
+function upgradeThemeForRegeneration(theme, regeneration) {
+  if (!regeneration?.previousTheme) return theme;
+  const next = structuredClone(theme);
+  next.style_tokens.hero_treatment = nextHeroTreatment(
+    regeneration.previousTheme.style_tokens?.hero_treatment,
+    next.style_tokens.hero_treatment,
+    Number(regeneration.iterationNumber || 1)
+  );
+  if (sameHex(next.palette.background, regeneration.previousTheme.palette?.background)) {
+    next.style_tokens.section_rhythm =
+      regeneration.previousTheme.style_tokens?.section_rhythm === "layered"
+        ? "alternating"
+        : regeneration.previousTheme.style_tokens?.section_rhythm === "alternating"
+          ? "layered"
+          : "alternating";
+  }
+  if (next.cta.variant === regeneration.previousTheme.cta?.variant) {
+    next.cta.variant = rotateCtaVariant(regeneration.previousTheme.cta.variant);
+  }
+  if (Number(regeneration.iterationNumber || 1) >= 2 && next.typography.scale === regeneration.previousTheme.typography?.scale) {
+    next.typography.scale = next.typography.scale === "balanced" ? "editorial" : "balanced";
+  }
+  return next;
+}
+
+function nextHeroTreatment(previous, candidate, iterationNumber) {
+  const cycle = ["split-asymmetric", "centered-cinematic", "editorial-overlap", "fullbleed-dark", "fullbleed-light"];
+  if (candidate !== previous) return candidate;
+  const index = cycle.indexOf(previous);
+  if (index === -1) return candidate;
+  return cycle[(index + Math.max(1, iterationNumber)) % cycle.length] || candidate;
+}
+
+function rotateCtaVariant(previous) {
+  const variants = ["filled", "pill", "ghost", "underline"];
+  const index = variants.indexOf(previous);
+  return variants[(index + 1) % variants.length] || "filled";
+}
+
+function prioritizeHeroBuilders(builders, regeneration) {
+  if (!regeneration?.previousTheme) return builders;
+  const treatment = regeneration.previousTheme.style_tokens?.hero_treatment;
+  if (treatment === "split-asymmetric") {
+    return moveBuilderNamesToEnd(builders, ["heroService", "heroTech"]);
+  }
+  if (treatment === "centered-cinematic") {
+    return moveBuilderNamesToEnd(builders, ["heroSoft"]);
+  }
+  if (treatment === "editorial-overlap") {
+    return moveBuilderNamesToEnd(builders, ["heroEditorial"]);
+  }
+  return builders;
+}
+
+function prioritizeCatalogBuilders(builders, regeneration) {
+  if (!regeneration) return builders;
+  let nextBuilders = builders;
+  const hasProductImages = Array.isArray(regeneration.currentSiteContent?.products)
+    ? regeneration.currentSiteContent.products.some((product) => product.hasImage)
+    : false;
+  if (hasProductImages) {
+    nextBuilders = moveBuilderNamesToFront(nextBuilders, ["catalogFeatured", "catalogMosaic"]);
+  }
+  const previousVariant = regeneration.currentSiteContent?.sectionVariants?.catalog;
+  if (previousVariant === "grid") {
+    nextBuilders = moveBuilderNamesToEnd(nextBuilders, ["catalogGrid"]);
+  }
+  if (previousVariant === "list") {
+    nextBuilders = moveBuilderNamesToEnd(nextBuilders, ["catalogFeatured"]);
+  }
+  return nextBuilders;
+}
+
+function moveBuilderNamesToFront(builders, names) {
+  const preferred = builders.filter((builder) => names.includes(builder.name));
+  const rest = builders.filter((builder) => !names.includes(builder.name));
+  return [...preferred, ...rest];
+}
+
+function moveBuilderNamesToEnd(builders, names) {
+  const rest = builders.filter((builder) => !names.includes(builder.name));
+  const moved = builders.filter((builder) => names.includes(builder.name));
+  return [...rest, ...moved];
+}
+
+function sameHex(left, right) {
+  return String(left || "").toLowerCase() === String(right || "").toLowerCase();
+}
+
 function heroSubtitle(brief) {
   const offer = String(brief.offer_summary || "Propuesta clara y visual.");
   const audience = String(brief.target_audience || "clientes potenciales").toLowerCase();
@@ -552,9 +695,11 @@ async function requestRefineFromModel(input) {
   const rawInput = String(input.rawInput || "").trim();
   const currentBrief = input.currentBrief || null;
   const followUpAnswer = String(input.followUpAnswer || "").trim();
+  const regenerationContext = input.regenerationContext || null;
+  const isRegeneration = input.generationMode === "regenerate" || Boolean(regenerationContext);
 
   if (!promptAvailable(rawInput)) {
-    return buildHeuristicRefine(input);
+    return isRegeneration ? buildHeuristicRegenerationRefine(input) : buildHeuristicRefine(input);
   }
 
   const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
@@ -568,22 +713,37 @@ async function requestRefineFromModel(input) {
         {
           role: "system",
           content:
-            "Devuelve SOLO JSON válido con este contrato: " +
-            "{briefDraft:{business_name,business_type,offer_summary,target_audience,tone,primary_cta,whatsapp_phone,whatsapp_message}," +
-            "confidence,completenessScore,warnings,followUpQuestion,missingFields,heroSuggestion:{headline,subheadline,primary_cta,hero_direction},heroConfidence}. " +
-            "No incluyas section_preferences ni style_preset. " +
-            "missingFields solo puede contener offer_summary,target_audience,whatsapp_phone,business_type. " +
-            "tone es interno: puedes devolverlo, pero no hagas preguntas al usuario sobre estilo visual si faltan otros datos de negocio. " +
-            "Intenta siempre proponer heroSuggestion; si no tienes suficiente claridad, devuelve heroConfidence bajo y usa followUpQuestion para pedir la pieza faltante."
+            (isRegeneration
+              ? "Devuelve SOLO JSON válido con este contrato: {assistantSummary,followUpQuestion,refinedPrompt}. " +
+                "Estás ayudando a REGENERAR un sitio existente, no a crear el negocio desde cero. " +
+                "assistantSummary debe explicar en español qué vas a mejorar visualmente preservando el contenido actual. " +
+                "followUpQuestion debe ser null o una sola pregunta corta para afinar dirección visual/comercial según el feedback del usuario. " +
+                "refinedPrompt debe compactar el feedback confirmado para reutilizarlo luego en la regeneración. " +
+                "No pidas reescribir el negocio ni el brief completo."
+              : "Devuelve SOLO JSON válido con este contrato: " +
+                "{briefDraft:{business_name,business_type,offer_summary,target_audience,tone,primary_cta,whatsapp_phone,whatsapp_message}," +
+                "confidence,completenessScore,warnings,followUpQuestion,missingFields,heroSuggestion:{headline,subheadline,primary_cta,hero_direction},heroConfidence}. " +
+                "No incluyas section_preferences ni style_preset. " +
+                "missingFields solo puede contener offer_summary,target_audience,whatsapp_phone,business_type. " +
+                "tone es interno: puedes devolverlo, pero no hagas preguntas al usuario sobre estilo visual si faltan otros datos de negocio. " +
+                "Intenta siempre proponer heroSuggestion; si no tienes suficiente claridad, devuelve heroConfidence bajo y usa followUpQuestion para pedir la pieza faltante.")
         },
         {
           role: "user",
-          content: [
-            `Descripción inicial: ${rawInput}`,
-            `Brief actual: ${JSON.stringify(currentBrief || {})}`,
-            `Última respuesta del usuario: ${followUpAnswer || "(sin respuesta adicional)"}`,
-            "Completa el brief con lo disponible y haz una sola pregunta siguiente si aún falta información importante."
-          ].join("\n")
+          content: isRegeneration
+            ? [
+                `Feedback actual del cliente: ${rawInput}`,
+                `Feedback adicional o respuesta reciente: ${followUpAnswer || "(sin respuesta adicional)"}`,
+                `Brief actual: ${JSON.stringify(currentBrief || {})}`,
+                `Contexto de regeneración: ${JSON.stringify(regenerationContext || {})}`,
+                "Resume la intención de mejora y haz a lo sumo una pregunta corta si todavía falta claridad para regenerar mejor."
+              ].join("\n")
+            : [
+                `Descripción inicial: ${rawInput}`,
+                `Brief actual: ${JSON.stringify(currentBrief || {})}`,
+                `Última respuesta del usuario: ${followUpAnswer || "(sin respuesta adicional)"}`,
+                "Completa el brief con lo disponible y haz una sola pregunta siguiente si aún falta información importante."
+              ].join("\n")
         }
       ]
     })
@@ -618,6 +778,19 @@ function buildHeuristicRefine(input) {
     missingFields,
     heroSuggestion: buildHeroSuggestion(briefDraft),
     heroConfidence: buildHeroConfidence(briefDraft, missingFields)
+  };
+}
+
+function buildHeuristicRegenerationRefine(input) {
+  const rawInput = String(input.rawInput || "").trim();
+  const followUpAnswer = String(input.followUpAnswer || "").trim();
+  const regenerationContext = input.regenerationContext || {};
+  const merged = [rawInput, followUpAnswer].filter(Boolean).join(" ").trim();
+  const assistantSummary = `Perfecto. Voy a conservar el contenido actual y enfocar la nueva propuesta en esto: ${merged || "mejorar la claridad visual, la jerarquía y la presentación general del sitio"}.`;
+  return {
+    assistantSummary,
+    followUpQuestion: buildRegenerationFollowUpQuestion(merged, regenerationContext),
+    refinedPrompt: merged || String(regenerationContext.feedbackPrompt || "")
   };
 }
 
@@ -787,6 +960,17 @@ function buildHeroFollowUpQuestion(brief, missingFields) {
     return "Antes de cerrar el hero, dime mejor para quién es tu oferta. ¿Qué tipo de cliente quieres atraer primero?";
   }
   return `Quiero mejorar el hero de ${brief.business_name || "tu negocio"}, pero aún falta una promesa principal clara. ¿Qué debe entender alguien en los primeros 3 segundos al entrar a tu web?`;
+}
+
+function buildRegenerationFollowUpQuestion(feedback, regenerationContext) {
+  const lower = String(feedback || "").toLowerCase();
+  if (!/(premium|editorial|minimal|moderno|oscuro|claro|elegante|audaz|comercial|sofisticad)/.test(lower)) {
+    return "Antes de regenerar, ¿la quieres más premium, más comercial, más minimalista o más editorial?";
+  }
+  if (regenerationContext?.businessType === "commerce_lite" && !/(producto|catalog|catálogo|imagen|tienda)/.test(lower)) {
+    return "¿Prefieres que destaque más el hero de marca o el catálogo y las imágenes de producto?";
+  }
+  return null;
 }
 
 function computeCompletenessScore(brief, rawInput) {

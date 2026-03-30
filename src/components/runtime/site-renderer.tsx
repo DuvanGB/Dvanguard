@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { AnySiteSpec } from "@/lib/site-spec-any";
 import { buildFallbackSiteSpecV3, parseSiteSpecV3 } from "@/lib/site-spec-v3";
-import { getBodyFontFamily } from "@/lib/site-theme";
+import type { SiteThemeV31 } from "@/lib/site-spec-v3";
+import { getBodyFontFamily, getButtonAppearance, getCardSurface } from "@/lib/site-theme";
 import { SiteHeader } from "@/components/runtime/site-header";
 import { CanvasSection, type ProductCartItem } from "@/components/runtime/sections";
 
@@ -153,6 +154,7 @@ export function SiteRenderer({ spec, viewport, trackEvents = false, siteId, subd
         ))}
       {cartVisible ? (
         <CartDock
+          theme={normalized.theme}
           items={cart.items}
           open={cart.open}
           onToggle={() => cart.setOpen((prev) => !prev)}
@@ -490,6 +492,7 @@ function formatCurrency(value: number, currency: string) {
 }
 
 function CartDock(props: {
+  theme: SiteThemeV31;
   items: CartItem[];
   open: boolean;
   onToggle: () => void;
@@ -505,15 +508,30 @@ function CartDock(props: {
 }) {
   const total = props.items.reduce((sum, item) => sum + (item.price ?? 0) * item.quantity, 0);
   const currency = props.items.find((item) => item.currency)?.currency ?? "COP";
+  const buttonAppearance = getButtonAppearance(props.theme);
+  const panelSurface = getCardSurface(props.theme);
+  const fabStyle = {
+    ...buttonAppearance,
+    borderRadius: 999,
+    boxShadow: "0 12px 30px rgba(15, 23, 42, 0.2)",
+    cursor: "pointer"
+  };
+  const panelStyle = {
+    background: panelSurface.background,
+    borderColor: panelSurface.borderColor,
+    color: panelSurface.color,
+    boxShadow: "0 18px 40px rgba(15, 23, 42, 0.22)"
+  };
+  const softSurface = `${props.theme.palette.border}22`;
 
   return (
     <div className="cart-dock">
-      <button type="button" className="cart-fab" onClick={props.onToggle}>
+      <button type="button" className="cart-fab" onClick={props.onToggle} style={fabStyle}>
         Carrito ({props.items.reduce((sum, item) => sum + item.quantity, 0)})
       </button>
 
       {props.open ? (
-        <aside className="cart-panel">
+        <aside className="cart-panel" style={panelStyle}>
           <div className="cart-panel-header">
             <strong>Tu carrito</strong>
             <button type="button" className="btn-secondary" onClick={props.onClose}>
@@ -523,17 +541,25 @@ function CartDock(props: {
 
           {!props.items.length ? <p className="muted">Aún no agregas productos.</p> : null}
           {props.items.map((item) => (
-            <div key={item.blockId} className="cart-item">
+            <div key={item.blockId} className="cart-item" style={{ borderBottomColor: props.theme.palette.border }}>
               <div className="cart-item-info">
                 <strong>{item.name}</strong>
-                <small>{formatCurrency(item.price ?? 0, item.currency ?? currency)}</small>
+                <small style={{ color: props.theme.palette.text_muted }}>{formatCurrency(item.price ?? 0, item.currency ?? currency)}</small>
               </div>
               <div className="cart-item-actions">
-                <button type="button" onClick={() => props.onUpdateQuantity(item, Math.max(1, item.quantity - 1))}>
+                <button
+                  type="button"
+                  style={{ background: softSurface, color: props.theme.palette.text_primary }}
+                  onClick={() => props.onUpdateQuantity(item, Math.max(1, item.quantity - 1))}
+                >
                   -
                 </button>
                 <span>{item.quantity}</span>
-                <button type="button" onClick={() => props.onUpdateQuantity(item, item.quantity + 1)}>
+                <button
+                  type="button"
+                  style={{ background: softSurface, color: props.theme.palette.text_primary }}
+                  onClick={() => props.onUpdateQuantity(item, item.quantity + 1)}
+                >
                   +
                 </button>
                 <button type="button" className="danger" onClick={() => props.onRemove(item)}>
@@ -550,16 +576,16 @@ function CartDock(props: {
             </div>
           ) : null}
 
-          <button type="button" className="btn-primary" onClick={props.onCheckout} disabled={!props.items.length}>
+          <button type="button" onClick={props.onCheckout} disabled={!props.items.length} style={{ ...buttonAppearance, cursor: "pointer" }}>
             Pagar por WhatsApp
           </button>
 
-          <div className="cart-login">
+          <div className="cart-login" style={{ borderTopColor: props.theme.palette.border }}>
             {props.buyer ? (
-              <small>Comprador: {props.buyer.email ?? "sesión activa"}</small>
+              <small style={{ color: props.theme.palette.text_muted }}>Comprador: {props.buyer.email ?? "sesión activa"}</small>
             ) : (
               <>
-                <small>Guarda tu carrito iniciando sesión.</small>
+                <small style={{ color: props.theme.palette.text_muted }}>Guarda tu carrito iniciando sesión.</small>
                 <div className="cart-login-form">
                   <input
                     type="email"

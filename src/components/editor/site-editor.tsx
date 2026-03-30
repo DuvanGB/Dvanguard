@@ -7,9 +7,9 @@ import { ModuleTour } from "@/components/guided/module-tour";
 import { SiteRenderer } from "@/components/runtime/site-renderer";
 import { SiteHeader, getSiteHeaderPreviewHeight } from "@/components/runtime/site-header";
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
-import { CANVAS_BASE_WIDTH, applyEditableThemePatch, deriveVisualThemeFromLegacy, fontFamilies, getEditableThemeSnapshot, normalizeSiteSpecV3, stabilizeSiteSpecForMobile } from "@/lib/site-spec-v3";
+import { CANVAS_BASE_WIDTH, applyEditableThemePatch, deriveVisualThemeFromLegacy, fontFamilies, getEditableThemeSnapshot, getViewportSectionHeightPx, normalizeSiteSpecV3, stabilizeSiteSpecForMobile } from "@/lib/site-spec-v3";
 import { resolveFontStack } from "@/lib/design-fonts";
-import { getBodyFontFamily } from "@/lib/site-theme";
+import { getBlockRadius, getBodyFontFamily, getButtonAppearance, getCardSurface, getHeadingFontFamily, getSectionAppearance, getSectionPadding, getTextScale } from "@/lib/site-theme";
 import type { TemplateDefinition, TemplateId } from "@/lib/templates/types";
 
 type Props = {
@@ -1805,9 +1805,14 @@ function addSection(type: SiteSectionV3["type"]) {
                 />
               ) : null}
               {visibleSections
-                .map((section) => {
-                  const sectionWidth = canvasWidth;
+                .map((section, sectionIndex) => {
+                  const sectionWidth = canvasBaseWidth;
                   const sectionHeight = getSectionHeightPx(section, viewport, sectionWidth);
+                  const sectionAppearance = getSectionAppearance(siteSpec.theme, section, sectionIndex);
+                  const cardSurface = getCardSurface(siteSpec.theme);
+                  const buttonAppearance = getButtonAppearance(siteSpec.theme);
+                  const sectionPadding = getSectionPadding(siteSpec.theme);
+                  const textScale = getTextScale(siteSpec.theme);
 
                   return (
                     <article
@@ -1816,6 +1821,8 @@ function addSection(type: SiteSectionV3["type"]) {
                         canvasDropSectionId === section.id ? "drop-target" : ""
                       }`}
                       style={{
+                        background: sectionAppearance.background,
+                        borderBottom: `1px solid ${sectionAppearance.borderColor}`,
                         minHeight: sectionHeight,
                         height: sectionHeight
                       }}
@@ -1896,12 +1903,61 @@ function addSection(type: SiteSectionV3["type"]) {
                                   style={{ width: "100%", height: "100%", objectFit: block.content.fit ?? "contain" }}
                                 />
                               ) : null}
-                              {block.type === "button" ? <button type="button">{block.content.label}</button> : null}
+                              {block.type === "button" ? (
+                                <button type="button" style={{ ...buttonAppearance, width: "100%", height: "100%", cursor: "pointer" }}>
+                                  {block.content.label}
+                                </button>
+                              ) : null}
                               {block.type === "product" ? (
-                                <div className="canvas-product">
-                                  <div className="canvas-product-image" />
-                                  <strong>{block.content.name}</strong>
-                                  {block.content.price !== undefined ? <span>${block.content.price}</span> : null}
+                                <div
+                                  className="canvas-product"
+                                  style={{
+                                    ...cardSurface,
+                                    border: `1px solid ${cardSurface.borderColor}`,
+                                    borderRadius: getBlockRadius(siteSpec.theme, block.style.radius ?? 12),
+                                    padding: sectionPadding,
+                                    gap: Math.max(8, Math.round(sectionPadding * 0.45))
+                                  }}
+                                >
+                                  <div
+                                    className="canvas-product-image"
+                                    style={{
+                                      borderRadius: getBlockRadius(siteSpec.theme, block.style.radius ?? 12),
+                                      backgroundImage: `url(${block.content.image_url || "https://placehold.co/640x420?text=Producto"})`,
+                                      backgroundSize: "cover",
+                                      backgroundPosition: "center"
+                                    }}
+                                  />
+                                  <strong
+                                    style={{
+                                      fontSize: 18 * textScale,
+                                      fontFamily: getHeadingFontFamily(siteSpec.theme),
+                                      color: siteSpec.theme.palette.text_primary
+                                    }}
+                                  >
+                                    {block.content.name}
+                                  </strong>
+                                  {block.content.description ? (
+                                    <span style={{ color: siteSpec.theme.palette.text_muted, fontSize: 14 * textScale }}>
+                                      {block.content.description}
+                                    </span>
+                                  ) : null}
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "space-between",
+                                      gap: 12,
+                                      marginTop: "auto"
+                                    }}
+                                  >
+                                    <span style={{ fontWeight: 700, color: siteSpec.theme.palette.text_primary }}>
+                                      {formatEditorPrice(block.content.price, block.content.currency)}
+                                    </span>
+                                    <button type="button" style={{ ...buttonAppearance, cursor: "pointer" }}>
+                                      Agregar
+                                    </button>
+                                  </div>
                                 </div>
                               ) : null}
                               {block.type === "shape" ? <div className="canvas-shape" /> : null}
@@ -2914,28 +2970,21 @@ function getBlockRect(block: CanvasBlock, viewport: EditorViewport) {
 }
 
 function getSectionHeightPx(section: SiteSectionV3, viewport: EditorViewport, width: number) {
-  const ratio = viewport === "mobile" ? section.height_ratio.mobile : section.height_ratio.desktop;
-  const baseHeight = Math.max(1, width * ratio);
-  if (viewport !== "mobile") {
-    return baseHeight;
+  return getViewportSectionHeightPx(section, viewport, width);
+}
+
+function formatEditorPrice(value?: number, currency?: string) {
+  if (value === undefined || value === null) return "Consultar";
+  const normalizedCurrency = currency?.trim() || "COP";
+  try {
+    return new Intl.NumberFormat("es-CO", {
+      style: "currency",
+      currency: normalizedCurrency,
+      maximumFractionDigits: 0
+    }).format(value);
+  } catch {
+    return `${normalizedCurrency} ${value}`;
   }
-
-  const contentBottom = section.blocks
-    .filter((block) => block.visible)
-    .reduce((maxBottom, block) => {
-      const rect = rectPercentToPx(getBlockRect(block, viewport), width, baseHeight);
-      const visualHeight =
-        block.type === "text"
-          ? getTextBlockMinHeightPx(block, rect.w, rect.h)
-          : block.type === "product"
-            ? Math.max(rect.h, 300)
-            : block.type === "image"
-              ? Math.max(rect.h, 180)
-              : rect.h;
-      return Math.max(maxBottom, rect.y + visualHeight + 24);
-    }, 0);
-
-  return Math.max(baseHeight, contentBottom);
 }
 
 function getTextBlockMinHeightPx(

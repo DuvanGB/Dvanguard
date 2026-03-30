@@ -6,8 +6,14 @@ import { useRouter } from "next/navigation";
 
 import { ModuleTour } from "@/components/guided/module-tour";
 import { SiteRenderer } from "@/components/runtime/site-renderer";
+import {
+  buildRegenerationBriefBase,
+  buildRegenerationSummaryLine,
+  extractCurrentSiteContentForRegeneration
+} from "@/lib/ai/regeneration-context";
 import type { BusinessBriefDraft, HeroSuggestion, MissingBriefField, OnboardingInputMode } from "@/lib/onboarding/types";
 import type { SiteSpecV3 } from "@/lib/site-spec-v3";
+import { normalizeWhatsappPhone, validateWhatsappPhone } from "@/lib/whatsapp";
 
 type RefineResponse = {
   briefDraft: BusinessBriefDraft;
@@ -27,6 +33,14 @@ type GenerateResponse = {
   jobId: string;
   status: "queued" | "processing" | "done" | "failed";
   jobType?: "visual_home_generation";
+  error?: string;
+};
+
+type RegenerationRefineResponse = {
+  assistantSummary: string;
+  followUpQuestion: string | null;
+  refinedPrompt: string;
+  provider?: "llm" | "heuristic";
   error?: string;
 };
 
@@ -90,6 +104,9 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [followUpQuestion, setFollowUpQuestion] = useState<string | null>(null);
   const [followUpInput, setFollowUpInput] = useState("");
+  const [regenerationFeedback, setRegenerationFeedback] = useState("");
+  const [regenerationFeedbackSummary, setRegenerationFeedbackSummary] = useState<string | null>(null);
+  const [regenerationFollowUpQuestion, setRegenerationFollowUpQuestion] = useState<string | null>(null);
   const [loadingRefine, setLoadingRefine] = useState(false);
   const [loadingGenerate, setLoadingGenerate] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -103,6 +120,11 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
   const canRefine = useMemo(() => rawInput.trim().length >= 10 && rawInput.length <= maxInputChars, [rawInput, maxInputChars]);
   const canSendFollowUp = Boolean(followUpQuestion && followUpInput.trim().length >= 2 && !loadingRefine);
   const canGenerate = Boolean(briefDraft && !loadingGenerate);
+  const canAnalyzeRegeneration = Boolean(regenerationFeedback.trim().length >= 8 && !loadingRefine);
+  const regenerationSiteContent = useMemo(
+    () => (generationMode === "regenerate" && initialSpec ? extractCurrentSiteContentForRegeneration({ siteSpec: initialSpec }) : null),
+    [generationMode, initialSpec]
+  );
 
   useEffect(() => {
     const ctor = getRecognitionCtor();
@@ -117,7 +139,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
 
   useEffect(() => {
     if (generationMode !== "regenerate" || !initialSpec) return;
-    const bootstrap = buildBriefFromExistingSite(initialSpec, siteName);
+    const bootstrap = buildRegenerationBriefBase(initialSpec, siteName);
     setRawInput(bootstrap.rawInput);
     setBriefDraft(bootstrap.briefDraft);
     setWhatsappPhoneInput(bootstrap.briefDraft.whatsapp_phone ?? "");
@@ -127,7 +149,15 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
     setHeroSuggestion(buildHeroSuggestionClient(bootstrap.briefDraft));
     setHeroConfidence(0.82);
     setFollowUpQuestion(null);
-    setChatMessages([]);
+    setChatMessages([
+      {
+        role: "assistant",
+        content:
+          "Voy a conservar tu contenido actual y usar tu feedback para empujar una versión más rica y mejor organizada. Cuéntame qué quieres mejorar en esta iteración."
+      }
+    ]);
+    setRegenerationFeedbackSummary(null);
+    setRegenerationFollowUpQuestion(null);
     setStep(2);
   }, [generationMode, initialSpec, siteName]);
 
@@ -165,7 +195,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
     return {
       ...currentBrief,
       business_name: currentBrief.business_name.trim() || siteName?.trim() || currentBrief.business_name,
-      whatsapp_phone: whatsappPhoneInput.trim() || undefined,
+      whatsapp_phone: normalizeWhatsappPhone(whatsappPhoneInput) || undefined,
       whatsapp_message: whatsappMessageInput.trim() || undefined
     };
   }
@@ -386,7 +416,11 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
           briefDraft: buildFinalBrief(briefDraft),
           refineConfidence: confidence ?? undefined,
           warnings,
-          generationMode
+          generationMode,
+          regenerationFeedback:
+            generationMode === "regenerate"
+              ? buildRegenerationFeedbackPayload(regenerationFeedback, chatMessages, regenerationFeedbackSummary)
+              : undefined
         })
       });
 
@@ -405,6 +439,103 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
       setError("No se pudo iniciar la generación. Intenta nuevamente.");
       setLoadingGenerate(false);
       setStep(2);
+    }
+  }
+
+  function buildRegenerationRefineContext() {
+    const currentBrief = briefDraft ? buildFinalBrief(briefDraft) : undefined;
+    return {
+      siteId,
+      currentBrief,
+      currentSiteSummary:
+        briefDraft && regenerationSiteContent
+          ? buildRegenerationSummaryLine({
+              businessName: briefDraft.business_name,
+              siteType: briefDraft.business_type,
+              currentSiteContent: regenerationSiteContent
+            })
+          : undefined,
+      sectionList: regenerationSiteContent?.sectionsPresent ?? [],
+      productCount: regenerationSiteContent?.products.length ?? 0,
+      imageCount: regenerationSiteContent?.imageCount ?? 0
+    };
+  }
+
+  async function requestRegenerationRefine(feedbackPrompt: string) {
+    const response = await fetch("/api/onboarding/regenerate-refine", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...buildRegenerationRefineContext(),
+        feedbackPrompt
+      })
+    });
+
+    return { ok: response.ok, data: (await response.json()) as RegenerationRefineResponse };
+  }
+
+  async function handleRegenerationFeedbackAnalyze() {
+    const feedback = regenerationFeedback.trim();
+    if (!feedback) return;
+
+    setLoadingRefine(true);
+    setError(null);
+
+    try {
+      const result = await requestRegenerationRefine(feedback);
+      if (!result.ok || !result.data.assistantSummary) {
+        setError(result.data.error ?? "No se pudo analizar esta mejora. Intenta de nuevo.");
+        setLoadingRefine(false);
+        return;
+      }
+
+      setChatMessages((prev) => [
+        ...prev,
+        { role: "user", content: feedback },
+        { role: "assistant", content: result.data.assistantSummary },
+        ...(result.data.followUpQuestion ? [{ role: "assistant" as const, content: result.data.followUpQuestion }] : [])
+      ]);
+      setRegenerationFeedbackSummary(result.data.refinedPrompt || result.data.assistantSummary);
+      setRegenerationFollowUpQuestion(result.data.followUpQuestion ?? null);
+      setRegenerationFeedback("");
+      setLoadingRefine(false);
+    } catch {
+      setError("No se pudo analizar esta mejora con IA en este momento. Intenta de nuevo.");
+      setLoadingRefine(false);
+    }
+  }
+
+  async function handleRegenerationFollowUpSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!regenerationFollowUpQuestion || !followUpInput.trim()) return;
+
+    const answer = followUpInput.trim();
+    setLoadingRefine(true);
+    setError(null);
+    setChatMessages((prev) => [...prev, { role: "user", content: answer }]);
+    setFollowUpInput("");
+
+    try {
+      const composedPrompt =
+        buildRegenerationFeedbackPayload(answer, chatMessages, regenerationFeedbackSummary) ?? answer;
+      const result = await requestRegenerationRefine(composedPrompt);
+      if (!result.ok || !result.data.assistantSummary) {
+        setError(result.data.error ?? "No se pudo procesar tu respuesta. Intenta de nuevo.");
+        setLoadingRefine(false);
+        return;
+      }
+
+      setChatMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: result.data.assistantSummary },
+        ...(result.data.followUpQuestion ? [{ role: "assistant" as const, content: result.data.followUpQuestion }] : [])
+      ]);
+      setRegenerationFeedbackSummary(result.data.refinedPrompt || result.data.assistantSummary);
+      setRegenerationFollowUpQuestion(result.data.followUpQuestion ?? null);
+      setLoadingRefine(false);
+    } catch {
+      setError("No se pudo procesar tu respuesta con IA en este momento. Intenta de nuevo.");
+      setLoadingRefine(false);
     }
   }
 
@@ -510,165 +641,235 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
 
       {step === 2 && briefDraft ? (
         <section className="card stack">
-          <h2>Refinemos la información clave</h2>
-          <p>La idea aquí es reunir lo mínimo necesario para que la generación visual salga mejor desde el primer intento.</p>
-          {confidence !== null ? <small>Confianza estimada: {Math.round(confidence * 100)}%</small> : null}
-          {completenessScore !== null ? <small>Completitud del brief: {Math.round(completenessScore)}%</small> : null}
+          {generationMode === "regenerate" ? (
+            <>
+              <h2>Rediseñemos tu sitio actual</h2>
+              <p>Vamos a conservar tu contenido actual y usar tu feedback para empujar una versión más rica, más profesional y mejor organizada.</p>
 
-          {warnings.length ? (
-            <div className="stack">
-              <strong>Recomendaciones</strong>
-              <ul>
-                {warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
-          <div className="onboarding-refine-grid">
-            <div className="card stack onboarding-summary-card">
-              <strong>Resumen del brief</strong>
-
-              <label>
-                Nombre del negocio
-                <input
-                  value={briefDraft.business_name}
-                  onChange={(event) => setBriefDraft((prev) => (prev ? { ...prev, business_name: event.target.value } : prev))}
-                />
-              </label>
-
-              <label>
-                Tipo de sitio
-                <select
-                  value={briefDraft.business_type}
-                  onChange={(event) =>
-                    setBriefDraft((prev) =>
-                      prev ? { ...prev, business_type: event.target.value as BusinessBriefDraft["business_type"] } : prev
-                    )
-                  }
-                >
-                  <option value="informative">informative</option>
-                  <option value="commerce_lite">commerce_lite</option>
-                </select>
-              </label>
-
-              <label>
-                Resumen de oferta
-                <textarea
-                  rows={4}
-                  value={briefDraft.offer_summary}
-                  onChange={(event) => setBriefDraft((prev) => (prev ? { ...prev, offer_summary: event.target.value } : prev))}
-                />
-              </label>
-
-              <label>
-                Público objetivo
-                <input
-                  value={briefDraft.target_audience}
-                  onChange={(event) => setBriefDraft((prev) => (prev ? { ...prev, target_audience: event.target.value } : prev))}
-                />
-              </label>
-
-              <label>
-                CTA principal
-                <input
-                  value={briefDraft.primary_cta}
-                  onChange={(event) => {
-                    setCtaManuallyEdited(true);
-                    setBriefDraft((prev) => (prev ? { ...prev, primary_cta: event.target.value } : prev));
-                  }}
-                />
-              </label>
-
-              <label>
-                Número WhatsApp (con país)
-                <input value={whatsappPhoneInput} onChange={(event) => setWhatsappPhoneInput(event.target.value)} placeholder="+573001234567" />
-              </label>
-              {whatsappPhoneInput.trim().length > 0 && !/^\+\d{8,15}$/.test(whatsappPhoneInput.trim()) ? (
-                <small className="muted">Formato esperado: +573001234567</small>
+              {briefDraft && regenerationSiteContent ? (
+                <div className="card stack" style={{ gap: "0.55rem" }}>
+                  <strong>Resumen de la regeneración</strong>
+                  <p className="muted" style={{ margin: 0 }}>
+                    Esta regeneración preserva contenido, imágenes, CTA y estructura base. El objetivo es mejorar diseño, jerarquía y presentación visual.
+                  </p>
+                  <small>{buildRegenerationSummaryLine({ businessName: briefDraft.business_name, siteType: briefDraft.business_type, currentSiteContent: regenerationSiteContent })}</small>
+                  <small className="muted">
+                    Voy a usar tu información actual: {regenerationSiteContent.sectionsPresent.join(", ") || "sin secciones detectadas"}.
+                  </small>
+                </div>
               ) : null}
 
-              <label>
-                Mensaje prellenado (opcional)
-                <textarea
-                  rows={2}
-                  value={whatsappMessageInput}
-                  onChange={(event) => {
-                    setWhatsappMessageManuallyEdited(true);
-                    setWhatsappMessageInput(event.target.value);
-                  }}
-                  placeholder="Hola, vi tu web y quiero más info."
-                />
-              </label>
-            </div>
+              <div className="card stack onboarding-chat-card">
+                <strong>Chat de regeneración</strong>
+                <p>Escribe qué te gustaría mejorar y la IA lo tomará como dirección para esta nueva iteración.</p>
 
-            <div className="card stack onboarding-chat-card">
-              <strong>Asistente de refine</strong>
-              <p>Si hace falta más contexto, la IA te hará preguntas cortas para mejorar la generación.</p>
+                <div className="onboarding-chat-thread">
+                  {chatMessages.length ? (
+                    chatMessages.map((message, index) => (
+                      <div key={`${message.role}-${index}`} className={`onboarding-chat-bubble ${message.role}`}>
+                        <strong>{message.role === "assistant" ? "IA" : "Tú"}</strong>
+                        <p>{message.content}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="onboarding-chat-empty">Todavía no hay instrucciones de mejora.</div>
+                  )}
+                </div>
 
-              {missingFields.length ? (
-                <small>Campos aún débiles: {missingFields.join(", ")}</small>
-              ) : (
-                <small>Ya tenemos suficiente información para generar una propuesta sólida.</small>
-              )}
+                <label>
+                  ¿Qué quieres mejorar o cambiar en esta versión?
+                  <textarea
+                    rows={3}
+                    value={regenerationFeedback}
+                    onChange={(event) => setRegenerationFeedback(event.target.value.slice(0, 500))}
+                    maxLength={500}
+                    placeholder="Ejemplo: quiero un hero más premium, más contraste visual y que el catálogo destaque mejor las imágenes."
+                  />
+                </label>
+                <small>
+                  {regenerationFeedback.length}/500 caracteres
+                </small>
 
-              <div className="card stack" style={{ gap: "0.5rem" }}>
-                <strong>Propuesta de hero</strong>
-                {heroConfidence !== null ? <small>Confianza del hero: {Math.round(heroConfidence * 100)}%</small> : null}
-                {heroSuggestion ? (
-                  <>
-                    <div className="stack" style={{ gap: "0.2rem" }}>
-                      <small className="muted">Headline</small>
-                      <strong>{heroSuggestion.headline}</strong>
-                    </div>
-                    <div className="stack" style={{ gap: "0.2rem" }}>
-                      <small className="muted">Subheadline</small>
-                      <p>{heroSuggestion.subheadline}</p>
-                    </div>
-                    <div className="stack" style={{ gap: "0.2rem" }}>
-                      <small className="muted">CTA</small>
-                      <strong>{heroSuggestion.primary_cta}</strong>
-                    </div>
-                    <div className="stack" style={{ gap: "0.2rem" }}>
-                      <small className="muted">Dirección</small>
-                      <p>{heroSuggestion.hero_direction}</p>
-                    </div>
-                  </>
-                ) : (
-                  <p className="muted">Todavía no hay suficiente claridad para proponerte un hero fuerte. Vamos a pedir una precisión adicional por chat.</p>
-                )}
+                <button type="button" className="btn-secondary" onClick={handleRegenerationFeedbackAnalyze} disabled={!canAnalyzeRegeneration}>
+                  {loadingRefine ? "Analizando con IA..." : "Analizar mejora"}
+                </button>
+
+                {regenerationFollowUpQuestion ? (
+                  <form className="stack" onSubmit={handleRegenerationFollowUpSubmit}>
+                    <label>
+                      Respuesta
+                      <textarea rows={3} value={followUpInput} onChange={(event) => setFollowUpInput(event.target.value)} />
+                    </label>
+                    <button type="submit" className="btn-secondary" disabled={!followUpInput.trim() || loadingRefine}>
+                      {loadingRefine ? "Analizando respuesta..." : "Guardar respuesta"}
+                    </button>
+                  </form>
+                ) : null}
               </div>
+            </>
+          ) : (
+            <>
+              <h2>Refinemos la información clave</h2>
+              <p>La idea aquí es reunir lo mínimo necesario para que la generación visual salga mejor desde el primer intento.</p>
+              {confidence !== null ? <small>Confianza estimada: {Math.round(confidence * 100)}%</small> : null}
+              {completenessScore !== null ? <small>Completitud del brief: {Math.round(completenessScore)}%</small> : null}
 
-              <div className="onboarding-chat-thread">
-                {chatMessages.length ? (
-                  chatMessages.map((message, index) => (
-                    <div key={`${message.role}-${index}`} className={`onboarding-chat-bubble ${message.role}`}>
-                      <strong>{message.role === "assistant" ? "IA" : "Tú"}</strong>
-                      <p>{message.content}</p>
-                    </div>
-                  ))
-                ) : (
-                  <div className="onboarding-chat-empty">No hay preguntas pendientes. Puedes generar cuando quieras.</div>
-                )}
-              </div>
+              {warnings.length ? (
+                <div className="stack">
+                  <strong>Recomendaciones</strong>
+                  <ul>
+                    {warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
 
-              {followUpQuestion ? (
-                <form className="stack" onSubmit={handleFollowUpSubmit}>
+              <div className="onboarding-refine-grid">
+                <div className="card stack onboarding-summary-card">
+                  <strong>Resumen del brief</strong>
+
                   <label>
-                    Respuesta
-                    <textarea rows={3} value={followUpInput} onChange={(event) => setFollowUpInput(event.target.value)} />
+                    Nombre del negocio
+                    <input
+                      value={briefDraft.business_name}
+                      onChange={(event) => setBriefDraft((prev) => (prev ? { ...prev, business_name: event.target.value } : prev))}
+                    />
                   </label>
-                  <button type="submit" className="btn-secondary" disabled={!canSendFollowUp}>
-                    {loadingRefine ? "Actualizando brief..." : "Responder y mejorar brief"}
-                  </button>
-                </form>
-              ) : null}
-            </div>
-          </div>
+
+                  <label>
+                    Tipo de sitio
+                    <select
+                      value={briefDraft.business_type}
+                      onChange={(event) =>
+                        setBriefDraft((prev) =>
+                          prev ? { ...prev, business_type: event.target.value as BusinessBriefDraft["business_type"] } : prev
+                        )
+                      }
+                    >
+                      <option value="informative">informative</option>
+                      <option value="commerce_lite">commerce_lite</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Resumen de oferta
+                    <textarea
+                      rows={4}
+                      value={briefDraft.offer_summary}
+                      onChange={(event) => setBriefDraft((prev) => (prev ? { ...prev, offer_summary: event.target.value } : prev))}
+                    />
+                  </label>
+
+                  <label>
+                    Público objetivo
+                    <input
+                      value={briefDraft.target_audience}
+                      onChange={(event) => setBriefDraft((prev) => (prev ? { ...prev, target_audience: event.target.value } : prev))}
+                    />
+                  </label>
+
+                  <label>
+                    CTA principal
+                    <input
+                      value={briefDraft.primary_cta}
+                      onChange={(event) => {
+                        setCtaManuallyEdited(true);
+                        setBriefDraft((prev) => (prev ? { ...prev, primary_cta: event.target.value } : prev));
+                      }}
+                    />
+                  </label>
+
+                  <label>
+                    Número WhatsApp (con país)
+                    <input value={whatsappPhoneInput} onChange={(event) => setWhatsappPhoneInput(event.target.value)} placeholder="+573001234567" />
+                  </label>
+                  {whatsappPhoneInput.trim().length > 0 && !validateWhatsappPhone(whatsappPhoneInput.trim()) ? (
+                    <small className="muted">Formato esperado: +573001234567</small>
+                  ) : null}
+
+                  <label>
+                    Mensaje prellenado (opcional)
+                    <textarea
+                      rows={2}
+                      value={whatsappMessageInput}
+                      onChange={(event) => {
+                        setWhatsappMessageManuallyEdited(true);
+                        setWhatsappMessageInput(event.target.value);
+                      }}
+                      placeholder="Hola, vi tu web y quiero más info."
+                    />
+                  </label>
+                </div>
+
+                <div className="card stack onboarding-chat-card">
+                  <strong>Asistente de refine</strong>
+                  <p>Si hace falta más contexto, la IA te hará preguntas cortas para mejorar la generación.</p>
+
+                  {missingFields.length ? (
+                    <small>Campos aún débiles: {missingFields.join(", ")}</small>
+                  ) : (
+                    <small>Ya tenemos suficiente información para generar una propuesta sólida.</small>
+                  )}
+
+                  <div className="card stack" style={{ gap: "0.5rem" }}>
+                    <strong>Propuesta de hero</strong>
+                    {heroConfidence !== null ? <small>Confianza del hero: {Math.round(heroConfidence * 100)}%</small> : null}
+                    {heroSuggestion ? (
+                      <>
+                        <div className="stack" style={{ gap: "0.2rem" }}>
+                          <small className="muted">Headline</small>
+                          <strong>{heroSuggestion.headline}</strong>
+                        </div>
+                        <div className="stack" style={{ gap: "0.2rem" }}>
+                          <small className="muted">Subheadline</small>
+                          <p>{heroSuggestion.subheadline}</p>
+                        </div>
+                        <div className="stack" style={{ gap: "0.2rem" }}>
+                          <small className="muted">CTA</small>
+                          <strong>{heroSuggestion.primary_cta}</strong>
+                        </div>
+                        <div className="stack" style={{ gap: "0.2rem" }}>
+                          <small className="muted">Dirección</small>
+                          <p>{heroSuggestion.hero_direction}</p>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="muted">Todavía no hay suficiente claridad para proponerte un hero fuerte. Vamos a pedir una precisión adicional por chat.</p>
+                    )}
+                  </div>
+
+                  <div className="onboarding-chat-thread">
+                    {chatMessages.length ? (
+                      chatMessages.map((message, index) => (
+                        <div key={`${message.role}-${index}`} className={`onboarding-chat-bubble ${message.role}`}>
+                          <strong>{message.role === "assistant" ? "IA" : "Tú"}</strong>
+                          <p>{message.content}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="onboarding-chat-empty">No hay preguntas pendientes. Puedes generar cuando quieras.</div>
+                    )}
+                  </div>
+
+                  {followUpQuestion ? (
+                    <form className="stack" onSubmit={handleFollowUpSubmit}>
+                      <label>
+                        Respuesta
+                        <textarea rows={3} value={followUpInput} onChange={(event) => setFollowUpInput(event.target.value)} />
+                      </label>
+                      <button type="submit" className="btn-secondary" disabled={!canSendFollowUp}>
+                        {loadingRefine ? "Actualizando brief..." : "Responder y mejorar brief"}
+                      </button>
+                    </form>
+                  ) : null}
+                </div>
+              </div>
+            </>
+          )}
 
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            <button type="button" className="btn-secondary" onClick={() => setStep(1)}>
+            <button type="button" className="btn-secondary" onClick={() => (generationMode === "regenerate" ? router.back() : setStep(1))}>
               Volver
             </button>
             <button type="button" className="btn-primary" onClick={handleGenerate} disabled={!canGenerate}>
@@ -774,6 +975,20 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
   );
 }
 
+function buildRegenerationFeedbackPayload(
+  draftFeedback: string,
+  chatMessages: ChatMessage[],
+  assistantSummary: string | null
+) {
+  const userMessages = chatMessages
+    .filter((message) => message.role === "user")
+    .map((message) => message.content.trim())
+    .filter(Boolean);
+  const parts = [draftFeedback.trim(), ...userMessages, assistantSummary ?? ""].filter(Boolean);
+  const compact = Array.from(new Set(parts)).join("\n");
+  return compact || undefined;
+}
+
 function stageOrder(stage: string | null | undefined) {
   return {
     brief_analysis: 1,
@@ -816,42 +1031,6 @@ function suggestPrimaryCtaClient(input: {
   }
   if (/agenda|cita|consulta|asesor/.test(lower)) return "Agendar asesoría";
   return "Solicitar información";
-}
-
-function buildBriefFromExistingSite(siteSpec: SiteSpecV3, siteName?: string) {
-  const home = siteSpec.pages.find((page) => page.slug === "/") ?? siteSpec.pages[0];
-  const textBlocks = home?.sections.flatMap((section) => section.blocks.filter((block) => block.type === "text")) ?? [];
-  const buttonBlocks = home?.sections.flatMap((section) => section.blocks.filter((block) => block.type === "button")) ?? [];
-  const headline = textBlocks[0]?.type === "text" ? textBlocks[0].content.text.trim() : "";
-  const supporting = textBlocks
-    .slice(1, 4)
-    .map((block) => (block.type === "text" ? block.content.text.trim() : ""))
-    .filter(Boolean)
-    .join(" ");
-  const firstButton = buttonBlocks[0];
-  const whatsapp = siteSpec.integrations.whatsapp;
-
-  const offerSummary = [headline, supporting].filter(Boolean).join(". ").slice(0, 420) || "Presentación del negocio y su propuesta principal.";
-  const rawInput = [siteName ?? headline, offerSummary, siteSpec.site_type === "commerce_lite" ? "Sitio comercial con catálogo." : "Sitio informativo."]
-    .filter(Boolean)
-    .join(" ");
-
-  return {
-    rawInput,
-    briefDraft: {
-      business_name: siteName?.trim() || headline || "Mi negocio",
-      business_type: siteSpec.site_type,
-      offer_summary: offerSummary,
-      target_audience: siteSpec.site_type === "commerce_lite" ? "Clientes interesados en comprar online o por WhatsApp." : "Clientes potenciales que buscan información y contacto.",
-      tone: "profesional y claro",
-      primary_cta:
-        (firstButton?.type === "button" ? firstButton.content.label : undefined) ||
-        whatsapp?.cta_label ||
-        (siteSpec.site_type === "commerce_lite" ? "Comprar por WhatsApp" : "Solicitar información"),
-      whatsapp_phone: whatsapp?.phone,
-      whatsapp_message: whatsapp?.message
-    } satisfies BusinessBriefDraft
-  };
 }
 
 function suggestWhatsappMessageClient(input: {

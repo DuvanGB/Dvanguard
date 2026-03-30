@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import type { RegenerationContext } from "@/lib/ai/regeneration-context";
 import type { BusinessBriefDraft } from "@/lib/onboarding/types";
 import type { TemplateId } from "@/lib/templates/types";
 
@@ -10,6 +11,7 @@ type TriggerVisualWorkerInput = {
   briefDraft?: BusinessBriefDraft;
   callbackBaseUrl: string;
   currentSiteSummary?: string;
+  regenerationContext?: RegenerationContext;
 };
 
 type TriggerRefineWorkerInput = {
@@ -17,6 +19,16 @@ type TriggerRefineWorkerInput = {
   inputMode: "text" | "voice";
   currentBrief?: Partial<BusinessBriefDraft> | null;
   followUpAnswer?: string | null;
+  generationMode?: "new" | "regenerate";
+  regenerationContext?: {
+    currentSiteSummary?: string | null;
+    feedbackPrompt?: string | null;
+    businessName?: string | null;
+    businessType?: BusinessBriefDraft["business_type"] | null;
+    sectionList?: string[] | null;
+    productCount?: number | null;
+    imageCount?: number | null;
+  } | null;
 };
 
 export async function triggerVisualGenerationWorker(input: TriggerVisualWorkerInput) {
@@ -37,7 +49,9 @@ export async function triggerVisualGenerationWorker(input: TriggerVisualWorkerIn
       templateId: input.templateId ?? null,
       briefDraft: input.briefDraft ?? null,
       callbackBaseUrl: input.callbackBaseUrl,
-      currentSiteSummary: input.currentSiteSummary ?? null
+      currentSiteSummary: input.currentSiteSummary ?? null,
+      isRegeneration: input.regenerationContext?.isRegeneration ?? false,
+      regenerationContext: input.regenerationContext ?? null
     })
   });
 
@@ -67,7 +81,9 @@ export async function requestRefineFromWorker(input: TriggerRefineWorkerInput) {
       rawInput: input.rawInput,
       inputMode: input.inputMode,
       currentBrief: input.currentBrief ?? null,
-      followUpAnswer: input.followUpAnswer ?? null
+      followUpAnswer: input.followUpAnswer ?? null,
+      generationMode: input.generationMode ?? "new",
+      regenerationContext: input.regenerationContext ?? null
     })
   });
 

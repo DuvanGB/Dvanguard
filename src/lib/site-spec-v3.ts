@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { BusinessBriefDraft } from "@/lib/onboarding/types";
 import { getTemplateById } from "@/lib/templates/catalog";
 import { pickTemplateOrFallback } from "@/lib/templates/selector";
+import { normalizeWhatsappPhone as normalizeWhatsappPhoneValue } from "@/lib/whatsapp";
 import {
   templateIds,
   type HeaderVariant,
@@ -1059,12 +1060,7 @@ export function buildFallbackSiteSpecV3(
 }
 
 function normalizeWhatsappPhone(value?: string) {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const normalized = trimmed.startsWith("+") ? trimmed : `+${trimmed}`;
-  if (!/^\+\d{8,15}$/.test(normalized)) return undefined;
-  return normalized.replace(/\D/g, "");
+  return normalizeWhatsappPhoneValue(value);
 }
 
 export function stabilizeSiteSpecForMobile(spec: SiteSpecV3): SiteSpecV3 {
@@ -1074,6 +1070,36 @@ export function stabilizeSiteSpecForMobile(spec: SiteSpecV3): SiteSpecV3 {
     sections: page.sections.map((section) => stabilizeSectionForMobile(section))
   }));
   return next;
+}
+
+export function getViewportSectionHeightPx(
+  section: SiteSectionV3,
+  viewport: "desktop" | "mobile",
+  width: number
+) {
+  const ratio = viewport === "mobile" ? section.height_ratio.mobile : section.height_ratio.desktop;
+  const baseHeight =
+    viewport === "mobile"
+      ? Math.max(width * ratio, getMinimumSectionHeight(section.type))
+      : Math.max(1, width * ratio);
+
+  const contentBottom = section.blocks
+    .filter((block) => block.visible)
+    .reduce((maxBottom, block) => {
+      const sourceRect = viewport === "mobile" && block.layout.mobile ? block.layout.mobile : block.layout.desktop;
+      const rect = rectPercentToPx(sourceRect, width, baseHeight);
+      const visualHeight =
+        block.type === "text"
+          ? getViewportTextHeightPx(block.content.text, block.style.fontSize, rect.w, rect.h)
+          : block.type === "product"
+            ? Math.max(rect.h, viewport === "mobile" ? 300 : 250)
+            : block.type === "image"
+              ? Math.max(rect.h, viewport === "mobile" ? 180 : rect.h)
+              : rect.h;
+      return Math.max(maxBottom, rect.y + visualHeight + 24);
+    }, 0);
+
+  return Math.max(baseHeight, contentBottom);
 }
 
 function stabilizeSectionForMobile(section: SiteSectionV3): SiteSectionV3 {
@@ -1289,6 +1315,16 @@ function getMobileTextHeightPx(text: string, fontSize = 18, widthPx: number, fal
     .split("\n")
     .reduce((total, line) => total + Math.max(1, Math.ceil(Math.max(1, line.length) / charsPerLine)), 0);
   return Math.max(fallbackHeightPx, lineCount * fontSize * 1.18 + 26);
+}
+
+function getViewportTextHeightPx(text: string, fontSize = 18, widthPx: number, fallbackHeightPx: number) {
+  const usableWidth = Math.max(40, widthPx - 16);
+  const avgCharWidth = Math.max(7, fontSize * 0.56);
+  const charsPerLine = Math.max(6, Math.floor(usableWidth / avgCharWidth));
+  const lineCount = String(text || "")
+    .split("\n")
+    .reduce((total, line) => total + Math.max(1, Math.ceil(Math.max(1, line.length) / charsPerLine)), 0);
+  return Math.max(fallbackHeightPx, lineCount * fontSize * 1.15 + 20);
 }
 
 function reprojectPercentRect(rect: CanvasLayoutRect, fromHeight: number, toHeight: number): CanvasLayoutRect {
