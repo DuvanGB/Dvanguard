@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { DeleteSiteButton } from "@/components/dashboard/delete-site-button";
+import { SignOutButton } from "@/components/dashboard/sign-out-button";
 import { SitePublicationToggle } from "@/components/dashboard/site-publication-toggle";
 import { CreateSiteForm } from "@/components/forms/create-site-form";
 import { ModuleTour } from "@/components/guided/module-tour";
@@ -74,7 +75,10 @@ export default async function DashboardPage() {
               />
             </div>
           </div>
-          <div className="dashboard-email">{user.email}</div>
+          <div className="dashboard-email">
+            {user.email}
+            <SignOutButton />
+          </div>
         </section>
 
         <section className="dashboard-kpi-grid">

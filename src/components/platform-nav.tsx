@@ -1,0 +1,69 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { ThemeToggle } from "@/components/theme-provider";
+
+const navLinks = [
+  { href: "/", label: "Home", icon: "home" },
+  { href: "/dashboard", label: "Dashboard", icon: "insights" },
+  { href: "/pricing", label: "Planes", icon: "payments" },
+];
+
+export function PlatformNav() {
+  const pathname = usePathname();
+
+  return (
+    <>
+      {/* Desktop / Tablet top bar */}
+      <header className="platform-topbar glass-panel">
+        <nav className="platform-topbar-inner">
+          <div className="platform-topbar-left">
+            <Link href="/" className="platform-logo">
+              <span className="material-symbols-outlined platform-logo-icon">navigation</span>
+              DVanguard
+            </Link>
+            <div className="platform-nav-links">
+              {navLinks.map((l) => (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  className={`platform-nav-link ${pathname === l.href ? "active" : ""}`}
+                >
+                  {l.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+          <div className="platform-topbar-right">
+            <ThemeToggle />
+            <Link href="/signin" className="btn-primary platform-nav-cta">
+              Comenzar
+            </Link>
+          </div>
+        </nav>
+      </header>
+
+      {/* Mobile bottom nav */}
+      <nav className="platform-bottom-nav">
+        {navLinks.map((l) => (
+          <Link
+            key={l.href}
+            href={l.href}
+            className={`platform-bottom-link ${pathname === l.href ? "active" : ""}`}
+          >
+            <span className="material-symbols-outlined">{l.icon}</span>
+            <span>{l.label}</span>
+          </Link>
+        ))}
+        <Link
+          href="/billing"
+          className={`platform-bottom-link ${pathname === "/billing" ? "active" : ""}`}
+        >
+          <span className="material-symbols-outlined">settings</span>
+          <span>Cuenta</span>
+        </Link>
+      </nav>
+    </>
+  );
+}
