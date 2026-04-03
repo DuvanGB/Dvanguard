@@ -8,6 +8,8 @@ import { recordPlatformEvent } from "@/lib/platform-events";
 import { getOnboardingPlatformConfig } from "@/lib/platform-config";
 import { normalizeSiteSpecV3, type SiteSpecV3 } from "@/lib/site-spec-v3";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { PlatformNav } from "@/components/platform-nav";
+import { PlatformFooter } from "@/components/platform-footer";
 
 export default async function OnboardingPage({
   searchParams
@@ -66,20 +68,28 @@ export default async function OnboardingPage({
 
     if (siteList.length > 1) {
       return (
-        <main className="container stack" style={{ paddingTop: "2rem" }}>
+        <>
+        <PlatformNav />
+        <main className="container stack" style={{ paddingTop: "5.5rem" }}>
           <OnboardingSiteSelector sites={siteList} />
         </main>
+        <PlatformFooter />
+        </>
       );
     }
 
     return (
-      <main className="container stack" style={{ paddingTop: "2rem" }}>
+      <>
+      <PlatformNav />
+      <main className="container stack" style={{ paddingTop: "5.5rem" }}>
         <h1>Onboarding IA</h1>
         <p>No tienes sitios creados todavía. Crea uno para iniciar este flujo.</p>
         <Link className="btn-secondary" href="/dashboard">
           Ir al dashboard
         </Link>
       </main>
+      <PlatformFooter />
+      </>
     );
   }
 
@@ -93,10 +103,14 @@ export default async function OnboardingPage({
 
   if (!site) {
     return (
-      <main className="container stack" style={{ paddingTop: "2rem" }}>
+      <>
+      <PlatformNav />
+      <main className="container stack" style={{ paddingTop: "5.5rem" }}>
         <h1>Onboarding IA</h1>
         <p>No se encontró el sitio solicitado.</p>
       </main>
+      <PlatformFooter />
+      </>
     );
   }
 
@@ -130,7 +144,9 @@ export default async function OnboardingPage({
   }
 
   return (
-    <main className="container stack" style={{ paddingTop: "2rem" }}>
+    <>
+    <PlatformNav />
+    <main className="container stack" style={{ paddingTop: "5.5rem" }}>
       <h1>Onboarding IA</h1>
       <p>Sitio: {site.name}</p>
       <OnboardingWizard
@@ -142,5 +158,7 @@ export default async function OnboardingPage({
         initialSpec={initialSpec}
       />
     </main>
+    <PlatformFooter />
+    </>
   );
 }

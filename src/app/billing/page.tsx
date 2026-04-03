@@ -6,6 +6,8 @@ import { getBillingSummary, listBillingTransactions } from "@/lib/billing/subscr
 import { env } from "@/lib/env";
 import { getPlatformCopyMap } from "@/lib/platform-config";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { PlatformNav } from "@/components/platform-nav";
+import { PlatformFooter } from "@/components/platform-footer";
 
 export default async function BillingPage({
   searchParams
@@ -53,6 +55,8 @@ export default async function BillingPage({
   }
 
   return (
+    <>
+    <PlatformNav />
     <main className="dashboard-shell">
       <div className="dashboard-container stack">
         <section className="dashboard-hero">
@@ -82,5 +86,7 @@ export default async function BillingPage({
         />
       </div>
     </main>
+    <PlatformFooter />
+    </>
   );
 }

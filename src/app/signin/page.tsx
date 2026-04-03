@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
 
+import { PlatformNav } from "@/components/platform-nav";
+import { PlatformFooter } from "@/components/platform-footer";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 export default function SignInPage() {
@@ -53,6 +55,8 @@ export default function SignInPage() {
   }
 
   return (
+    <>
+    <PlatformNav />
     <main className="auth-shell">
       <div className="auth-container">
         <div className="auth-header stack">
@@ -103,5 +107,7 @@ export default function SignInPage() {
         </p>
       </div>
     </main>
+    <PlatformFooter />
+    </>
   );
 }

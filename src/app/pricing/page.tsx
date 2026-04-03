@@ -3,6 +3,8 @@ import Link from "next/link";
 import { getPlatformCopyMap } from "@/lib/platform-config";
 import { listPlanDefinitions } from "@/lib/billing/plans";
 import { getSupabaseAdminClient, getSupabaseServerClient } from "@/lib/supabase/server";
+import { PlatformNav } from "@/components/platform-nav";
+import { PlatformFooter } from "@/components/platform-footer";
 
 function formatMoney(amountInCents: number | null) {
   if (!amountInCents) return null;
@@ -31,7 +33,9 @@ export default async function PricingPage() {
   ]);
 
   return (
-    <main className="container stack" style={{ paddingTop: "2.5rem" }}>
+    <>
+    <PlatformNav />
+    <main className="container stack" style={{ paddingTop: "5.5rem" }}>
       <header className="stack">
         <h1>{copy["pricing.hero.title"]}</h1>
         <p>{copy["pricing.hero.description"]}</p>
@@ -67,5 +71,7 @@ export default async function PricingPage() {
         <p>{copy["pricing.faq.description"]}</p>
       </section>
     </main>
+    <PlatformFooter />
+    </>
   );
 }

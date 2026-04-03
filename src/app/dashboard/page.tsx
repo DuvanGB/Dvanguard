@@ -11,6 +11,8 @@ import { getUsageSnapshot } from "@/lib/billing/usage";
 import { getOwnerSiteAnalytics } from "@/lib/data/dashboard/analytics";
 import { listTrashedSitesForOwner, purgeExpiredDeletedSites } from "@/lib/sites-trash";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { PlatformNav } from "@/components/platform-nav";
+import { PlatformFooter } from "@/components/platform-footer";
 
 export default async function DashboardPage() {
   const { user } = await requireUser();
@@ -33,6 +35,8 @@ export default async function DashboardPage() {
   const blockedByLimit = usage.plan === "free" && (usage.ai_generations_remaining <= 0 || usage.published_sites_remaining <= 0);
 
   return (
+    <>
+    <PlatformNav />
     <main className="dashboard-shell">
       <div className="dashboard-container stack">
         <section className="dashboard-hero">
@@ -239,5 +243,7 @@ export default async function DashboardPage() {
         </section>
       </div>
     </main>
+    <PlatformFooter />
+    </>
   );
 }

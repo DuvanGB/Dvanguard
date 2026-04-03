@@ -1,12 +1,16 @@
 import { MarkdownLite } from "@/components/content/markdown-lite";
 import { getPublishedLegalDocument } from "@/lib/legal-documents";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { PlatformNav } from "@/components/platform-nav";
+import { PlatformFooter } from "@/components/platform-footer";
 
 export default async function PrivacyPage() {
   const admin = getSupabaseAdminClient();
   const { version } = await getPublishedLegalDocument(admin, "privacy");
 
   return (
+    <>
+    <PlatformNav />
     <main className="dashboard-shell">
       <div className="dashboard-container stack">
         <section className="card stack">
@@ -22,5 +26,7 @@ export default async function PrivacyPage() {
         </section>
       </div>
     </main>
+    <PlatformFooter />
+    </>
   );
 }

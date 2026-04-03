@@ -5,6 +5,8 @@ import { RestoreSiteButton } from "@/components/dashboard/restore-site-button";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { listTrashedSitesForOwner, purgeExpiredDeletedSites } from "@/lib/sites-trash";
+import { PlatformNav } from "@/components/platform-nav";
+import { PlatformFooter } from "@/components/platform-footer";
 
 export default async function TrashPage() {
   const { user } = await requireUser();
@@ -14,6 +16,8 @@ export default async function TrashPage() {
   const trashedSites = await listTrashedSitesForOwner(admin, user.id);
 
   return (
+    <>
+    <PlatformNav />
     <main className="dashboard-shell">
       <div className="dashboard-container stack">
         <section className="dashboard-hero">
@@ -73,5 +77,7 @@ export default async function TrashPage() {
         </section>
       </div>
     </main>
+    <PlatformFooter />
+    </>
   );
 }
