@@ -25,11 +25,6 @@ export default async function TrashPage() {
             <small className="dashboard-chip">Papelera</small>
             <h1>Sitios eliminados</h1>
             <p>Durante 7 días puedes restaurar un sitio o eliminarlo permanentemente si ya no lo necesitas.</p>
-            <div className="dashboard-hero-actions">
-              <Link href="/dashboard" className="btn-secondary">
-                Volver al dashboard
-              </Link>
-            </div>
           </div>
           <div className="dashboard-email">{user.email}</div>
         </section>

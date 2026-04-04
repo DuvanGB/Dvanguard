@@ -64,14 +64,6 @@ export default async function BillingPage({
             <small className="dashboard-chip">{copy["billing.hero.eyebrow"]}</small>
             <h1>{copy["billing.hero.title"]}</h1>
             <p>{copy["billing.hero.description"]}</p>
-            <div className="dashboard-hero-actions">
-              <Link href="/dashboard" className="btn-secondary">
-                Volver al dashboard
-              </Link>
-              <Link href="/pricing" className="btn-secondary">
-                Ver precios
-              </Link>
-            </div>
           </div>
           <div className="dashboard-email">{user.email}</div>
         </section>
