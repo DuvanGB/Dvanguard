@@ -36,7 +36,8 @@ export const PLATFORM_SETTING_KEYS = {
   plansDefaultFreeCode: "plans.default_free_code",
   plansDefaultProCode: "plans.default_pro_code",
   onboardingVoiceLocale: "onboarding.voice_locale",
-  onboardingMaxInputChars: "onboarding.max_input_chars"
+  onboardingMaxInputChars: "onboarding.max_input_chars",
+  marketingWhatsappNumber: "marketing.whatsapp_number"
 } as const;
 
 function normalizeScope(scope?: PlatformScope) {

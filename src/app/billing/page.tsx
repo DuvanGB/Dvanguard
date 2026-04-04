@@ -56,7 +56,7 @@ export default async function BillingPage({
 
   return (
     <>
-    <PlatformNav />
+    <PlatformNav isAuthenticated />
     <main className="dashboard-shell">
       <div className="dashboard-container stack">
         <section className="dashboard-hero">

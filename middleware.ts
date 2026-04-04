@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getSubdomainFromHost, isPrimaryAppHost } from "@/lib/tenant";
+import { detectLocale, LOCALE_COOKIE } from "@/lib/locale";
 import { stripPort } from "@/lib/site-domains";
 
 const RESERVED_PATHS = [
@@ -18,16 +19,29 @@ const RESERVED_PATHS = [
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const hasLocaleCookie = request.cookies.has(LOCALE_COOKIE);
+
+  function withLocale(response: NextResponse) {
+    if (!hasLocaleCookie) {
+      const locale = detectLocale(request.headers.get("accept-language"));
+      response.cookies.set(LOCALE_COOKIE, locale, {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365,
+        sameSite: "lax"
+      });
+    }
+    return response;
+  }
 
   if (RESERVED_PATHS.some((prefix) => pathname.startsWith(prefix)) || pathname.includes(".")) {
-    return NextResponse.next();
+    return withLocale(NextResponse.next());
   }
 
   const subdomain = getSubdomainFromHost(request.headers.get("host"));
   if (!subdomain) {
     const normalizedHost = stripPort(request.headers.get("host"));
     if (!normalizedHost || isPrimaryAppHost(normalizedHost)) {
-      return NextResponse.next();
+      return withLocale(NextResponse.next());
     }
 
     const rewriteUrl = request.nextUrl.clone();

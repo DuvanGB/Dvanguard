@@ -10,7 +10,7 @@ const navLinks = [
   { href: "/pricing", label: "Planes", icon: "payments" },
 ];
 
-export function PlatformNav() {
+export function PlatformNav({ isAuthenticated = false }: { isAuthenticated?: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -37,9 +37,15 @@ export function PlatformNav() {
           </div>
           <div className="platform-topbar-right">
             <ThemeToggle />
-            <Link href="/signin" className="btn-primary platform-nav-cta">
-              Comenzar
-            </Link>
+            {isAuthenticated ? (
+              <Link href="/dashboard" className="btn-primary platform-nav-cta">
+                Dashboard
+              </Link>
+            ) : (
+              <Link href="/signin" className="btn-primary platform-nav-cta">
+                Comenzar
+              </Link>
+            )}
           </div>
         </nav>
       </header>

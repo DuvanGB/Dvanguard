@@ -1,16 +1,20 @@
 import { MarkdownLite } from "@/components/content/markdown-lite";
 import { getPublishedLegalDocument } from "@/lib/legal-documents";
-import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { getSupabaseAdminClient, getSupabaseServerClient } from "@/lib/supabase/server";
 import { PlatformNav } from "@/components/platform-nav";
 import { PlatformFooter } from "@/components/platform-footer";
 
 export default async function PrivacyPage() {
   const admin = getSupabaseAdminClient();
-  const { version } = await getPublishedLegalDocument(admin, "privacy");
+  const supabase = await getSupabaseServerClient();
+  const [{ version }, { data: { user } }] = await Promise.all([
+    getPublishedLegalDocument(admin, "privacy"),
+    supabase.auth.getUser()
+  ]);
 
   return (
     <>
-    <PlatformNav />
+    <PlatformNav isAuthenticated={!!user} />
     <main className="dashboard-shell">
       <div className="dashboard-container stack">
         <section className="card stack">

@@ -34,7 +34,7 @@ export default async function PricingPage() {
 
   return (
     <>
-    <PlatformNav />
+    <PlatformNav isAuthenticated={!!user} />
     <main className="container stack" style={{ paddingTop: "5.5rem" }}>
       <header className="stack">
         <h1>{copy["pricing.hero.title"]}</h1>
