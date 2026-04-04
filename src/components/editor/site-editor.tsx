@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import { ModuleTour } from "@/components/guided/module-tour";
+import { ThemeToggle } from "@/components/theme-provider";
 import { SiteRenderer } from "@/components/runtime/site-renderer";
 import { SiteHeader, getSiteHeaderPreviewHeight } from "@/components/runtime/site-header";
 import type { CanvasBlock, CanvasLayoutRect, SiteSectionV3, SiteSpecV3 } from "@/lib/site-spec-v3";
@@ -162,6 +163,9 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
   const versionsMenuRef = useRef<HTMLDivElement | null>(null);
   const moreMenuRef = useRef<HTMLDivElement | null>(null);
   const topbarRef = useRef<HTMLElement | null>(null);
+  const zoomDockRef = useRef<HTMLDivElement | null>(null);
+  const [dockPos, setDockPos] = useState<{ x: number; y: number } | null>(null);
+  const dockDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
 
   const currentHash = useMemo(() => hashSpec(siteSpec), [siteSpec]);
   const isDirty = currentHash !== lastPersistedHash;
@@ -270,6 +274,39 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
     sync();
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    function onDockMove(e: MouseEvent | TouchEvent) {
+      const drag = dockDragRef.current;
+      const shell = canvasShellRef.current;
+      const dock = zoomDockRef.current;
+      const area = shell?.parentElement;
+      if (!drag || !shell || !dock || !area) return;
+      e.preventDefault();
+      const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+      const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+      const areaRect = area.getBoundingClientRect();
+      const dockRect = dock.getBoundingClientRect();
+      let nx = drag.origX + (clientX - drag.startX);
+      let ny = drag.origY + (clientY - drag.startY);
+      nx = Math.max(0, Math.min(nx, areaRect.width - dockRect.width));
+      ny = Math.max(0, Math.min(ny, areaRect.height - dockRect.height));
+      setDockPos({ x: nx, y: ny });
+    }
+    function onDockUp() {
+      dockDragRef.current = null;
+    }
+    document.addEventListener("mousemove", onDockMove);
+    document.addEventListener("mouseup", onDockUp);
+    document.addEventListener("touchmove", onDockMove, { passive: false });
+    document.addEventListener("touchend", onDockUp);
+    return () => {
+      document.removeEventListener("mousemove", onDockMove);
+      document.removeEventListener("mouseup", onDockUp);
+      document.removeEventListener("touchmove", onDockMove);
+      document.removeEventListener("touchend", onDockUp);
+    };
   }, []);
 
   useEffect(() => {
@@ -1165,6 +1202,21 @@ function addSection(type: SiteSectionV3["type"]) {
   const isFontFamily = (value: string): value is (typeof fontFamilies)[number] =>
     (fontFamilies as readonly string[]).includes(value);
 
+  function startDockDrag(e: React.MouseEvent | React.TouchEvent) {
+    const shell = canvasShellRef.current;
+    const dock = zoomDockRef.current;
+    const area = shell?.parentElement;
+    if (!shell || !dock || !area) return;
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+    const areaRect = area.getBoundingClientRect();
+    const dockRect = dock.getBoundingClientRect();
+    const origX = dockRect.left - areaRect.left;
+    const origY = dockRect.top - areaRect.top;
+    dockDragRef.current = { startX: clientX, startY: clientY, origX, origY };
+    setDockPos({ x: origX, y: origY });
+  }
+
   function renderHistoryActions() {
     return (
       <div className="editor-history-actions" role="group" aria-label="Deshacer y rehacer">
@@ -1238,7 +1290,7 @@ function addSection(type: SiteSectionV3["type"]) {
           aria-label="Más acciones"
           title="Más acciones"
         >
-          <PlusIcon />
+          <MoreIcon />
         </button>
         {moreMenuOpen ? (
           <div className="editor-overflow-popover">
@@ -1276,6 +1328,21 @@ function addSection(type: SiteSectionV3["type"]) {
     );
   }
 
+  const editorTourSteps = [
+    {
+      title: "Selecciona y mueve bloques",
+      body: "Haz clic sobre cualquier bloque para editarlo y arrástralo dentro de la sección para reubicarlo."
+    },
+    {
+      title: "Usa el panel izquierdo y el inspector",
+      body: "Desde secciones y capas agregas contenido; desde el inspector cambias texto, estilo, posición y navegación."
+    },
+    {
+      title: "Guarda, revisa y publica",
+      body: "El editor hace autosave, pero también puedes guardar checkpoints y publicar cuando la web ya esté lista."
+    }
+  ];
+
   return (
     <div className="editor-shell">
       <header
@@ -1283,7 +1350,10 @@ function addSection(type: SiteSectionV3["type"]) {
         className={`editor-topbar ${isMobileEditor ? "editor-topbar-mobile" : ""} ${mobileTopbarExpanded ? "is-expanded" : ""}`}
       >
         <div className="editor-topbar-left">
-          <div className="editor-brand">DVanguard</div>
+          <Link href="/dashboard" className="editor-brand">
+            <span className="material-symbols-outlined editor-brand-icon">navigation</span>
+            DVanguard
+          </Link>
           <div className="editor-meta">
             <strong>{siteName}</strong>
             <span>Editor visual</span>
@@ -1389,7 +1459,26 @@ function addSection(type: SiteSectionV3["type"]) {
           <>
             <div className="editor-topbar-center">{renderViewportSwitch()}</div>
             <div className="editor-topbar-actions">
-              {renderMoreMenu()}
+              {isPublished ? (
+                <a
+                  href={publicSiteUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="editor-icon-button"
+                  title="Abrir sitio"
+                  aria-label="Abrir sitio"
+                >
+                  <OpenSiteIcon />
+                </a>
+              ) : null}
+              <ModuleTour
+                module="editor"
+                title="Cómo editar tu sitio"
+                description="Este editor te permite ajustar el layout, el contenido y la publicación de tu página."
+                compact
+                steps={editorTourSteps}
+              />
+              <ThemeToggle />
               <button className="btn-primary" type="button" onClick={() => void publish()} disabled={publishing}>
                 {publishing ? "Publicando..." : "Publicar"}
               </button>
@@ -1402,7 +1491,25 @@ function addSection(type: SiteSectionV3["type"]) {
               {renderHistoryActions()}
               {renderViewportSwitch()}
               <div className="editor-topbar-mobile-actions">
-                {renderMoreMenu()}
+                {isPublished ? (
+                  <a
+                    href={publicSiteUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="editor-icon-button"
+                    title="Abrir sitio"
+                    aria-label="Abrir sitio"
+                  >
+                    <OpenSiteIcon />
+                  </a>
+                ) : null}
+                <ModuleTour
+                  module="editor"
+                  title="Cómo editar tu sitio"
+                  description="Este editor te permite ajustar el layout, el contenido y la publicación de tu página."
+                  compact
+                  steps={editorTourSteps}
+                />
                 <button className="btn-primary" type="button" onClick={() => void publish()} disabled={publishing}>
                   {publishing ? "Publicando..." : "Publicar"}
                 </button>
@@ -1776,23 +1883,6 @@ function addSection(type: SiteSectionV3["type"]) {
         </aside>
 
         <section className="editor-canvas-area">
-          <div className="editor-canvas-zoom-dock" aria-label="Controles de zoom del canvas">
-            <button type="button" className="editor-canvas-zoom-icon" onClick={zoomOut} aria-label="Alejar preview">
-              −
-            </button>
-            <div className="editor-canvas-zoom-pill">
-              <span className="editor-canvas-zoom-glyph" aria-hidden="true">
-                🔍
-              </span>
-              <span className="editor-canvas-zoom-value">{Math.round(effectiveZoomPercent)}%</span>
-            </div>
-            <button type="button" className="editor-canvas-zoom-icon" onClick={zoomIn} aria-label="Acercar preview">
-              +
-            </button>
-            <button type="button" className="editor-canvas-zoom-reset" onClick={resetZoom}>
-              Ajustar
-            </button>
-          </div>
           <div className="editor-canvas-shell" ref={canvasShellRef}>
             <div
               className={`editor-canvas-viewport ${isCanvasOverflowingHorizontally ? "overflowing-x" : ""}`}
@@ -2049,6 +2139,32 @@ function addSection(type: SiteSectionV3["type"]) {
                 </div>
               </div>
             </div>
+          </div>
+          <div
+            className={`editor-canvas-zoom-dock ${dockDragRef.current ? "is-dragging" : ""}`}
+            ref={zoomDockRef}
+            aria-label="Controles de zoom del canvas"
+            style={dockPos ? { left: dockPos.x, top: dockPos.y } : undefined}
+          >
+            <button type="button" className="editor-canvas-zoom-icon" onClick={zoomOut} aria-label="Alejar preview">
+              −
+            </button>
+            <div
+              className="editor-canvas-zoom-pill"
+              onMouseDown={startDockDrag}
+              onTouchStart={startDockDrag}
+            >
+              <span className="editor-canvas-zoom-glyph" aria-hidden="true">
+                🔍
+              </span>
+              <span className="editor-canvas-zoom-value">{Math.round(effectiveZoomPercent)}%</span>
+            </div>
+            <button type="button" className="editor-canvas-zoom-icon" onClick={zoomIn} aria-label="Acercar preview">
+              +
+            </button>
+            <button type="button" className="editor-canvas-zoom-reset" onClick={resetZoom}>
+              Ajustar
+            </button>
           </div>
         </section>
 
@@ -3362,6 +3478,30 @@ function MinusIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d="M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function OpenSiteIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5M15 3h6v6M10 14 20.5 3.5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function MoreIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="5" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="19" r="1.5" fill="currentColor" />
     </svg>
   );
 }
