@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { OnboardingSiteSelector, type OnboardingSiteListItem } from "@/components/forms/onboarding-site-selector";
 import { OnboardingWizard } from "@/components/forms/onboarding-wizard";
+import { ModuleTour } from "@/components/guided/module-tour";
 import { requireUser } from "@/lib/auth";
 import { recordPlatformEvent } from "@/lib/platform-events";
 import { getOnboardingPlatformConfig } from "@/lib/platform-config";
@@ -71,6 +72,25 @@ export default async function OnboardingPage({
         <>
         <PlatformNav isAuthenticated isStatic />
         <main className="onboarding-shell" style={{ paddingBottom: "3rem" }}>
+          <ModuleTour
+            module="onboarding"
+            title="Asistente de creación IA"
+            description="En 3 pasos la IA construirá tu sitio web. Cuéntale sobre tu negocio y deja que la magia suceda."
+            steps={[
+              {
+                title: "Describe tu negocio",
+                body: "Escribe o dicta con voz lo que hace tu negocio. No te preocupes por la estructura, la IA interpreta tus ideas. También puedes elegir un prompt rápido como inspiración."
+              },
+              {
+                title: "Refina con la IA",
+                body: "La IA te hará preguntas cortas para completar la información. Verás un puntaje de confianza y una propuesta de hero en tiempo real. Cuanta más claridad, mejor será el resultado."
+              },
+              {
+                title: "Generación visual",
+                body: "Cuando todo esté listo, la IA armará tu sitio completo con layout, contenido, colores y tipografía. Al terminar, entrarás directo al editor para ajustar cada detalle."
+              }
+            ]}
+          />
           <OnboardingSiteSelector sites={siteList} />
         </main>
         <PlatformFooter />
@@ -147,6 +167,25 @@ export default async function OnboardingPage({
     <>
     <PlatformNav isAuthenticated isStatic />
     <main className="onboarding-shell" style={{ paddingBottom: "3rem" }}>
+      <ModuleTour
+        module="onboarding"
+        title="Asistente de creación IA"
+        description="En 3 pasos la IA construirá tu sitio web. Cuéntale sobre tu negocio y deja que la magia suceda."
+        steps={[
+          {
+            title: "Describe tu negocio",
+            body: "Escribe o dicta con voz lo que hace tu negocio. No te preocupes por la estructura, la IA interpreta tus ideas. También puedes elegir un prompt rápido como inspiración."
+          },
+          {
+            title: "Refina con la IA",
+            body: "La IA te hará preguntas cortas para completar la información. Verás un puntaje de confianza y una propuesta de hero en tiempo real. Cuanta más claridad, mejor será el resultado."
+          },
+          {
+            title: "Generación visual",
+            body: "Cuando todo esté listo, la IA armará tu sitio completo con layout, contenido, colores y tipografía. Al terminar, entrarás directo al editor para ajustar cada detalle."
+          }
+        ]}
+      />
       <OnboardingWizard
         siteId={site.id}
         siteName={site.name}

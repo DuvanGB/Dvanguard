@@ -1343,7 +1343,7 @@ td {
   position: fixed;
   inset: 0;
   z-index: 120;
-  background: rgba(15, 23, 42, 0.46);
+  background: color-mix(in srgb, var(--text) 46%, transparent);
   display: grid;
   place-items: center;
   padding: 1.2rem;
@@ -1351,10 +1351,10 @@ td {
 
 .tour-card {
   width: min(560px, 100%);
-  background: #ffffff;
+  background: var(--surface);
   border-radius: 1.2rem;
-  border: 1px solid #dbe3ee;
-  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.24);
+  border: 1px solid var(--border);
+  box-shadow: 0 30px 80px color-mix(in srgb, var(--text) 24%, transparent);
   padding: 1.25rem;
   display: grid;
   gap: 1rem;
@@ -1369,8 +1369,8 @@ td {
   width: fit-content;
   padding: 0.28rem 0.65rem;
   border-radius: 999px;
-  background: #e0f2fe;
-  color: #075985;
+  background: var(--brand-soft);
+  color: var(--primary);
   font-size: 0.76rem;
   font-weight: 800;
   text-transform: capitalize;
@@ -1383,7 +1383,7 @@ td {
 
 .tour-progress span {
   font-size: 0.82rem;
-  color: #475569;
+  color: var(--on-surface-variant);
   font-weight: 700;
 }
 
@@ -1391,19 +1391,19 @@ td {
   width: 100%;
   height: 0.55rem;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: var(--surface-high);
   overflow: hidden;
 }
 
 .tour-progress-value {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #0c4a6e, #0ea5e9);
+  background: linear-gradient(90deg, var(--primary), var(--accent));
 }
 
 .tour-step-card {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--surface-low);
+  border: 1px solid var(--border);
   border-radius: 1rem;
   padding: 1rem;
   display: grid;
@@ -1712,6 +1712,7 @@ td {
   border-radius: 0.85rem;
   padding: 0.75rem;
   background: var(--surface-low);
+  color: var(--text);
   display: grid;
   gap: 0.4rem;
   cursor: pointer;
@@ -2712,7 +2713,7 @@ td {
   width: 100%;
   height: 55%;
   border-radius: 0.5rem;
-  background: #e2e8f0;
+  background: var(--surface-high);
 }
 
 .canvas-resize-handle {
@@ -2722,7 +2723,7 @@ td {
   width: 14px;
   height: 14px;
   border-radius: 4px;
-  background: #0ea5e9;
+  background: var(--accent);
   cursor: nwse-resize;
 }
 
@@ -2779,7 +2780,7 @@ td {
 .asset-meta button {
   border: none;
   background: transparent;
-  color: #dc2626;
+  color: var(--error);
   font-size: 0.75rem;
   cursor: pointer;
 }
@@ -4911,7 +4912,7 @@ td {
   width: 42px;
   height: 24px;
   border-radius: 999px;
-  background: #cbd5e1;
+  background: var(--surface-high);
   padding: 2px;
   display: inline-flex;
   align-items: center;
@@ -4926,10 +4927,14 @@ td {
   width: 20px;
   height: 20px;
   border-radius: 999px;
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.16);
+  background: var(--surface);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--text) 16%, transparent);
   transform: translateX(0);
   transition: transform 0.16s ease;
+}
+
+[data-theme="dark"] .dashboard-publish-toggle.is-on {
+  color: #34d399;
 }
 
 .dashboard-publish-toggle.is-on .dashboard-publish-toggle-thumb {

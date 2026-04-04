@@ -1296,21 +1296,25 @@ function addSection(type: SiteSectionV3["type"]) {
           <div className="editor-overflow-popover">
             <ModuleTour
               module="editor"
-              title="Cómo editar tu sitio"
-              description="Este editor te permite ajustar el layout, el contenido y la publicación de tu página."
+              title="Tu editor visual"
+              description="Aquí diseñas tu sitio web arrastrando bloques, ajustando estilos y publicando con un clic. Te explicamos las herramientas."
               compact
               steps={[
                 {
-                  title: "Selecciona y mueve bloques",
-                  body: "Haz clic sobre cualquier bloque para editarlo y arrástralo dentro de la sección para reubicarlo."
+                  title: "Toca, arrastra y transforma",
+                  body: "Cada elemento en el canvas es un bloque. Tócalo para seleccionarlo, arrástralo para moverlo y usa las esquinas para cambiar su tamaño. Los bloques viven dentro de secciones."
                 },
                 {
-                  title: "Usa el panel izquierdo y el inspector",
-                  body: "Desde secciones y capas agregas contenido; desde el inspector cambias texto, estilo, posición y navegación."
+                  title: "Paneles que te acompañan",
+                  body: "A la izquierda encuentras Secciones (estructura de tu página) y Capas (orden de cada bloque). A la derecha, el Inspector te deja editar texto, estilo, posición y enlaces del bloque seleccionado."
                 },
                 {
-                  title: "Guarda, revisa y publica",
-                  body: "El editor hace autosave, pero también puedes guardar checkpoints y publicar cuando la web ya esté lista."
+                  title: "Guarda checkpoints y publica",
+                  body: "Tu trabajo se guarda automáticamente. Cuando quieras fijar un punto de referencia, guarda un checkpoint desde el historial de versiones. Cuando todo se vea listo, toca Publicar para que el mundo lo vea."
+                },
+                {
+                  title: "Zoom, viewport y tema",
+                  body: "Usa los controles flotantes para acercar o alejar el canvas. Alterna entre Desktop y Móvil para ver cómo luce en cada dispositivo. Y activa el tema oscuro desde el ícono de sol/luna."
                 }
               ]}
             />
@@ -1330,16 +1334,20 @@ function addSection(type: SiteSectionV3["type"]) {
 
   const editorTourSteps = [
     {
-      title: "Selecciona y mueve bloques",
-      body: "Haz clic sobre cualquier bloque para editarlo y arrástralo dentro de la sección para reubicarlo."
+      title: "Toca, arrastra y transforma",
+      body: "Cada elemento en el canvas es un bloque. Tócalo para seleccionarlo, arrástralo para moverlo y usa las esquinas para cambiar su tamaño. Los bloques viven dentro de secciones."
     },
     {
-      title: "Usa el panel izquierdo y el inspector",
-      body: "Desde secciones y capas agregas contenido; desde el inspector cambias texto, estilo, posición y navegación."
+      title: "Paneles que te acompañan",
+      body: "A la izquierda encuentras Secciones (estructura de tu página) y Capas (orden de cada bloque). A la derecha, el Inspector te deja editar texto, estilo, posición y enlaces del bloque seleccionado."
     },
     {
-      title: "Guarda, revisa y publica",
-      body: "El editor hace autosave, pero también puedes guardar checkpoints y publicar cuando la web ya esté lista."
+      title: "Guarda checkpoints y publica",
+      body: "Tu trabajo se guarda automáticamente. Cuando quieras fijar un punto de referencia, guarda un checkpoint desde el historial de versiones. Cuando todo se vea listo, toca Publicar para que el mundo lo vea."
+    },
+    {
+      title: "Zoom, viewport y tema",
+      body: "Usa los controles flotantes para acercar o alejar el canvas. Alterna entre Desktop y Móvil para ver cómo luce en cada dispositivo. Y activa el tema oscuro desde el ícono de sol/luna."
     }
   ];
 
@@ -1473,8 +1481,8 @@ function addSection(type: SiteSectionV3["type"]) {
               ) : null}
               <ModuleTour
                 module="editor"
-                title="Cómo editar tu sitio"
-                description="Este editor te permite ajustar el layout, el contenido y la publicación de tu página."
+                title="Tu editor visual"
+                description="Aquí diseñas tu sitio web arrastrando bloques, ajustando estilos y publicando con un clic. Te explicamos las herramientas."
                 compact
                 steps={editorTourSteps}
               />
@@ -1505,8 +1513,8 @@ function addSection(type: SiteSectionV3["type"]) {
                 ) : null}
                 <ModuleTour
                   module="editor"
-                  title="Cómo editar tu sitio"
-                  description="Este editor te permite ajustar el layout, el contenido y la publicación de tu página."
+                  title="Tu editor visual"
+                  description="Aquí diseñas tu sitio web arrastrando bloques, ajustando estilos y publicando con un clic. Te explicamos las herramientas."
                   compact
                   steps={editorTourSteps}
                 />

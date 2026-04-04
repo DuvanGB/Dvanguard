@@ -4,6 +4,7 @@ import { DeleteSiteButton } from "@/components/dashboard/delete-site-button";
 import { SignOutButton } from "@/components/dashboard/sign-out-button";
 import { SitePublicationToggle } from "@/components/dashboard/site-publication-toggle";
 import { CreateSiteForm } from "@/components/forms/create-site-form";
+import { ModuleTour } from "@/components/guided/module-tour";
 import { SiteDomainManager } from "@/components/sites/site-domain-manager";
 import { requireUser } from "@/lib/auth";
 import { getUsageSnapshot } from "@/lib/billing/usage";
@@ -89,6 +90,25 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               <Link href="/trash" className="btn-secondary">
                 {t("dash.cta.trash")}{trashedSites.length ? ` (${trashedSites.length})` : ""}
               </Link>
+              <ModuleTour
+                module="dashboard"
+                title="Tu panel de control"
+                description="Desde aquí gestionas todos tus sitios, revisas métricas y controlas la publicación."
+                steps={[
+                  {
+                    title: "Métricas en un vistazo",
+                    body: "Las tarjetas superiores muestran visitas, clics en WhatsApp y tu tasa de conversión. Usa el selector de rango para filtrar por período."
+                  },
+                  {
+                    title: "Crea y administra sitios",
+                    body: "Desde la sección de creación puedes iniciar un nuevo sitio con IA. Cada tarjeta de sitio te permite editar, regenerar, publicar o eliminar."
+                  },
+                  {
+                    title: "Publicación y billing",
+                    body: "Usa el toggle de cada sitio para publicar o despublicar. Si necesitas más cupo, revisa tu plan desde la sección de billing."
+                  }
+                ]}
+              />
             </div>
           </div>
           <div className="dashboard-email">
