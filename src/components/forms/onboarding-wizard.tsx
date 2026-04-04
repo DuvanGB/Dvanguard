@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
-import { ModuleTour } from "@/components/guided/module-tour";
 import { SiteRenderer } from "@/components/runtime/site-renderer";
 import {
   buildRegenerationBriefBase,
@@ -539,129 +538,176 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
     }
   }
 
+  const stepLabels = [
+    { num: "01", icon: "architecture", label: "Captura" },
+    { num: "02", icon: "psychology", label: "Refinar" },
+    { num: "03", icon: "rocket_launch", label: "Generar" }
+  ];
+
+  const smartPrompts = [
+    "Tienda de ropa",
+    "Restaurante",
+    "Consultoría",
+    "Agencia Digital",
+    "Tienda de accesorios",
+    "Servicios profesionales"
+  ];
+
   return (
-    <div className="stack">
-      <section className="card stack">
-        <div className="onboarding-header-row">
-          <div className="stack" style={{ gap: "0.45rem" }}>
-            <strong>Paso {step} de 3</strong>
-            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-              <span className="btn-secondary" style={{ opacity: step >= 1 ? 1 : 0.5 }}>
-                1. Captura
-              </span>
-              <span className="btn-secondary" style={{ opacity: step >= 2 ? 1 : 0.5 }}>
-                2. Refinar
-              </span>
-              <span className="btn-secondary" style={{ opacity: step >= 3 ? 1 : 0.5 }}>
-                3. Generar
-              </span>
-            </div>
-          </div>
-          <ModuleTour
-            module="onboarding"
-            title="Cómo crear tu sitio con IA"
-            description="Este flujo te ayuda a pasar de la idea del negocio a una propuesta visual editable en pocos pasos."
-            compact
-            steps={[
-              {
-                title: "Describe tu negocio",
-                body: "Puedes escribir o dictar una primera idea. No hace falta que quede perfecta desde el inicio."
-              },
-              {
-                title: "Refina con ayuda de la IA",
-                body: "El sistema organiza la información importante y, si hace falta, te hará preguntas cortas para completar lo esencial."
-              },
-              {
-                title: "Genera y sigue al editor",
-                body: "Verás cómo se arma la propuesta visual y, al terminar, entrarás directo al editor para ajustarla."
-              }
-            ]}
-          />
-        </div>
-      </section>
+    <div className="stack" style={{ gap: "0" }}>
+      {/* ── Step Nav Pills ──────────────────────── */}
+      <nav className="onboarding-step-nav">
+        {stepLabels.map((s, i) => {
+          const stepNum = (i + 1) as 1 | 2 | 3;
+          const isActive = step === stepNum;
+          const isDone = step > stepNum;
+          return (
+            <span
+              key={s.num}
+              className={`onboarding-step-pill ${isActive ? "is-active" : ""} ${isDone ? "is-done" : ""}`}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: "0.9rem" }}>{s.icon}</span>
+              {s.label}
+            </span>
+          );
+        })}
+      </nav>
 
+      {/* ═══════════════════════════════════════════
+          STEP 1 — CAPTURA
+          ═══════════════════════════════════════════ */}
       {step === 1 ? (
-        <form className="card stack" onSubmit={handleRefine}>
-          <h2>Cuéntanos tu negocio</h2>
-          <p>Puedes escribir o dictar. Siempre podrás corregir antes de generar.</p>
-
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className={inputMode === "text" ? "btn-primary" : "btn-secondary"}
-              onClick={() => handleInputModeChange("text")}
-            >
-              Texto
-            </button>
-            <button
-              type="button"
-              className={inputMode === "voice" ? "btn-primary" : "btn-secondary"}
-              onClick={() => handleInputModeChange("voice")}
-            >
-              Voz
-            </button>
+        <form onSubmit={handleRefine} style={{ display: "contents" }}>
+          {/* Step indicator */}
+          <div className="onboarding-step-indicator">
+            <div className="onboarding-step-number">01</div>
+            <div className="onboarding-step-meta">
+              <span className="onboarding-step-label">Paso 1 de 3</span>
+              <span className="onboarding-step-title">Información del Negocio</span>
+            </div>
           </div>
 
-          {inputMode === "voice" ? (
-            <div className="stack">
-              {voiceSupported ? (
-                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                  <button type="button" className="btn-secondary" onClick={startVoiceCapture} disabled={listening}>
-                    {listening ? "Escuchando..." : "Iniciar dictado"}
-                  </button>
-                  <button type="button" className="btn-secondary" onClick={stopVoiceCapture} disabled={!listening}>
-                    Detener
-                  </button>
+          {/* Headline */}
+          <h1 className="onboarding-headline">
+            Define tu <span className="accent">visión</span>
+          </h1>
+          <p className="onboarding-subtitle">
+            Describe el alma de tu proyecto. No te preocupes por la estructura, nuestra IA interpretará tus ideas para construir el cimiento digital.
+          </p>
+
+          {/* Magic-border textarea */}
+          <div className="onboarding-magic-border">
+            <div className="onboarding-capture-inner">
+              <textarea
+                rows={7}
+                value={rawInput}
+                onChange={(event) => setRawInput(event.target.value)}
+                maxLength={maxInputChars}
+                placeholder="Cuéntanos... ¿Qué hace latir a tu negocio?"
+              />
+              <div className="onboarding-capture-footer">
+                <div className="onboarding-voice-group">
+                  {voiceSupported ? (
+                    <>
+                      <button
+                        type="button"
+                        className={`onboarding-voice-btn ${listening ? "is-listening" : ""}`}
+                        onClick={listening ? stopVoiceCapture : startVoiceCapture}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>
+                          {listening ? "stop" : "mic"}
+                        </span>
+                      </button>
+                      <span className="onboarding-voice-label">
+                        {listening ? "Escuchando..." : "Voice Capture"}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="onboarding-voice-label">Voz no disponible</span>
+                  )}
                 </div>
-              ) : (
-                <small>Voz no disponible en este navegador. Continúa con texto.</small>
-              )}
+                <span className="onboarding-char-count">
+                  {rawInput.length}/{maxInputChars} caracteres
+                </span>
+              </div>
             </div>
-          ) : null}
+          </div>
 
-          <label>
-            Descripción del negocio
-            <textarea
-              rows={7}
-              value={rawInput}
-              onChange={(event) => setRawInput(event.target.value)}
-              maxLength={maxInputChars}
-              placeholder="Ejemplo: vendo ropa deportiva para mujeres jóvenes con foco en WhatsApp y estilo moderno."
-            />
-          </label>
-          <small>
-            {rawInput.length}/{maxInputChars} caracteres
-          </small>
+          {/* Smart Prompts */}
+          <div className="onboarding-smart-prompts">
+            <span className="onboarding-smart-prompts-label">Smart Prompts:</span>
+            {smartPrompts.map((prompt) => (
+              <button
+                key={prompt}
+                type="button"
+                className="onboarding-prompt-chip"
+                onClick={() => setRawInput((prev) => (prev ? `${prev}. ${prompt}` : prompt))}
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
 
-          <button type="submit" className="btn-primary" disabled={!canRefine || loadingRefine}>
-            {loadingRefine ? "Analizando negocio..." : "Continuar"}
-          </button>
+          {/* CTA Row */}
+          <div className="onboarding-cta-row">
+            <button type="button" className="onboarding-back-btn" onClick={() => router.back()}>
+              <span className="material-symbols-outlined" style={{ fontSize: "1rem" }}>arrow_back</span>
+              Volver
+            </button>
+            <button
+              type="submit"
+              className={`onboarding-continue-btn ${canRefine && !loadingRefine ? "is-active" : ""} ${loadingRefine ? "is-loading" : ""}`}
+              disabled={!canRefine || loadingRefine}
+            >
+              {loadingRefine ? "Analizando negocio..." : "Continuar"}
+            </button>
+          </div>
         </form>
       ) : null}
 
+      {/* ═══════════════════════════════════════════
+          STEP 2 — REFINAR
+          ═══════════════════════════════════════════ */}
       {step === 2 && briefDraft ? (
-        <section className="card stack">
+        <section style={{ display: "contents" }}>
+          {/* Step indicator */}
+          <div className="onboarding-step-indicator">
+            <div className="onboarding-step-number">02</div>
+            <div className="onboarding-step-meta">
+              <span className="onboarding-step-label">Paso 2 de 3</span>
+              <span className="onboarding-step-title">
+                {generationMode === "regenerate" ? "Rediseño Inteligente" : "Refinamiento IA"}
+              </span>
+            </div>
+          </div>
+
           {generationMode === "regenerate" ? (
             <>
-              <h2>Rediseñemos tu sitio actual</h2>
-              <p>Vamos a conservar tu contenido actual y usar tu feedback para empujar una versión más rica, más profesional y mejor organizada.</p>
+              <h1 className="onboarding-headline">
+                Rediseñemos tu <span className="accent">sitio</span>
+              </h1>
+              <p className="onboarding-subtitle">
+                Conservaremos tu contenido actual y usaremos tu feedback para empujar una versión más rica, más profesional y mejor organizada.
+              </p>
 
               {briefDraft && regenerationSiteContent ? (
-                <div className="card stack" style={{ gap: "0.55rem" }}>
+                <div className="onboarding-regen-summary">
                   <strong>Resumen de la regeneración</strong>
-                  <p className="muted" style={{ margin: 0 }}>
-                    Esta regeneración preserva contenido, imágenes, CTA y estructura base. El objetivo es mejorar diseño, jerarquía y presentación visual.
+                  <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
+                    Preserva contenido, imágenes, CTA y estructura base. Mejora diseño, jerarquía y presentación visual.
                   </p>
                   <small>{buildRegenerationSummaryLine({ businessName: briefDraft.business_name, siteType: briefDraft.business_type, currentSiteContent: regenerationSiteContent })}</small>
                   <small className="muted">
-                    Voy a usar tu información actual: {regenerationSiteContent.sectionsPresent.join(", ") || "sin secciones detectadas"}.
+                    Secciones detectadas: {regenerationSiteContent.sectionsPresent.join(", ") || "ninguna"}.
                   </small>
                 </div>
               ) : null}
 
-              <div className="card stack onboarding-chat-card">
+              <div className="onboarding-summary-card stack">
                 <strong>Chat de regeneración</strong>
-                <p>Escribe qué te gustaría mejorar y la IA lo tomará como dirección para esta nueva iteración.</p>
+                <p style={{ fontSize: "0.88rem", color: "var(--secondary)" }}>
+                  Escribe qué te gustaría mejorar y la IA lo tomará como dirección para esta nueva iteración.
+                </p>
 
                 <div className="onboarding-chat-thread">
                   {chatMessages.length ? (
@@ -677,20 +723,18 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
                 </div>
 
                 <label>
-                  ¿Qué quieres mejorar o cambiar en esta versión?
+                  ¿Qué quieres mejorar o cambiar?
                   <textarea
                     rows={3}
                     value={regenerationFeedback}
                     onChange={(event) => setRegenerationFeedback(event.target.value.slice(0, 500))}
                     maxLength={500}
-                    placeholder="Ejemplo: quiero un hero más premium, más contraste visual y que el catálogo destaque mejor las imágenes."
+                    placeholder="Ejemplo: quiero un hero más premium, más contraste visual y que el catálogo destaque mejor."
                   />
                 </label>
-                <small>
-                  {regenerationFeedback.length}/500 caracteres
-                </small>
+                <small className="onboarding-char-count">{regenerationFeedback.length}/500</small>
 
-                <button type="button" className="btn-secondary" onClick={handleRegenerationFeedbackAnalyze} disabled={!canAnalyzeRegeneration}>
+                <button type="button" className={`onboarding-continue-btn ${canAnalyzeRegeneration ? "is-active" : ""}`} onClick={handleRegenerationFeedbackAnalyze} disabled={!canAnalyzeRegeneration}>
                   {loadingRefine ? "Analizando con IA..." : "Analizar mejora"}
                 </button>
 
@@ -700,8 +744,8 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
                       Respuesta
                       <textarea rows={3} value={followUpInput} onChange={(event) => setFollowUpInput(event.target.value)} />
                     </label>
-                    <button type="submit" className="btn-secondary" disabled={!followUpInput.trim() || loadingRefine}>
-                      {loadingRefine ? "Analizando respuesta..." : "Guardar respuesta"}
+                    <button type="submit" className={`onboarding-continue-btn ${followUpInput.trim() && !loadingRefine ? "is-active" : ""}`} disabled={!followUpInput.trim() || loadingRefine}>
+                      {loadingRefine ? "Analizando..." : "Guardar respuesta"}
                     </button>
                   </form>
                 ) : null}
@@ -709,13 +753,32 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
             </>
           ) : (
             <>
-              <h2>Refinemos la información clave</h2>
-              <p>La idea aquí es reunir lo mínimo necesario para que la generación visual salga mejor desde el primer intento.</p>
-              {confidence !== null ? <small>Confianza estimada: {Math.round(confidence * 100)}%</small> : null}
-              {completenessScore !== null ? <small>Completitud del brief: {Math.round(completenessScore)}%</small> : null}
+              <h1 className="onboarding-headline">
+                Refinemos la <span className="accent">información</span>
+              </h1>
+              <p className="onboarding-subtitle">
+                Reunimos lo mínimo necesario para que la generación visual salga mejor desde el primer intento.
+              </p>
 
+              {/* Scores */}
+              <div className="onboarding-scores">
+                {confidence !== null ? (
+                  <span className="onboarding-score-pill">
+                    <span className="material-symbols-outlined">trending_up</span>
+                    Confianza: {Math.round(confidence * 100)}%
+                  </span>
+                ) : null}
+                {completenessScore !== null ? (
+                  <span className="onboarding-score-pill">
+                    <span className="material-symbols-outlined">checklist</span>
+                    Completitud: {Math.round(completenessScore)}%
+                  </span>
+                ) : null}
+              </div>
+
+              {/* Warnings */}
               {warnings.length ? (
-                <div className="stack">
+                <div className="onboarding-warnings">
                   <strong>Recomendaciones</strong>
                   <ul>
                     {warnings.map((warning) => (
@@ -726,7 +789,8 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
               ) : null}
 
               <div className="onboarding-refine-grid">
-                <div className="card stack onboarding-summary-card">
+                {/* Brief summary card */}
+                <div className="onboarding-summary-card stack">
                   <strong>Resumen del brief</strong>
 
                   <label>
@@ -802,43 +866,52 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
                   </label>
                 </div>
 
-                <div className="card stack onboarding-chat-card">
+                {/* Chat + Hero preview card */}
+                <div className="onboarding-summary-card stack onboarding-chat-card">
                   <strong>Asistente de refine</strong>
-                  <p>Si hace falta más contexto, la IA te hará preguntas cortas para mejorar la generación.</p>
+                  <p style={{ fontSize: "0.88rem", color: "var(--secondary)" }}>
+                    Si hace falta más contexto, la IA te hará preguntas cortas para mejorar la generación.
+                  </p>
 
                   {missingFields.length ? (
                     <small>Campos aún débiles: {missingFields.join(", ")}</small>
                   ) : (
-                    <small>Ya tenemos suficiente información para generar una propuesta sólida.</small>
+                    <small style={{ color: "var(--primary)" }}>Ya tenemos suficiente información para generar.</small>
                   )}
 
-                  <div className="card stack" style={{ gap: "0.5rem" }}>
-                    <strong>Propuesta de hero</strong>
-                    {heroConfidence !== null ? <small>Confianza del hero: {Math.round(heroConfidence * 100)}%</small> : null}
+                  {/* Hero suggestion */}
+                  <div className="onboarding-hero-preview">
+                    <span className="onboarding-hero-preview-label">
+                      Propuesta de hero
+                      {heroConfidence !== null ? ` · ${Math.round(heroConfidence * 100)}%` : ""}
+                    </span>
                     {heroSuggestion ? (
                       <>
-                        <div className="stack" style={{ gap: "0.2rem" }}>
-                          <small className="muted">Headline</small>
+                        <div className="onboarding-hero-preview-field">
+                          <small>Headline</small>
                           <strong>{heroSuggestion.headline}</strong>
                         </div>
-                        <div className="stack" style={{ gap: "0.2rem" }}>
-                          <small className="muted">Subheadline</small>
-                          <p>{heroSuggestion.subheadline}</p>
+                        <div className="onboarding-hero-preview-field">
+                          <small>Subheadline</small>
+                          <p style={{ margin: 0, fontSize: "0.88rem" }}>{heroSuggestion.subheadline}</p>
                         </div>
-                        <div className="stack" style={{ gap: "0.2rem" }}>
-                          <small className="muted">CTA</small>
+                        <div className="onboarding-hero-preview-field">
+                          <small>CTA</small>
                           <strong>{heroSuggestion.primary_cta}</strong>
                         </div>
-                        <div className="stack" style={{ gap: "0.2rem" }}>
-                          <small className="muted">Dirección</small>
-                          <p>{heroSuggestion.hero_direction}</p>
+                        <div className="onboarding-hero-preview-field">
+                          <small>Dirección</small>
+                          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--secondary)" }}>{heroSuggestion.hero_direction}</p>
                         </div>
                       </>
                     ) : (
-                      <p className="muted">Todavía no hay suficiente claridad para proponerte un hero fuerte. Vamos a pedir una precisión adicional por chat.</p>
+                      <p className="muted" style={{ fontSize: "0.85rem" }}>
+                        Todavía no hay suficiente claridad para proponerte un hero fuerte. Responde las preguntas del chat.
+                      </p>
                     )}
                   </div>
 
+                  {/* Chat thread */}
                   <div className="onboarding-chat-thread">
                     {chatMessages.length ? (
                       chatMessages.map((message, index) => (
@@ -858,7 +931,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
                         Respuesta
                         <textarea rows={3} value={followUpInput} onChange={(event) => setFollowUpInput(event.target.value)} />
                       </label>
-                      <button type="submit" className="btn-secondary" disabled={!canSendFollowUp}>
+                      <button type="submit" className={`onboarding-continue-btn ${canSendFollowUp ? "is-active" : ""}`} disabled={!canSendFollowUp}>
                         {loadingRefine ? "Actualizando brief..." : "Responder y mejorar brief"}
                       </button>
                     </form>
@@ -868,51 +941,58 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
             </>
           )}
 
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            <button type="button" className="btn-secondary" onClick={() => (generationMode === "regenerate" ? router.back() : setStep(1))}>
+          {/* CTA Row */}
+          <div className="onboarding-cta-row">
+            <button type="button" className="onboarding-back-btn" onClick={() => (generationMode === "regenerate" ? router.back() : setStep(1))}>
+              <span className="material-symbols-outlined" style={{ fontSize: "1rem" }}>arrow_back</span>
               Volver
             </button>
-            <button type="button" className="btn-primary" onClick={handleGenerate} disabled={!canGenerate}>
+            <button
+              type="button"
+              className={`onboarding-continue-btn ${canGenerate && !loadingGenerate ? "is-active" : ""}`}
+              onClick={handleGenerate}
+              disabled={!canGenerate}
+            >
               {loadingGenerate ? "Generando..." : "Generar propuesta IA"}
             </button>
           </div>
         </section>
       ) : null}
 
+      {/* ═══════════════════════════════════════════
+          STEP 3 — GENERAR
+          ═══════════════════════════════════════════ */}
       {step === 3 ? (
-        <section className="card stack">
-          <h2>Generando tu sitio</h2>
-          <p>La IA está construyendo una propuesta visual principal para tu homepage.</p>
-          {jobId ? <small>job_id: {jobId}</small> : null}
-
-          <div className="stack" style={{ gap: "0.75rem" }}>
-            <div
-              style={{
-                width: "100%",
-                height: "0.7rem",
-                borderRadius: "999px",
-                background: "var(--surface)"
-              }}
-            >
-              <div
-                style={{
-                  width: `${Math.max(6, generationProgress)}%`,
-                  height: "100%",
-                  borderRadius: "999px",
-                  background: "linear-gradient(90deg, var(--brand), #38bdf8)",
-                  transition: "width 0.35s ease"
-                }}
-              />
+        <section style={{ display: "contents" }}>
+          {/* Step indicator */}
+          <div className="onboarding-step-indicator">
+            <div className="onboarding-step-number">03</div>
+            <div className="onboarding-step-meta">
+              <span className="onboarding-step-label">Paso 3 de 3</span>
+              <span className="onboarding-step-title">Generación Visual</span>
             </div>
-            <strong>{generationMessage ?? "Preparando generación visual..."}</strong>
-            <small>
-              {labelForStage(generationStage)} {generationProgress ? `· ${generationProgress}%` : ""}
-            </small>
-            <small>La propuesta se construye por etapas para que puedas verla nacer en tiempo real.</small>
           </div>
 
-          <div className="stack" style={{ gap: "0.6rem" }}>
-            <strong>Timeline</strong>
+          <h1 className="onboarding-headline">
+            Construyendo tu <span className="accent">sitio</span>
+          </h1>
+          <p className="onboarding-subtitle">
+            La IA está armando una propuesta visual principal para tu homepage.
+          </p>
+
+          {/* Progress */}
+          <div className="stack" style={{ gap: "0.75rem" }}>
+            <div className="onboarding-progress-bar">
+              <div className="onboarding-progress-bar-fill" style={{ width: `${Math.max(6, generationProgress)}%` }} />
+            </div>
+            <strong>{generationMessage ?? "Preparando generación visual..."}</strong>
+            <small style={{ color: "var(--secondary)" }}>
+              {labelForStage(generationStage)} {generationProgress ? `· ${generationProgress}%` : ""}
+            </small>
+          </div>
+
+          {/* Timeline */}
+          <div className="onboarding-timeline">
             {[
               ["brief_analysis", "Analizando tu negocio"],
               ["visual_direction", "Definiendo dirección visual"],
@@ -925,28 +1005,17 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
               return (
                 <div
                   key={key}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.65rem",
-                    opacity: active || completed ? 1 : 0.55
-                  }}
+                  className={`onboarding-timeline-step ${active ? "is-active" : ""} ${completed ? "is-done" : ""}`}
                 >
-                  <span
-                    style={{
-                      width: "0.8rem",
-                      height: "0.8rem",
-                      borderRadius: "999px",
-                      background: completed ? "var(--brand)" : active ? "#38bdf8" : "var(--border)"
-                    }}
-                  />
+                  <span className="onboarding-timeline-dot" />
                   <span>{label}</span>
                 </div>
               );
             })}
           </div>
 
-          <div className="card onboarding-generation-preview">
+          {/* Preview */}
+          <div className="onboarding-generation-preview">
             {generationSnapshot ? (
               <div className="onboarding-generation-preview-frame">
                 <div className="onboarding-generation-preview-canvas">
@@ -954,15 +1023,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
                 </div>
               </div>
             ) : (
-              <div
-                style={{
-                  minHeight: "420px",
-                  display: "grid",
-                  placeItems: "center",
-                  background: "linear-gradient(180deg, #f8fafc 0%, #eef6ff 100%)",
-                  borderRadius: "1rem"
-                }}
-              >
+              <div className="onboarding-generation-empty">
                 <p style={{ margin: 0 }}>Preparando el primer snapshot visual...</p>
               </div>
             )}
@@ -970,7 +1031,8 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
         </section>
       ) : null}
 
-      {error ? <p>{error}</p> : null}
+      {/* ── Error ────────────────────────────────── */}
+      {error ? <div className="onboarding-error">{error}</div> : null}
     </div>
   );
 }
