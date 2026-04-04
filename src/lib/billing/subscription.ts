@@ -13,6 +13,7 @@ import type {
 } from "@/lib/billing/types";
 import {
   buildWompiReference,
+  createWompiPaymentLink,
   createWompiPaymentSource,
   createWompiTransaction,
   getManualAmountInCents,
@@ -1335,6 +1336,50 @@ export async function createManualBillingCheckout(
   };
 }
 
+/**
+ * Creates a Wompi Payment Link for PSE, Nequi or Bank Transfer.
+ * The user is redirected to Wompi's hosted checkout — no form fields needed.
+ */
+export async function createManualCheckoutViaPaymentLink(
+  admin: SupabaseClient,
+  input: {
+    userId: string;
+    email: string;
+    method: Exclude<BillingPaymentMethodKind, "card">;
+  }
+) {
+  await requireBillingLegalAccepted(admin, input.userId);
+
+  const amountInCents = await getManualAmountInCents(admin, input.method);
+  const reference = buildWompiReference(`pro-${input.method}`, input.userId);
+  const redirectUrl = `${env.appUrl}/billing?checkout=${input.method}_pending`;
+
+  const methodLabel =
+    input.method === "pse" ? "PSE" : input.method === "nequi" ? "Nequi" : "Transferencia bancaria";
+
+  const link = await createWompiPaymentLink({
+    name: `DVanguard Pro — ${methodLabel}`,
+    description: "Acceso Pro mensual a DVanguard.",
+    amountInCents,
+    redirectUrl,
+    expiresAtMinutes: 30,
+    customerEmail: input.email
+  });
+
+  await recordTransaction(admin, {
+    userId: input.userId,
+    method: input.method,
+    reference,
+    status: "PENDING",
+    amountInCents,
+    interval: "month",
+    rawPayload: { payment_link_id: link.id, payment_link_url: link.url },
+    checkoutUrl: link.url
+  });
+
+  return { redirectUrl: link.url };
+}
+
 export async function switchManualMembershipToCard(
   admin: SupabaseClient,
   input: {
@@ -1435,11 +1480,33 @@ export async function syncBillingTransactionFromWompi(admin: SupabaseClient, tra
     throw new Error("La transacción de Wompi no incluye referencia.");
   }
 
-  const { data: local, error } = await admin
+  /* Try matching by external_transaction_id or reference first */
+  let { data: local, error } = await admin
     .from("billing_transactions")
     .select("id, user_id, membership_id, method, interval")
     .or(`external_transaction_id.eq.${transactionId},reference.eq.${reference}`)
     .maybeSingle();
+
+  /* Fallback: match by payment_link_id stored in raw_payload (payment link flow) */
+  if (!local && !error) {
+    const linkId =
+      typeof rawTx.payment_link_id === "string"
+        ? rawTx.payment_link_id
+        : typeof rawTx.payment_link_id === "number"
+          ? String(rawTx.payment_link_id)
+          : null;
+
+    if (linkId) {
+      const fallback = await admin
+        .from("billing_transactions")
+        .select("id, user_id, membership_id, method, interval")
+        .eq("status", "PENDING")
+        .filter("raw_payload->>payment_link_id", "eq", linkId)
+        .maybeSingle();
+      if (fallback.data) local = fallback.data;
+      if (fallback.error) error = fallback.error;
+    }
+  }
 
   if (error || !local) {
     throw new Error(error?.message ?? "No encontramos la transacción local para sincronizar.");

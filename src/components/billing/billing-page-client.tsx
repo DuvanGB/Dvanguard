@@ -25,15 +25,6 @@ type CardFormState = {
   phoneNumber: string;
 };
 
-type ManualFormState = {
-  customerName: string;
-  phoneNumber: string;
-  legalIdType: string;
-  legalId: string;
-  userType: "0" | "1";
-  financialInstitutionCode: string;
-};
-
 function formatDate(value: string | null) {
   if (!value) return "-";
   return new Date(value).toLocaleDateString("es-CO", {
@@ -119,14 +110,6 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
     expYear: "",
     cardholderName: "",
     phoneNumber: ""
-  });
-  const [manualForm, setManualForm] = useState<ManualFormState>({
-    customerName: "",
-    phoneNumber: "",
-    legalIdType: "CC",
-    legalId: "",
-    userType: "0",
-    financialInstitutionCode: ""
   });
 
   const cardReady = useMemo(() => {
@@ -222,7 +205,7 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
     }
   }
 
-  async function handleManualCheckout(method: "pse" | "nequi" | "bank_transfer") {
+  async function handleManualCheckout() {
     setMessage(null);
     const legalOk = await ensureLegalAccepted();
     if (!legalOk) return;
@@ -230,21 +213,12 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
     const response = await fetch("/api/billing/wompi/manual/checkout", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        method,
-        customerName: manualForm.customerName,
-        phoneNumber: manualForm.phoneNumber,
-        legalIdType: manualForm.legalIdType,
-        legalId: manualForm.legalId,
-        userType: Number(manualForm.userType),
-        financialInstitutionCode: manualForm.financialInstitutionCode
-      })
+      body: JSON.stringify({ method: "pse" })
     });
 
     const payload = (await response.json().catch(() => ({}))) as {
       error?: string;
       redirectUrl?: string | null;
-      status?: string;
     };
     if (!response.ok) {
       setMessage(payload.error ?? "No se pudo iniciar el pago.");
@@ -256,7 +230,7 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
       return;
     }
 
-    refresh(`El pago por ${method === "pse" ? "PSE" : method === "nequi" ? "Nequi" : "transferencia"} quedó registrado.`);
+    refresh("El pago quedó registrado.");
   }
 
   async function cancelAutoRenew() {
@@ -482,67 +456,14 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
             </div>
           </div>
 
-          <div className="billing-manual-fields">
-            <label className="billing-field">
-              <small>Nombre / razón social</small>
-              <input value={manualForm.customerName} onChange={(event) => setManualForm((prev) => ({ ...prev, customerName: event.target.value }))} />
-            </label>
-            <label className="billing-field">
-              <small>Teléfono</small>
-              <input value={manualForm.phoneNumber} onChange={(event) => setManualForm((prev) => ({ ...prev, phoneNumber: event.target.value }))} />
-            </label>
-            <label className="billing-field">
-              <small>Tipo doc.</small>
-              <input value={manualForm.legalIdType} onChange={(event) => setManualForm((prev) => ({ ...prev, legalIdType: event.target.value }))} placeholder="CC" />
-            </label>
-            <label className="billing-field">
-              <small>Documento</small>
-              <input value={manualForm.legalId} onChange={(event) => setManualForm((prev) => ({ ...prev, legalId: event.target.value }))} />
-            </label>
-            <label className="billing-field">
-              <small>Tipo usuario PSE</small>
-              <select value={manualForm.userType} onChange={(event) => setManualForm((prev) => ({ ...prev, userType: event.target.value as "0" | "1" }))}>
-                <option value="0">Persona</option>
-                <option value="1">Empresa</option>
-              </select>
-            </label>
-            <label className="billing-field">
-              <small>Código banco PSE</small>
-              <input value={manualForm.financialInstitutionCode} onChange={(event) => setManualForm((prev) => ({ ...prev, financialInstitutionCode: event.target.value }))} placeholder="Código del banco" />
-            </label>
-          </div>
+          <p className="muted" style={{ fontSize: "0.8rem" }}>
+            Acepta PSE, Nequi y transferencia bancaria. Serás redirigido a Wompi para elegir tu método y completar el pago de forma segura.
+          </p>
 
-          <div className="billing-manual-methods">
-            <button type="button" className="billing-method-btn" onClick={() => void handleManualCheckout("pse")}>
-              <span className="material-symbols-outlined">account_balance</span>
-              <div>
-                <strong>PSE</strong>
-                <small>Banca en línea</small>
-              </div>
-              <span className="material-symbols-outlined billing-method-arrow">chevron_right</span>
-            </button>
-            <button type="button" className="billing-method-btn" onClick={() => void handleManualCheckout("nequi")}>
-              <span className="material-symbols-outlined">phone_android</span>
-              <div>
-                <strong>Nequi</strong>
-                <small>Pago móvil</small>
-              </div>
-              <span className="material-symbols-outlined billing-method-arrow">chevron_right</span>
-            </button>
-            <button type="button" className="billing-method-btn" onClick={() => void handleManualCheckout("bank_transfer")}>
-              <span className="material-symbols-outlined">swap_horiz</span>
-              <div>
-                <strong>Transferencia</strong>
-                <small>Bancaria directa</small>
-              </div>
-              <span className="material-symbols-outlined billing-method-arrow">chevron_right</span>
-            </button>
-          </div>
-
-          <div className="billing-info-box">
-            <span className="material-symbols-outlined">info</span>
-            <p>La compra única no permite renovación automática. Deberás renovar antes del vencimiento.</p>
-          </div>
+          <button type="button" className="billing-wompi-cta" onClick={() => void handleManualCheckout()}>
+            <span className="material-symbols-outlined">open_in_new</span>
+            Pagar
+          </button>
         </section>
       </div>
 

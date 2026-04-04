@@ -194,6 +194,58 @@ export async function createWompiTransaction(input: WompiTransactionInput) {
   return response.data ?? {};
 }
 
+export type WompiPaymentLinkInput = {
+  name: string;
+  description: string;
+  amountInCents: number;
+  redirectUrl: string;
+  expiresAtMinutes?: number;
+  customerEmail?: string;
+};
+
+export type WompiPaymentLinkResult = {
+  id: string;
+  url: string;
+};
+
+export async function createWompiPaymentLink(input: WompiPaymentLinkInput): Promise<WompiPaymentLinkResult> {
+  const expiresAt = new Date(Date.now() + (input.expiresAtMinutes ?? 30) * 60 * 1000).toISOString();
+
+  const response = await wompiRequest<{
+    data?: {
+      id?: string;
+      name?: string;
+      active?: boolean;
+    };
+  }>("/payment_links", {
+    method: "POST",
+    body: JSON.stringify({
+      name: input.name,
+      description: input.description,
+      single_use: true,
+      collect_shipping: false,
+      currency: "COP",
+      amount_in_cents: input.amountInCents,
+      redirect_url: input.redirectUrl,
+      expires_at: expiresAt,
+      customer_data: input.customerEmail
+        ? { customer_email: input.customerEmail }
+        : undefined
+    })
+  });
+
+  const id = response.data?.id;
+  if (!id) {
+    throw new Error("Wompi no retornó un Payment Link válido.");
+  }
+
+  const base = env.wompiPublicKey.startsWith("pub_test_")
+    ? "https://checkout.wompi.co/l"
+    : "https://checkout.wompi.co/l";
+
+  return { id, url: `${base}/${id}` };
+}
+
 export async function getWompiTransaction(transactionId: string) {
   const response = await wompiRequest<{ data?: JsonRecord }>(`/transactions/${transactionId}`, {
     method: "GET",

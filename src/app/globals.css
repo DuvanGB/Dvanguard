@@ -1044,9 +1044,8 @@ td {
 
 .billing-grid {
   display: grid;
-  grid-template-columns: 7fr 5fr;
+  grid-template-columns: 1fr;
   gap: 1.25rem;
-  align-items: start;
 }
 
 .billing-form-grid {
@@ -1099,6 +1098,7 @@ td {
   flex-wrap: wrap;
   position: relative;
   z-index: 1;
+  justify-content: center;
 }
 
 .billing-card-manage {
@@ -1127,62 +1127,33 @@ td {
   z-index: 1;
 }
 
-.billing-manual-fields {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.85rem;
-}
-
-.billing-manual-methods {
-  display: grid;
-  gap: 0.5rem;
-}
-
-.billing-method-btn {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+.billing-wompi-cta {
+  display: inline-flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.85rem 1rem;
-  border-radius: 1rem;
-  border: 1px solid color-mix(in srgb, var(--border) 20%, transparent);
-  background: color-mix(in srgb, var(--surface-low) 60%, transparent);
-  color: var(--text);
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.8rem 1.5rem;
+  border-radius: 0.75rem;
+  border: 0;
+  background: linear-gradient(135deg, var(--primary), var(--primary-container));
+  color: var(--on-primary);
+  font-weight: 700;
+  font-size: 0.95rem;
   cursor: pointer;
-  text-align: left;
-  transition: all 200ms ease;
+  transition: transform 150ms ease, box-shadow 200ms ease;
 }
 
-.billing-method-btn:hover {
-  background: var(--surface-highest);
-  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+.billing-wompi-cta:hover {
+  transform: scale(1.02);
+  box-shadow: 0 8px 24px rgba(12, 74, 110, 0.18);
 }
 
-.billing-method-btn > .material-symbols-outlined:first-child {
-  font-size: 1.25rem;
-  color: var(--accent);
+.billing-wompi-cta:active {
+  transform: scale(0.98);
 }
 
-.billing-method-btn strong {
-  font-size: 0.88rem;
-}
-
-.billing-method-btn small {
-  display: block;
-  font-size: 0.7rem;
-  color: var(--on-surface-variant);
-}
-
-.billing-method-arrow {
-  color: var(--on-surface-variant);
-  opacity: 0;
-  transform: translateX(-4px);
-  transition: all 200ms ease;
-}
-
-.billing-method-btn:hover .billing-method-arrow {
-  opacity: 1;
-  transform: translateX(0);
+.billing-wompi-cta > .material-symbols-outlined {
+  font-size: 1.1rem;
 }
 
 .billing-info-box {
@@ -1321,16 +1292,12 @@ td {
 }
 
 @media (max-width: 768px) {
-  .billing-grid {
-    grid-template-columns: 1fr;
-  }
 
   .billing-status-strip {
     grid-template-columns: 1fr 1fr;
   }
 
-  .billing-form-grid,
-  .billing-manual-fields {
+  .billing-form-grid {
     grid-template-columns: 1fr;
   }
 
