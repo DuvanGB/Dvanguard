@@ -300,6 +300,9 @@ export default async function DashboardPage() {
                       {/* Actions Row */}
                       <div className="dashboard-site-actions-row">
                         <div className="dashboard-site-actions-left">
+                          <Link className="dashboard-site-action-btn" href={`/sites/${site.site_id}`} title={t("dash.sites.edit")}>
+                            <span className="material-symbols-outlined">edit</span>
+                          </Link>
                           {isPublished ? (
                             <a className="dashboard-site-action-btn" href={site.public_url} target="_blank" rel="noreferrer" title={t("dash.sites.open")}>
                               <span className="material-symbols-outlined">open_in_new</span>
@@ -310,10 +313,6 @@ export default async function DashboardPage() {
                           </Link>
                           <DeleteSiteButton siteId={site.site_id} siteName={site.name} />
                         </div>
-                        <Link className="dashboard-site-edit-btn" href={`/sites/${site.site_id}`}>
-                          <span className="material-symbols-outlined">edit</span>
-                          {t("dash.sites.edit")}
-                        </Link>
                       </div>
 
                       <SiteDomainManager siteId={site.site_id} initialDomains={site.domains} compact />

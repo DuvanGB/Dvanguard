@@ -3404,6 +3404,12 @@ td {
   font-size: 1.05rem;
 }
 
+.dashboard-site-action-btn.dashboard-site-action-danger:hover {
+  background: color-mix(in srgb, var(--admin-warning) 12%, transparent);
+  color: var(--admin-warning);
+  border-color: color-mix(in srgb, var(--admin-warning) 30%, transparent);
+}
+
 .dashboard-site-edit-btn {
   flex: 1;
   display: flex;

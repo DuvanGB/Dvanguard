@@ -41,8 +41,8 @@ export function DeleteSiteButton({ siteId, siteName }: Props) {
 
   return (
     <>
-      <button type="button" className="btn-secondary btn-danger-soft" onClick={() => setOpen(true)}>
-        Eliminar sitio
+      <button type="button" className="dashboard-site-action-btn dashboard-site-action-danger" onClick={() => setOpen(true)} title="Eliminar sitio">
+        <span className="material-symbols-outlined">delete</span>
       </button>
 
       {open ? (
