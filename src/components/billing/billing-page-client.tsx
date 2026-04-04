@@ -338,18 +338,20 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
           <p className="muted">{copy["billing.legal.description"]}</p>
         </div>
 
-        <label className="billing-legal-check">
-          <input type="checkbox" checked={legalTermsAccepted} onChange={(event) => setLegalTermsAccepted(event.target.checked)} />
-          <span>
-            Acepto los <Link href="/terms">Términos</Link> de DVanguard (versión {summary.legal.termsVersion}).
-          </span>
-        </label>
-        <label className="billing-legal-check">
-          <input type="checkbox" checked={legalPrivacyAccepted} onChange={(event) => setLegalPrivacyAccepted(event.target.checked)} />
-          <span>
-            Acepto la <Link href="/privacy">Política de Privacidad</Link> (versión {summary.legal.privacyVersion}).
-          </span>
-        </label>
+        <div className="billing-legal-checks">
+          <label className="billing-legal-check">
+            <input type="checkbox" checked={legalTermsAccepted} onChange={(event) => setLegalTermsAccepted(event.target.checked)} />
+            <span>
+              Acepto los <Link href="/terms">Términos</Link> de DVanguard (versión {summary.legal.termsVersion}).
+            </span>
+          </label>
+          <label className="billing-legal-check">
+            <input type="checkbox" checked={legalPrivacyAccepted} onChange={(event) => setLegalPrivacyAccepted(event.target.checked)} />
+            <span>
+              Acepto la <Link href="/privacy">Política de Privacidad</Link> (versión {summary.legal.privacyVersion}).
+            </span>
+          </label>
+        </div>
         <div className="stack stack-sm">
           {summary.wompiAcceptance.termsPermalink ? (
             <a href={summary.wompiAcceptance.termsPermalink} target="_blank" rel="noreferrer">
