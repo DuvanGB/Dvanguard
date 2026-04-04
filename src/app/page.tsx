@@ -187,7 +187,7 @@ export default async function HomePage() {
             <p>{t("home.bento.wa.desc")}</p>
           </div>
 
-          <div className="marketing-bento-card span-7 dark-card" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem", alignItems: "center" }}>
+          <div className="marketing-bento-card span-7 dark-card marketing-bento-analytics-grid">
             <div>
               <h3>{t("home.bento.analytics.title")}</h3>
               <p>{t("home.bento.analytics.desc")}</p>
