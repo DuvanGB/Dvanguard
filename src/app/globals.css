@@ -2098,7 +2098,7 @@ td {
 .onboarding-shell {
   max-width: 56rem;
   margin-inline: auto;
-  padding-inline: 1.5rem;
+  padding: 1.5rem 1.5rem 2rem;
   position: relative;
 }
 
@@ -4987,7 +4987,7 @@ td {
   background: var(--bg);
   color: var(--text);
   font-family: "Manrope", "Avenir Next", "Segoe UI", sans-serif;
-  padding-top: 5.5rem;
+  padding-top: 1.5rem;
   overflow: hidden;
 }
 
