@@ -12,6 +12,15 @@ import type { TemplateId } from "@/lib/templates/types";
 import { env } from "@/lib/env";
 import type { SiteSpecV3 } from "@/lib/site-spec-v3";
 
+function extractProductCount(text: string): number | undefined {
+  const match = text.match(/(\d+)\s*(?:productos?|servicios?|items?|artículos?)/i);
+  if (match) {
+    const n = Number(match[1]);
+    if (n >= 1 && n <= 30) return n;
+  }
+  return undefined;
+}
+
 type StartGenerationInput = {
   supabase: SupabaseClient;
   admin: SupabaseClient;
@@ -96,11 +105,14 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
     .eq("created_by", userId)
     .in("job_type", ["site_generation", "visual_home_generation"]);
 
+  const productCount = extractProductCount(input.briefDraft?.offer_summary ?? "") ?? extractProductCount(prompt);
+
   const seedSpec = buildVisualSeedSpec({
     prompt,
     templateId: input.templateId,
     briefDraft: input.briefDraft,
-    currentSiteSpec: input.generationMode === "regenerate" ? input.currentSiteSpec : undefined
+    currentSiteSpec: input.generationMode === "regenerate" ? input.currentSiteSpec : undefined,
+    productCount
   });
 
   const { data: job, error: jobError } = await supabase
@@ -148,7 +160,8 @@ export async function startSiteGeneration(input: StartGenerationInput): Promise<
     briefDraft: input.briefDraft,
     callbackBaseUrl: env.appUrl,
     currentSiteSummary: input.currentSiteSummary,
-    regenerationContext: input.regenerationContext
+    regenerationContext: input.regenerationContext,
+    productCount
   });
 
   if (!workerTrigger.ok) {

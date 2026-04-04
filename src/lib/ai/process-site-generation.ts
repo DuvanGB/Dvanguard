@@ -18,6 +18,15 @@ import {
 import type { BusinessBriefDraft } from "@/lib/onboarding/types";
 import { recordPlatformEvent } from "@/lib/platform-events";
 import type { SiteSpecV3 } from "@/lib/site-spec-v3";
+
+function extractProductCount(text: string): number | undefined {
+  const match = text.match(/(\d+)\s*(?:productos?|servicios?|items?|artículos?)/i);
+  if (match) {
+    const n = Number(match[1]);
+    if (n >= 1 && n <= 30) return n;
+  }
+  return undefined;
+}
 import type { TemplateId } from "@/lib/templates/types";
 
 type ExecuteGenerationInput = {
@@ -29,6 +38,7 @@ type ExecuteGenerationInput = {
   templateId?: TemplateId;
   briefDraft?: BusinessBriefDraft;
   currentSiteSpec?: SiteSpecV3;
+  productCount?: number;
   extraEventPayload?: Record<string, unknown>;
 };
 
@@ -79,7 +89,8 @@ export async function executeSiteGenerationJob(input: ExecuteGenerationInput): P
         generateSiteSpecFromPrompt({
           prompt: input.prompt,
           templateId: input.templateId,
-          briefDraft: input.briefDraft
+          briefDraft: input.briefDraft,
+          productCount: input.productCount
         }),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error("AI timeout")), 18_000))
       ]);
@@ -199,11 +210,14 @@ export async function applyVisualGenerationProgress(input: ApplyVisualProgressIn
   }
 
   const jobInput = ((job.input_json as JobInputJson | null) ?? {}) as JobInputJson;
+  const productCount = extractProductCount(jobInput.briefDraft?.offer_summary ?? "")
+    ?? extractProductCount(jobInput.prompt ?? "");
   const seedSpec = buildVisualSeedSpec({
     prompt: jobInput.prompt ?? "",
     templateId: jobInput.meta?.template_id ?? undefined,
     briefDraft: jobInput.briefDraft ?? undefined,
-    currentSiteSpec: jobInput.meta?.generation_mode === "regenerate" ? jobInput.currentSiteSpec ?? undefined : undefined
+    currentSiteSpec: jobInput.meta?.generation_mode === "regenerate" ? jobInput.currentSiteSpec ?? undefined : undefined,
+    productCount
   });
   const effectivePatch =
     input.layoutProposal ? compileLayoutProposalToDesignPatch(input.layoutProposal) : input.designPatch;
@@ -299,10 +313,13 @@ export async function runLocalVisualGenerationFallback(input: {
   }
 
   const jobInput = ((job.input_json as JobInputJson | null) ?? {}) as JobInputJson;
+  const fallbackProductCount = extractProductCount(jobInput.briefDraft?.offer_summary ?? "")
+    ?? extractProductCount(jobInput.prompt ?? "");
   const layoutProposal = buildHeuristicLayoutProposal({
     prompt: jobInput.prompt ?? "",
     briefDraft: jobInput.briefDraft ?? undefined,
-    regenerationContext: jobInput.meta?.regeneration_context ?? undefined
+    regenerationContext: jobInput.meta?.regeneration_context ?? undefined,
+    productCount: fallbackProductCount
   });
   const designPatch = compileLayoutProposalToDesignPatch(layoutProposal);
 

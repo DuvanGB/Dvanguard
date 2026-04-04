@@ -619,7 +619,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
                         </span>
                       </button>
                       <span className="onboarding-voice-label">
-                        {listening ? "Escuchando..." : "Voice Capture"}
+                        {listening ? "Escuchando..." : "Captura de voz"}
                       </span>
                     </>
                   ) : (
@@ -635,7 +635,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
 
           {/* Smart Prompts */}
           <div className="onboarding-smart-prompts">
-            <span className="onboarding-smart-prompts-label">Smart Prompts:</span>
+            <span className="onboarding-smart-prompts-label">Mira estas ideas:</span>
             {smartPrompts.map((prompt) => (
               <button
                 key={prompt}

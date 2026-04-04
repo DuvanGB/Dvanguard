@@ -202,11 +202,21 @@ export const visualGenerationProgressSchema = z.object({
 
 export type VisualGenerationProgressPayload = z.infer<typeof visualGenerationProgressSchema>;
 
+function extractProductCountFromText(text: string): number | undefined {
+  const match = text.match(/(\d+)\s*(?:productos?|servicios?|items?|artículos?)/i);
+  if (match) {
+    const n = Number(match[1]);
+    if (n >= 1 && n <= 30) return n;
+  }
+  return undefined;
+}
+
 export function buildVisualSeedSpec(input: {
   prompt: string;
   templateId?: TemplateId;
   briefDraft?: BusinessBriefDraft;
   currentSiteSpec?: SiteSpecV3;
+  productCount?: number;
 }): SiteSpecV3 {
   if (input.currentSiteSpec) {
     const parsedCurrent = parseSiteSpecV3(input.currentSiteSpec);
@@ -215,14 +225,19 @@ export function buildVisualSeedSpec(input: {
     }
   }
 
+  const productCount = input.productCount
+    ?? extractProductCountFromText(input.briefDraft?.offer_summary ?? "")
+    ?? extractProductCountFromText(input.prompt);
+
   if (input.templateId && input.briefDraft) {
     return buildTemplateAlternativeSpec({
       briefDraft: input.briefDraft,
-      templateId: input.templateId
+      templateId: input.templateId,
+      productCount
     });
   }
 
-  return buildNeutralProposalSeed(input);
+  return buildNeutralProposalSeed({ ...input, productCount });
 }
 
 export function preserveCurrentSiteDataFromPatch(patch?: DesignPatch | null): DesignPatch | undefined {
@@ -274,6 +289,7 @@ export function summarizeSiteSpecForRegeneration(input: { siteSpec?: SiteSpecV3 
 export function buildTemplateAlternativeSpec(input: {
   briefDraft: BusinessBriefDraft;
   templateId: TemplateId;
+  productCount?: number;
 }): SiteSpecV3 {
   return buildSiteSpecV3FromBrief({
     siteType: input.briefDraft.business_type,
@@ -284,7 +300,8 @@ export function buildTemplateAlternativeSpec(input: {
     tone: input.briefDraft.tone,
     ctaLabel: input.briefDraft.primary_cta,
     whatsappPhone: input.briefDraft.whatsapp_phone,
-    whatsappMessage: input.briefDraft.whatsapp_message
+    whatsappMessage: input.briefDraft.whatsapp_message,
+    productCount: input.productCount
   });
 }
 
@@ -397,10 +414,14 @@ export function buildHeuristicLayoutProposal(input: {
   prompt: string;
   briefDraft?: BusinessBriefDraft;
   regenerationContext?: RegenerationContext;
+  productCount?: number;
 }): LayoutProposal {
   const regeneration = input.regenerationContext;
   const brief = input.briefDraft;
   const prompt = [input.prompt, regeneration?.prompt ?? ""].filter(Boolean).join(" ").toLowerCase();
+  const productCount = input.productCount
+    ?? extractProductCountFromText(brief?.offer_summary ?? "")
+    ?? extractProductCountFromText(input.prompt);
   const seed = hashString(
     [
       brief?.business_name ?? "",
@@ -459,7 +480,7 @@ export function buildHeuristicLayoutProposal(input: {
         : [catalogCardsInformative, catalogServiceFocusInformative, catalogStripInformative];
 
   const hero = pickBuilder(prioritizeHeroBuilders(heroBuilders, regeneration), seed + 1)(brief, themeDirection);
-  const catalog = pickBuilder(prioritizeCatalogBuilders(catalogBuilders, regeneration), seed + 7)(themeDirection);
+  const catalog = pickBuilder(prioritizeCatalogBuilders(catalogBuilders, regeneration), seed + 7)(themeDirection, productCount);
 
   const testimonials = pickBuilder(
     premium || fashion
@@ -531,6 +552,7 @@ export function buildHeuristicDesignPatch(input: {
 function buildNeutralProposalSeed(input: {
   prompt: string;
   briefDraft?: BusinessBriefDraft;
+  productCount?: number;
 }): SiteSpecV3 {
   const brief = input.briefDraft;
   const siteType = brief?.business_type ?? inferSiteType(input.prompt.toLowerCase());
@@ -550,7 +572,8 @@ function buildNeutralProposalSeed(input: {
     siteType,
     businessName,
     offerSummary,
-    targetAudience
+    targetAudience,
+    productCount: input.productCount
   }));
 
   return {
@@ -596,6 +619,7 @@ function buildSeedSection(input: {
   businessName: string;
   offerSummary: string;
   targetAudience: string;
+  productCount?: number;
 }): SiteSectionV3 {
   const id = `${input.type}-${input.index + 1}`;
 
@@ -633,53 +657,94 @@ function buildSeedSection(input: {
 
   if (input.type === "catalog") {
     if (input.siteType === "commerce_lite") {
+      const n = Math.min(input.productCount ?? 3, 30);
+      const cols = 3;
+      const rows = Math.ceil(n / cols);
+      const cardW = 26;
+      const gap = 4;
+      const startX = 8;
+      const startY = 22;
+      const cardH = 62;
+      const rowGap = 6;
+      const mStartY = 18;
+      const mCardH = 22;
+      const mGap = 4;
+      const desktopHeightRatio = 0.7 + Math.max(0, rows - 1) * 0.5;
+      const mobileHeightRatio = 1.75 + Math.max(0, n - 3) * 0.58;
+      const products: ReturnType<typeof productBlock>[] = [];
+      for (let i = 0; i < n; i++) {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const dx = startX + col * (cardW + gap);
+        const dy = startY + row * (cardH + rowGap);
+        const my = mStartY + i * (mCardH + mGap);
+        const dPct = { x: dx, y: (dy / (desktopHeightRatio * 100)) * 100, w: cardW, h: (cardH / (desktopHeightRatio * 100)) * 100 };
+        const mPct = { x: 8, y: (my / (mobileHeightRatio * 100)) * 100, w: 84, h: (mCardH / (mobileHeightRatio * 100)) * 100 };
+        products.push(
+          productBlock(
+            `${id}-product-${i + 1}`,
+            i === 0 ? "Producto estrella" : `Producto ${i + 1}`,
+            rect(dx, dPct.y, cardW, dPct.h, 1),
+            rect(8, mPct.y, 84, mPct.h, 1)
+          )
+        );
+      }
       return {
         id,
         type: "catalog",
         enabled: true,
         variant: "grid",
-        height_ratio: { desktop: 0.7, mobile: 1.75 },
+        height_ratio: { desktop: desktopHeightRatio, mobile: mobileHeightRatio },
         blocks: [
           textBlock(`${id}-title`, "Catálogo destacado", rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), {
             fontSize: 34,
             fontWeight: 700
           }),
-          productBlock(`${id}-product-1`, "Producto estrella", rect(8, 22, 26, 62, 1), rect(8, 18, 84, 22, 1)),
-          productBlock(`${id}-product-2`, "Producto 2", rect(38, 22, 26, 62, 1), rect(8, 44, 84, 22, 1)),
-          productBlock(`${id}-product-3`, "Producto 3", rect(68, 22, 26, 62, 1), rect(8, 70, 84, 22, 1))
+          ...products
         ]
       };
     }
 
+    const n = Math.min(input.productCount ?? 3, 30);
+    const cols = 3;
+    const rows = Math.ceil(n / cols);
+    const cardW = 26;
+    const gap = 4;
+    const startX = 8;
+    const startY = 22;
+    const cardH = 56;
+    const rowGap = 6;
+    const mStartY = 18;
+    const mCardH = 24;
+    const mGap = 4;
+    const desktopHeightRatio = 0.6 + Math.max(0, rows - 1) * 0.48;
+    const mobileHeightRatio = 1.4 + Math.max(0, n - 3) * 0.56;
+    const cards: CanvasBlock[] = [];
+    for (let i = 0; i < n; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const dx = startX + col * (cardW + gap);
+      const dy = startY + row * (cardH + rowGap);
+      const my = mStartY + i * (mCardH + mGap);
+      cards.push(
+        containerBlock(`${id}-card-${i + 1}`, rect(dx, dy, cardW, cardH, 1), rect(8, my, 84, mCardH, 1)),
+        imageBlock(`${id}-image-${i + 1}`, true, rect(dx + 2, dy + 2, cardW - 4, 20, 2), rect(12, my + 2, 76, 10, 2), { radius: 14 }, { fit: "cover" }),
+        textBlock(`${id}-name-${i + 1}`, `Servicio ${i + 1}`, rect(dx + 2, dy + 26, cardW - 8, 6, 3), rect(12, my + 14, 70, 5, 3), { fontSize: 20, fontWeight: 700 }),
+        textBlock(`${id}-desc-${i + 1}`, i === 0 ? input.offerSummary : "Descripción breve del servicio.", rect(dx + 2, dy + 34, cardW - 6, 12, 3), rect(12, my + 20, 70, 4, 3), { fontSize: 14, color: "#475569" })
+      );
+    }
     return {
       id,
       type: "catalog",
       enabled: true,
       variant: "cards",
-      height_ratio: { desktop: 0.6, mobile: 1.4 },
+      height_ratio: { desktop: desktopHeightRatio, mobile: mobileHeightRatio },
       blocks: [
         textBlock(`${id}-title`, "Servicios principales", rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), {
           fontSize: 34,
           fontWeight: 700
         }),
-        containerBlock(`${id}-card-1`, rect(8, 22, 26, 56, 1), rect(8, 18, 84, 24, 1)),
-        imageBlock(`${id}-image-1`, true, rect(10, 24, 22, 20, 2), rect(12, 20, 76, 10, 2), { radius: 14 }, { fit: "cover" }),
-        textBlock(`${id}-name-1`, "Servicio 1", rect(10, 48, 18, 6, 3), rect(12, 32, 70, 5, 3), { fontSize: 20, fontWeight: 700 }),
-        textBlock(`${id}-desc-1`, input.offerSummary, rect(10, 56, 20, 12, 3), rect(12, 40, 70, 8, 3), { fontSize: 14, color: "#475569" }),
-        containerBlock(`${id}-card-2`, rect(38, 22, 26, 56, 1), rect(8, 46, 84, 24, 1)),
-        imageBlock(`${id}-image-2`, true, rect(40, 24, 22, 20, 2), rect(12, 48, 76, 10, 2), { radius: 14 }, { fit: "cover" }),
-        textBlock(`${id}-name-2`, "Servicio 2", rect(40, 48, 18, 6, 3), rect(12, 60, 70, 5, 3), { fontSize: 20, fontWeight: 700 }),
-        textBlock(`${id}-desc-2`, "Descripción breve del beneficio principal.", rect(40, 56, 20, 12, 3), rect(12, 68, 70, 8, 3), {
-          fontSize: 14,
-          color: "#475569"
-        }),
-        containerBlock(`${id}-card-3`, rect(68, 22, 26, 56, 1), rect(8, 74, 84, 24, 1)),
-        imageBlock(`${id}-image-3`, true, rect(70, 24, 22, 20, 2), rect(12, 76, 76, 10, 2), { radius: 14 }, { fit: "cover" }),
-        textBlock(`${id}-name-3`, "Servicio 3", rect(70, 48, 18, 6, 3), rect(12, 88, 70, 5, 3), { fontSize: 20, fontWeight: 700 }),
-        textBlock(`${id}-desc-3`, "Descripción breve del servicio o solución.", rect(70, 56, 20, 12, 3), rect(12, 94, 70, 4, 3), {
-          fontSize: 14,
-          color: "#475569"
-        })
+        ...cards
       ]
     };
   }
@@ -878,121 +943,174 @@ function heroImageLead(brief: BusinessBriefDraft | undefined, theme: Partial<Sit
   };
 }
 
-function catalogGridCommerce(theme: Partial<SiteSpecV3["theme"]>): SectionComposition {
+function buildProductComposeBlocks(n: number): { blocks: BlockComposition[]; desktopH: number; mobileH: number } {
+  const cols = 3;
+  const rows = Math.ceil(n / cols);
+  const cardW = 26;
+  const gap = 4;
+  const startX = 8;
+  const startY = 22;
+  const cardH = 62;
+  const rowGap = 6;
+  const mStartY = 18;
+  const mCardH = 22;
+  const mGap = 4;
+  const desktopH = 0.68 + Math.max(0, rows - 1) * 0.5;
+  const mobileH = 1.75 + Math.max(0, n - 3) * 0.58;
+  const blocks: BlockComposition[] = [];
+  for (let i = 0; i < n; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const dx = startX + col * (cardW + gap);
+    const dy = startY + row * (cardH + rowGap);
+    const my = mStartY + i * (mCardH + mGap);
+    blocks.push(compose(`product-${i + 1}`, true, rect(dx, dy, cardW, cardH, 1), rect(8, my, 84, mCardH, 1)));
+  }
+  return { blocks, desktopH, mobileH };
+}
+
+function buildCardComposeBlocks(n: number, theme: Partial<SiteSpecV3["theme"]>): { blocks: BlockComposition[]; desktopH: number; mobileH: number } {
+  const cols = 3;
+  const rows = Math.ceil(n / cols);
+  const cardW = 26;
+  const gap = 4;
+  const startX = 8;
+  const startY = 22;
+  const cardH = 56;
+  const rowGap = 6;
+  const mStartY = 18;
+  const mCardH = 24;
+  const mGap = 4;
+  const desktopH = 0.6 + Math.max(0, rows - 1) * 0.48;
+  const mobileH = 1.38 + Math.max(0, n - 3) * 0.56;
+  const blocks: BlockComposition[] = [];
+  for (let i = 0; i < n; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const dx = startX + col * (cardW + gap);
+    const dy = startY + row * (cardH + rowGap);
+    const my = mStartY + i * (mCardH + mGap);
+    blocks.push(
+      compose(`card-${i + 1}`, true, rect(dx, dy, cardW, cardH, 1), rect(8, my, 84, mCardH, 1)),
+      compose(`image-${i + 1}`, true, rect(dx + 2, dy + 2, cardW - 4, 20, 2), rect(12, my + 2, 76, 10, 2), { radius: 14 }, { fit: "cover" }),
+      compose(`name-${i + 1}`, true, rect(dx + 2, dy + 26, cardW - 8, 6, 3), rect(12, my + 14, 70, 5, 3), { fontSize: 20, fontWeight: 700 }),
+      compose(`desc-${i + 1}`, true, rect(dx + 2, dy + 34, cardW - 6, 12, 3), rect(12, my + 20, 70, 4, 3), { fontSize: 14, color: "#475569" })
+    );
+  }
+  return { blocks, desktopH, mobileH };
+}
+
+function catalogGridCommerce(theme: Partial<SiteSpecV3["theme"]>, productCount?: number): SectionComposition {
+  const n = Math.min(productCount ?? 3, 30);
+  const { blocks, desktopH, mobileH } = buildProductComposeBlocks(n);
   return {
     type: "catalog",
     variant: "grid",
-    height_ratio: { desktop: 0.68, mobile: 1.75 },
+    height_ratio: { desktop: desktopH, mobile: mobileH },
     blocks: [
       compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 38, fontWeight: 700, color: themeTextPrimary(theme) }),
-      compose("product-1", true, rect(8, 22, 26, 62, 1), rect(8, 18, 84, 22, 1)),
-      compose("product-2", true, rect(38, 22, 26, 62, 1), rect(8, 44, 84, 22, 1)),
-      compose("product-3", true, rect(68, 22, 26, 62, 1), rect(8, 70, 84, 22, 1))
+      ...blocks
     ]
   };
 }
 
-function catalogMosaicCommerce(theme: Partial<SiteSpecV3["theme"]>): SectionComposition {
+function catalogMosaicCommerce(theme: Partial<SiteSpecV3["theme"]>, productCount?: number): SectionComposition {
+  const n = Math.min(productCount ?? 3, 30);
+  const { blocks, desktopH, mobileH } = buildProductComposeBlocks(n);
   return {
     type: "catalog",
     variant: "grid",
-    height_ratio: { desktop: 0.72, mobile: 1.86 },
+    height_ratio: { desktop: desktopH, mobile: mobileH },
     blocks: [
       compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 38, fontWeight: 700, color: themeTextPrimary(theme) }),
-      compose("product-1", true, rect(8, 22, 38, 62, 1), rect(8, 18, 84, 22, 1)),
-      compose("product-2", true, rect(50, 22, 42, 28, 1), rect(8, 44, 84, 22, 1)),
-      compose("product-3", true, rect(50, 54, 42, 30, 1), rect(8, 70, 84, 22, 1))
+      ...blocks
     ]
   };
 }
 
-function catalogFeaturedCommerce(theme: Partial<SiteSpecV3["theme"]>): SectionComposition {
+function catalogFeaturedCommerce(theme: Partial<SiteSpecV3["theme"]>, productCount?: number): SectionComposition {
+  const n = Math.min(productCount ?? 3, 30);
+  const { blocks, desktopH, mobileH } = buildProductComposeBlocks(n);
   return {
     type: "catalog",
     variant: "list",
-    height_ratio: { desktop: 0.76, mobile: 1.82 },
+    height_ratio: { desktop: desktopH, mobile: mobileH },
     blocks: [
       compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 40, fontWeight: 700, color: themeTextPrimary(theme) }),
-      compose("product-1", true, rect(8, 22, 56, 62, 1), rect(8, 18, 84, 22, 1)),
-      compose("product-2", true, rect(68, 22, 24, 28, 1), rect(8, 44, 84, 22, 1)),
-      compose("product-3", true, rect(68, 54, 24, 30, 1), rect(8, 70, 84, 22, 1))
+      ...blocks
     ]
   };
 }
 
-function catalogFeaturedTopCommerce(theme: Partial<SiteSpecV3["theme"]>): SectionComposition {
+function catalogFeaturedTopCommerce(theme: Partial<SiteSpecV3["theme"]>, productCount?: number): SectionComposition {
+  const n = Math.min(productCount ?? 3, 30);
+  const { blocks, desktopH, mobileH } = buildProductComposeBlocks(n);
   return {
     type: "catalog",
     variant: "list",
-    height_ratio: { desktop: 0.74, mobile: 1.8 },
+    height_ratio: { desktop: desktopH, mobile: mobileH },
     blocks: [
       compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 40, fontWeight: 700, color: themeTextPrimary(theme) }),
-      compose("product-1", true, rect(8, 22, 84, 30, 1), rect(8, 18, 84, 22, 1)),
-      compose("product-2", true, rect(8, 58, 40, 24, 1), rect(8, 46, 84, 22, 1)),
-      compose("product-3", true, rect(52, 58, 40, 24, 1), rect(8, 72, 84, 22, 1))
+      ...blocks
     ]
   };
 }
 
-function catalogCardsInformative(theme: Partial<SiteSpecV3["theme"]>): SectionComposition {
+function catalogCardsInformative(theme: Partial<SiteSpecV3["theme"]>, productCount?: number): SectionComposition {
+  const n = Math.min(productCount ?? 3, 30);
+  const { blocks, desktopH, mobileH } = buildCardComposeBlocks(n, theme);
   return {
     type: "catalog",
     variant: "cards",
-    height_ratio: { desktop: 0.6, mobile: 1.38 },
+    height_ratio: { desktop: desktopH, mobile: mobileH },
     blocks: [
       compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: themeTextPrimary(theme) }),
-      compose("card-1", true, rect(8, 22, 26, 56, 1), rect(8, 18, 84, 24, 1)),
-      compose("image-1", true, rect(10, 24, 22, 20, 2), rect(12, 20, 76, 10, 2), { radius: 14 }, { fit: "cover" }),
-      compose("name-1", true, rect(10, 48, 18, 6, 3), rect(12, 32, 70, 5, 3), { fontSize: 20, fontWeight: 700 }),
-      compose("desc-1", true, rect(10, 56, 20, 12, 3), rect(12, 40, 70, 8, 3), { fontSize: 14, color: "#475569" }),
-      compose("card-2", true, rect(38, 22, 26, 56, 1), rect(8, 46, 84, 24, 1)),
-      compose("image-2", true, rect(40, 24, 22, 20, 2), rect(12, 48, 76, 10, 2), { radius: 14 }, { fit: "cover" }),
-      compose("name-2", true, rect(40, 48, 18, 6, 3), rect(12, 60, 70, 5, 3), { fontSize: 20, fontWeight: 700 }),
-      compose("desc-2", true, rect(40, 56, 20, 12, 3), rect(12, 68, 70, 8, 3), { fontSize: 14, color: "#475569" }),
-      compose("card-3", true, rect(68, 22, 26, 56, 1), rect(8, 74, 84, 24, 1)),
-      compose("image-3", true, rect(70, 24, 22, 20, 2), rect(12, 76, 76, 10, 2), { radius: 14 }, { fit: "cover" }),
-      compose("name-3", true, rect(70, 48, 18, 6, 3), rect(12, 88, 70, 5, 3), { fontSize: 20, fontWeight: 700 }),
-      compose("desc-3", true, rect(70, 56, 20, 12, 3), rect(12, 94, 70, 4, 3), { fontSize: 14, color: "#475569" })
+      ...blocks
     ]
   };
 }
 
-function catalogStripInformative(theme: Partial<SiteSpecV3["theme"]>): SectionComposition {
+function catalogStripInformative(theme: Partial<SiteSpecV3["theme"]>, productCount?: number): SectionComposition {
+  const n = Math.min(productCount ?? 3, 30);
+  const stripH = 14;
+  const stripGap = 6;
+  const startY = 24;
+  const mStartY = 18;
+  const mStripH = 18;
+  const mGap = 6;
+  const desktopH = 0.5 + Math.max(0, n - 3) * 0.2;
+  const mobileH = 1.26 + Math.max(0, n - 3) * 0.48;
+  const blocks: BlockComposition[] = [];
+  for (let i = 0; i < n; i++) {
+    const dy = startY + i * (stripH + stripGap);
+    const my = mStartY + i * (mStripH + mGap);
+    blocks.push(
+      compose(`card-${i + 1}`, true, rect(8, dy, 84, stripH, 1), rect(8, my, 84, mStripH, 1)),
+      compose(`name-${i + 1}`, true, rect(12, dy + 4, 30, 4, 2), rect(12, my + 4, 70, 5, 2), { fontSize: 18, fontWeight: 700 }),
+      compose(`desc-${i + 1}`, true, rect(12, dy + 9, 54, 4, 2), rect(12, my + 10, 70, 5, 2), { fontSize: 14, color: "#475569" })
+    );
+  }
   return {
     type: "catalog",
     variant: "list",
-    height_ratio: { desktop: 0.5, mobile: 1.26 },
+    height_ratio: { desktop: desktopH, mobile: mobileH },
     blocks: [
       compose("title", true, rect(8, 8, 52, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: themeTextPrimary(theme) }),
-      compose("card-1", true, rect(8, 24, 84, 14, 1), rect(8, 18, 84, 18, 1)),
-      compose("name-1", true, rect(12, 28, 30, 4, 2), rect(12, 22, 70, 5, 2), { fontSize: 18, fontWeight: 700 }),
-      compose("desc-1", true, rect(12, 33, 54, 4, 2), rect(12, 28, 70, 5, 2), { fontSize: 14, color: "#475569" }),
-      compose("card-2", true, rect(8, 44, 84, 14, 1), rect(8, 42, 84, 18, 1)),
-      compose("name-2", true, rect(12, 48, 30, 4, 2), rect(12, 46, 70, 5, 2), { fontSize: 18, fontWeight: 700 }),
-      compose("desc-2", true, rect(12, 53, 54, 4, 2), rect(12, 52, 70, 5, 2), { fontSize: 14, color: "#475569" }),
-      compose("card-3", true, rect(8, 64, 84, 14, 1), rect(8, 66, 84, 18, 1)),
-      compose("name-3", true, rect(12, 68, 30, 4, 2), rect(12, 70, 70, 5, 2), { fontSize: 18, fontWeight: 700 }),
-      compose("desc-3", true, rect(12, 73, 54, 4, 2), rect(12, 76, 70, 5, 2), { fontSize: 14, color: "#475569" })
+      ...blocks
     ]
   };
 }
 
-function catalogServiceFocusInformative(theme: Partial<SiteSpecV3["theme"]>): SectionComposition {
+function catalogServiceFocusInformative(theme: Partial<SiteSpecV3["theme"]>, productCount?: number): SectionComposition {
+  const n = Math.min(productCount ?? 3, 30);
+  const { blocks, desktopH, mobileH } = buildCardComposeBlocks(n, theme);
   return {
     type: "catalog",
     variant: "cards",
-    height_ratio: { desktop: 0.56, mobile: 1.3 },
+    height_ratio: { desktop: desktopH, mobile: mobileH },
     blocks: [
       compose("title", true, rect(8, 8, 54, 10, 2), rect(8, 4, 84, 8, 2), { fontSize: 36, fontWeight: 700, color: themeTextPrimary(theme) }),
-      compose("card-1", true, rect(8, 24, 40, 52, 1), rect(8, 18, 84, 22, 1)),
-      compose("name-1", true, rect(12, 30, 28, 6, 2), rect(12, 22, 70, 5, 2), { fontSize: 22, fontWeight: 700 }),
-      compose("desc-1", true, rect(12, 40, 24, 12, 2), rect(12, 30, 70, 8, 2), { fontSize: 14, color: "#475569" }),
-      compose("card-2", true, rect(54, 24, 38, 22, 1), rect(8, 46, 84, 18, 1)),
-      compose("name-2", true, rect(58, 30, 24, 5, 2), rect(12, 50, 70, 5, 2), { fontSize: 18, fontWeight: 700 }),
-      compose("desc-2", true, rect(58, 38, 24, 6, 2), rect(12, 56, 70, 6, 2), { fontSize: 14, color: "#475569" }),
-      compose("card-3", true, rect(54, 54, 38, 22, 1), rect(8, 68, 84, 18, 1)),
-      compose("name-3", true, rect(58, 60, 24, 5, 2), rect(12, 72, 70, 5, 2), { fontSize: 18, fontWeight: 700 }),
-      compose("desc-3", true, rect(58, 68, 24, 6, 2), rect(12, 78, 70, 6, 2), { fontSize: 14, color: "#475569" })
+      ...blocks
     ]
   };
 }

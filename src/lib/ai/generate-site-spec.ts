@@ -18,19 +18,32 @@ type EnhancementPayload = {
   contact_description?: string;
 };
 
+function extractProductCountFromText(text: string): number | undefined {
+  const match = text.match(/(\d+)\s*(?:productos?|servicios?|items?|artículos?)/i);
+  if (match) {
+    const n = Number(match[1]);
+    if (n >= 1 && n <= 30) return n;
+  }
+  return undefined;
+}
+
 export async function generateSiteSpecFromPrompt(input: {
   prompt: string;
   templateId?: TemplateId;
   briefDraft?: BusinessBriefDraft;
+  productCount?: number;
 }): Promise<GenerationResult> {
   const seedSpec = buildSeedSpec(input);
+  const effectiveProductCount = input.productCount
+    ?? extractProductCountFromText(input.briefDraft?.offer_summary ?? "")
+    ?? extractProductCountFromText(input.prompt);
 
   if (env.aiProvider === "mock" || !env.aiBaseUrl || !env.aiModel) {
     return { siteSpec: seedSpec, source: "seed", enhancementApplied: false };
   }
 
   try {
-    const llmText = await callLLMForEnhancement(input.prompt, seedSpec.template.id);
+    const llmText = await callLLMForEnhancement(input.prompt, seedSpec.template.id, effectiveProductCount);
     const parsed = safeParseJson(llmText);
     const enhanced = applyEnhancements(seedSpec, parsed);
     const validated = parseSiteSpecV3(enhanced);
@@ -50,8 +63,11 @@ export async function generateSiteSpecFromPrompt(input: {
   return { siteSpec: seedSpec, source: "seed", enhancementApplied: false };
 }
 
-function buildSeedSpec(input: { prompt: string; templateId?: TemplateId; briefDraft?: BusinessBriefDraft }) {
+function buildSeedSpec(input: { prompt: string; templateId?: TemplateId; briefDraft?: BusinessBriefDraft; productCount?: number }) {
   const { briefDraft } = input;
+  const productCount = input.productCount
+    ?? extractProductCountFromText(briefDraft?.offer_summary ?? "")
+    ?? extractProductCountFromText(input.prompt);
 
   if (briefDraft) {
     return buildSiteSpecV3FromBrief({
@@ -63,14 +79,16 @@ function buildSeedSpec(input: { prompt: string; templateId?: TemplateId; briefDr
       tone: briefDraft.tone,
       ctaLabel: briefDraft.primary_cta,
       whatsappPhone: briefDraft.whatsapp_phone,
-      whatsappMessage: briefDraft.whatsapp_message
+      whatsappMessage: briefDraft.whatsapp_message,
+      productCount
     });
   }
 
   return buildFallbackSiteSpecV3(input.prompt, { templateId: input.templateId });
 }
 
-async function callLLMForEnhancement(prompt: string, templateId: TemplateId) {
+async function callLLMForEnhancement(prompt: string, templateId: TemplateId, productCount?: number) {
+  const maxItems = Math.min(productCount ?? 3, 30);
   const response = await fetch(env.aiBaseUrl, {
     method: "POST",
     headers: {
@@ -90,7 +108,8 @@ async function callLLMForEnhancement(prompt: string, templateId: TemplateId) {
           role: "user",
           content: [
             "Devuelve un JSON con campos opcionales:",
-            "hero_subheadline, catalog_title, catalog_items (max 3), testimonials (max 3), contact_description.",
+            `hero_subheadline, catalog_title, catalog_items (max ${maxItems}), testimonials (max 3), contact_description.`,
+            "Cada catalog_item tiene: name, description, price.",
             "No inventes estructura HTML ni SiteSpec completo.",
             `Template elegida: ${templateId}.`,
             `Brief del negocio: ${prompt}`
@@ -156,7 +175,9 @@ function applyEnhancements(seedSpec: SiteSpecV3, parsed: unknown): SiteSpecV3 {
         }
       });
     } else {
-      payload.catalog_items.slice(0, 3).forEach((item, index) => {
+      const textProducts = catalog.blocks.filter((b) => b.type === "text" && /name-\d+$/.test(b.id));
+      const maxText = Math.max(textProducts.length, 3);
+      payload.catalog_items.slice(0, maxText).forEach((item, index) => {
         const name = catalog.blocks.find((block) => block.type === "text" && block.id.endsWith(`name-${index + 1}`));
         const desc = catalog.blocks.find((block) => block.type === "text" && block.id.endsWith(`desc-${index + 1}`));
         const price = catalog.blocks.find((block) => block.type === "text" && block.id.endsWith(`price-${index + 1}`));

@@ -49,6 +49,7 @@ type SectionDragState = {
   initialHeight: number;
   sectionWidth: number;
   viewport: EditorViewport;
+  originalBlockRects: Map<string, { desktop: CanvasLayoutRect; mobile?: CanvasLayoutRect }>;
 };
 
 type EditorVersionItem = {
@@ -472,6 +473,8 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
         const deltaY = (event.clientY - sectionDrag.startY) / zoomScale;
         const nextHeight = Math.max(200, sectionDrag.initialHeight + deltaY);
         const nextRatio = clampRatio(nextHeight / sectionDrag.sectionWidth);
+        const oldHeight = sectionDrag.initialHeight;
+        const vp = sectionDrag.viewport;
         applySiteSpecUpdate(
           (prev) => {
             const page = prev.pages.find((item) => item.id === home?.id);
@@ -488,8 +491,29 @@ export function SiteEditor({ siteId, siteName, publicSiteUrl, initialPublished, 
                               ...section,
                               height_ratio: {
                                 ...section.height_ratio,
-                                [sectionDrag.viewport]: nextRatio
-                              }
+                                [vp]: nextRatio
+                              },
+                              blocks: section.blocks.map((block) => {
+                                const original = sectionDrag.originalBlockRects.get(block.id);
+                                if (!original) return block;
+                                const rectKey = vp === "mobile" ? "mobile" : "desktop";
+                                const origRect = rectKey === "mobile" && original.mobile
+                                  ? original.mobile
+                                  : original.desktop;
+                                const scale = oldHeight / nextHeight;
+                                const rescaled: CanvasLayoutRect = {
+                                  ...origRect,
+                                  y: clampPercent(origRect.y * scale),
+                                  h: clampPercent(origRect.h * scale)
+                                };
+                                return {
+                                  ...block,
+                                  layout: {
+                                    ...block.layout,
+                                    [rectKey]: rescaled
+                                  }
+                                };
+                              })
                             }
                           : section
                       )
@@ -812,12 +836,24 @@ function addSection(type: SiteSectionV3["type"]) {
     event.stopPropagation();
     const sectionWidth = canvasWidth;
     const sectionHeight = getSectionHeightPx(section, viewport, sectionWidth);
+    const home = siteSpec.pages.find((p) => p.slug === "/") ?? siteSpec.pages[0];
+    const targetSection = home?.sections.find((s) => s.id === section.id);
+    const originalBlockRects = new Map<string, { desktop: CanvasLayoutRect; mobile?: CanvasLayoutRect }>();
+    if (targetSection) {
+      for (const block of targetSection.blocks) {
+        originalBlockRects.set(block.id, {
+          desktop: { ...block.layout.desktop },
+          mobile: block.layout.mobile ? { ...block.layout.mobile } : undefined
+        });
+      }
+    }
     sectionDragRef.current = {
       sectionId: section.id,
       startY: event.clientY,
       initialHeight: sectionHeight,
       sectionWidth,
-      viewport
+      viewport,
+      originalBlockRects
     };
     if (!draggingHistoryBaseRef.current) {
       draggingHistoryBaseRef.current = structuredClone(siteSpecRef.current);
@@ -1175,7 +1211,6 @@ function addSection(type: SiteSectionV3["type"]) {
           aria-pressed={viewport === "desktop"}
         >
           <DesktopPreviewIcon />
-          <span>Desktop</span>
         </button>
         <button
           type="button"
@@ -1184,7 +1219,6 @@ function addSection(type: SiteSectionV3["type"]) {
           aria-pressed={viewport === "mobile"}
         >
           <MobilePreviewIcon />
-          <span>Mobile</span>
         </button>
       </div>
     );

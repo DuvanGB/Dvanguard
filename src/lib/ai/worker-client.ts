@@ -12,6 +12,7 @@ type TriggerVisualWorkerInput = {
   callbackBaseUrl: string;
   currentSiteSummary?: string;
   regenerationContext?: RegenerationContext;
+  productCount?: number;
 };
 
 type TriggerRefineWorkerInput = {
@@ -51,7 +52,8 @@ export async function triggerVisualGenerationWorker(input: TriggerVisualWorkerIn
       callbackBaseUrl: input.callbackBaseUrl,
       currentSiteSummary: input.currentSiteSummary ?? null,
       isRegeneration: input.regenerationContext?.isRegeneration ?? false,
-      regenerationContext: input.regenerationContext ?? null
+      regenerationContext: input.regenerationContext ?? null,
+      productCount: input.productCount ?? null
     })
   });
 

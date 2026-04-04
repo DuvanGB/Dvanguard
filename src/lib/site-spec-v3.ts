@@ -921,6 +921,7 @@ function buildSectionFromBlueprint(input: {
   tone: string;
   ctaLabel: string;
   siteType: "informative" | "commerce_lite";
+  productCount?: number;
 }): SiteSectionV3 {
   const {
     sectionType,
@@ -937,25 +938,96 @@ function buildSectionFromBlueprint(input: {
   const sectionId = `${sectionType}-${index + 1}`;
   const sectionBlueprint = blueprint[sectionType];
 
+  const baseBlocks = sectionBlueprint.blocks.map((block) =>
+    buildBlockFromBlueprint({
+      blueprint: block,
+      sectionId,
+      sectionType,
+      businessName,
+      offerSummary,
+      targetAudience,
+      tone,
+      ctaLabel,
+      siteType
+    })
+  );
+
+  let blocks = baseBlocks;
+  let heightRatio = sectionBlueprint.height_ratio;
+
+  /* For catalog sections, duplicate product blocks if productCount > existing count */
+  if (sectionType === "catalog" && input.productCount && input.productCount > 0) {
+    const existingProducts = baseBlocks.filter((b) => b.type === "product");
+    const wanted = Math.min(input.productCount, 30);
+
+    if (wanted > existingProducts.length && existingProducts.length > 0) {
+      const templateProduct = existingProducts[existingProducts.length - 1];
+      const productLabels = getProductBaseLabels(siteType);
+      const productDescriptions = getProductDescriptions(offerSummary, tone);
+      const extras: CanvasBlock[] = [];
+
+      /* Calculate grid positions for new products (3-column desktop grid) */
+      const cols = 3;
+      for (let i = existingProducts.length; i < wanted; i++) {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const label = productLabels[i] ?? (siteType === "commerce_lite" ? `Producto ${i + 1}` : `Servicio ${i + 1}`);
+
+        /* Desktop: distribute evenly */
+        const dW = 28;
+        const dH = templateProduct.layout.desktop.h;
+        const dGap = 2;
+        const dX = 6 + col * (dW + dGap);
+        const dY = 20 + row * (dH + 4);
+
+        /* Mobile: single column stack */
+        const mW = 84;
+        const mH = templateProduct.layout.mobile?.h ?? 24;
+        const mX = 8;
+        const mY = 18 + i * (mH + 4);
+
+        extras.push({
+          id: `${sectionId}-product-${i + 1}`,
+          type: "product",
+          visible: true,
+          layout: {
+            desktop: { x: dX, y: dY, w: dW, h: dH, z: 1 },
+            mobile: { x: mX, y: mY, w: mW, h: mH, z: 1 }
+          },
+          style: templateProduct.style ? { ...templateProduct.style } : {},
+          content: {
+            name: label,
+            description: productDescriptions[i] ?? productDescriptions[0],
+            price: 120_000 + i * 20_000,
+            currency: "COP",
+            image_url: placeholderImage(label, "640x420")
+          }
+        });
+      }
+
+      blocks = [...baseBlocks, ...extras];
+
+      /* Expand section height to fit extra rows */
+      const totalRows = Math.ceil(wanted / cols);
+      const baseRows = Math.ceil(existingProducts.length / cols);
+      if (totalRows > baseRows) {
+        const dRatio = heightRatio.desktop * (totalRows / baseRows);
+        const mRatio = heightRatio.mobile * (wanted / existingProducts.length);
+        heightRatio = {
+          desktop: clampRatio(dRatio),
+          mobile: clampRatio(mRatio)
+        };
+      }
+    }
+  }
+
   return {
     id: sectionId,
     type: sectionType,
     enabled: true,
     variant: template.variants[sectionType] as SiteSectionV3["variant"],
-    height_ratio: sectionBlueprint.height_ratio,
-    blocks: sectionBlueprint.blocks.map((block) =>
-      buildBlockFromBlueprint({
-        blueprint: block,
-        sectionId,
-        sectionType,
-        businessName,
-        offerSummary,
-        targetAudience,
-        tone,
-        ctaLabel,
-        siteType
-      })
-    )
+    height_ratio: heightRatio,
+    blocks
   };
 }
 
@@ -969,6 +1041,7 @@ export function buildSiteSpecV3FromBrief(input: {
   ctaLabel?: string;
   whatsappPhone?: string;
   whatsappMessage?: string;
+  productCount?: number;
 }): SiteSpecV3 {
   const businessName = normalizeBusinessName(input.businessName);
   const templateId = pickTemplateOrFallback({
@@ -1000,7 +1073,8 @@ export function buildSiteSpecV3FromBrief(input: {
       targetAudience,
       tone,
       ctaLabel,
-      siteType: input.siteType
+      siteType: input.siteType,
+      productCount: input.productCount
     })
   );
 
@@ -1359,6 +1433,7 @@ function buildSection(input: {
   tone: string;
   ctaLabel: string;
   siteType: "informative" | "commerce_lite";
+  productCount?: number;
   templateVariants: {
     hero: string;
     catalog: string;
@@ -1403,12 +1478,16 @@ function buildSection(input: {
   }
 
   if (input.sectionType === "catalog") {
+    const productCount = input.productCount ?? 3;
+    const rows = Math.ceil(productCount / 3);
+    const desktopHeight = 132 + rows * (420 + 28) + 40;
+    const mobileHeight = 110 + productCount * (240 + 18) + 40;
     return {
       id,
       type: "catalog",
       enabled: true,
       variant: input.templateVariants.catalog as SiteSectionV3["variant"],
-      height: { desktop: 640, mobile: 930 },
+      height: { desktop: desktopHeight, mobile: mobileHeight },
       blocks: [
         textBlock({
           id: `${id}-title`,
@@ -1417,7 +1496,7 @@ function buildSection(input: {
           mobile: rect(24, 30, 320, 56, 2),
           style: { fontSize: 34, fontWeight: 700, color: "#0f172a" }
         }),
-        ...buildCatalogCardBlocks(id, input.siteType, input.offerSummary, input.tone)
+        ...buildCatalogCardBlocks(id, input.siteType, input.offerSummary, input.tone, productCount)
       ]
     };
   }
@@ -1499,34 +1578,62 @@ function buildCatalogCardBlocks(
   sectionId: string,
   siteType: "informative" | "commerce_lite",
   offerSummary: string,
-  tone: string
+  tone: string,
+  count = 3
 ) {
-  const labels =
+  const baseLabels =
     siteType === "commerce_lite"
       ? ["Producto estrella", "Producto recomendado", "Producto popular"]
       : ["Servicio principal", "Servicio complementario", "Servicio premium"];
 
-  const descriptions = [
+  const baseDescriptions = [
     offerSummary,
     "Ideal para clientes que buscan resultados rápidos.",
     `Atención ${tone.toLowerCase()} con soporte por WhatsApp.`
   ];
 
-  const cards = [
-    { x: 56, y: 132, w: 320, h: 420 },
-    { x: 404, y: 132, w: 320, h: 420 },
-    { x: 752, y: 132, w: 320, h: 420 }
-  ];
+  const n = Math.max(1, Math.min(count, 30));
 
-  const mobileCards = [
-    { x: 24, y: 110, w: 320, h: 240 },
-    { x: 24, y: 368, w: 320, h: 240 },
-    { x: 24, y: 626, w: 320, h: 240 }
-  ];
+  const labels = Array.from({ length: n }, (_, i) =>
+    baseLabels[i] ?? (siteType === "commerce_lite" ? `Producto ${i + 1}` : `Servicio ${i + 1}`)
+  );
+  const descriptions = Array.from({ length: n }, (_, i) =>
+    baseDescriptions[i] ?? offerSummary
+  );
+
+  /* Desktop grid: 3 columns, wrapping into rows */
+  const cols = Math.min(n, 3);
+  const cardW = 320;
+  const cardH = 420;
+  const gap = 28;
+  const startX = 56;
+  const startY = 132;
+  const rowHeight = cardH + gap;
+
+  const desktopCards = Array.from({ length: n }, (_, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    return { x: startX + col * (cardW + gap), y: startY + row * rowHeight, w: cardW, h: cardH };
+  });
+
+  /* Mobile: single column stacked */
+  const mCardW = 320;
+  const mCardH = 240;
+  const mGap = 18;
+  const mStartX = 24;
+  const mStartY = 110;
+
+  const mobileCards = Array.from({ length: n }, (_, i) => ({
+    x: mStartX,
+    y: mStartY + i * (mCardH + mGap),
+    w: mCardW,
+    h: mCardH
+  }));
 
   const blocks: LegacyCanvasBlock[] = [];
 
-  cards.forEach((card, index) => {
+  desktopCards.forEach((card, index) => {
+    const mCard = mobileCards[index];
     if (siteType === "commerce_lite") {
       blocks.push(
         productBlock({
@@ -1537,7 +1644,7 @@ function buildCatalogCardBlocks(
           currency: "COP",
           imageUrl: `https://placehold.co/640x420?text=${encodeURIComponent(labels[index] ?? `Producto ${index + 1}`)}`,
           desktop: rect(card.x, card.y, card.w, card.h, 1),
-          mobile: rect(mobileCards[index].x, mobileCards[index].y, mobileCards[index].w, mobileCards[index].h, 1)
+          mobile: rect(mCard.x, mCard.y, mCard.w, mCard.h, 1)
         })
       );
       return;
@@ -1547,7 +1654,7 @@ function buildCatalogCardBlocks(
       containerBlock({
         id: `${sectionId}-card-${index + 1}`,
         desktop: rect(card.x, card.y, card.w, card.h, 1),
-        mobile: rect(mobileCards[index].x, mobileCards[index].y, mobileCards[index].w, mobileCards[index].h, 1),
+        mobile: rect(mCard.x, mCard.y, mCard.w, mCard.h, 1),
         style: { bgColor: "#ffffff", radius: 14, borderColor: "#cbd5e1", borderWidth: 1 }
       })
     );
@@ -1558,7 +1665,7 @@ function buildCatalogCardBlocks(
         url: `https://placehold.co/640x420?text=${encodeURIComponent(labels[index] ?? `Item ${index + 1}`)}`,
         alt: labels[index],
         desktop: rect(card.x + 12, card.y + 12, card.w - 24, 210, 2),
-        mobile: rect(mobileCards[index].x + 10, mobileCards[index].y + 10, mobileCards[index].w - 20, 120, 2)
+        mobile: rect(mCard.x + 10, mCard.y + 10, mCard.w - 20, 120, 2)
       })
     );
 
@@ -1567,7 +1674,7 @@ function buildCatalogCardBlocks(
         id: `${sectionId}-name-${index + 1}`,
         text: labels[index] ?? `Item ${index + 1}`,
         desktop: rect(card.x + 16, card.y + 238, card.w - 32, 36, 3),
-        mobile: rect(mobileCards[index].x + 12, mobileCards[index].y + 136, mobileCards[index].w - 24, 30, 3),
+        mobile: rect(mCard.x + 12, mCard.y + 136, mCard.w - 24, 30, 3),
         style: { fontSize: 22, fontWeight: 700, color: "#0f172a" }
       })
     );
@@ -1577,7 +1684,7 @@ function buildCatalogCardBlocks(
         id: `${sectionId}-desc-${index + 1}`,
         text: descriptions[index] ?? "",
         desktop: rect(card.x + 16, card.y + 282, card.w - 32, 72, 3),
-        mobile: rect(mobileCards[index].x + 12, mobileCards[index].y + 168, mobileCards[index].w - 24, 56, 3),
+        mobile: rect(mCard.x + 12, mCard.y + 168, mCard.w - 24, 56, 3),
         style: { fontSize: 16, color: "#475569" }
       })
     );
