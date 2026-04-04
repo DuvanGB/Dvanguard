@@ -14,8 +14,11 @@ import { PlatformNav } from "@/components/platform-nav";
 import { PlatformFooter } from "@/components/platform-footer";
 import { getPlatformCopyMap } from "@/lib/platform-config";
 import { getLocaleFromCookies, localeToScope } from "@/lib/locale";
+import { TimeRangeSelector } from "@/components/time-range-selector";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
+  const { range: rangeParam } = await searchParams;
+  const range = rangeParam || "7d";
   const { user } = await requireUser();
   const admin = getSupabaseAdminClient();
   const locale = await getLocaleFromCookies();
@@ -47,7 +50,7 @@ export default async function DashboardPage() {
     getUsageSnapshot(admin, user.id),
     getOwnerSiteAnalytics({
       ownerId: user.id,
-      range: "7d"
+      range
     }),
     listTrashedSitesForOwner(admin, user.id),
     getPlatformCopyMap(admin, dashCopyKeys, scope)
@@ -98,7 +101,7 @@ export default async function DashboardPage() {
         <section className="stack stack-md">
           <div className="flex-between">
             <h2 style={{ margin: 0, fontSize: "1.15rem", color: "var(--text)" }}>{t("dash.kpi.section")}</h2>
-            <small style={{ fontSize: "0.7rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--secondary)" }}>{t("dash.kpi.period")}</small>
+            <TimeRangeSelector current={range} />
           </div>
           <div className="dashboard-kpi-strip">
             <article className="dashboard-kpi-card">

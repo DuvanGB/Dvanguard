@@ -4165,6 +4165,42 @@ td {
   white-space: nowrap;
 }
 
+/* ── Time Range Selector ─────────────────── */
+
+.time-range-selector {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--surface-high) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 15%, transparent);
+  flex-shrink: 0;
+}
+
+.time-range-btn {
+  padding: 0.3rem 0.7rem;
+  border: none;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--on-surface-variant);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.time-range-btn:hover {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  color: var(--text);
+}
+
+.time-range-btn.active {
+  background: var(--primary);
+  color: var(--on-primary);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+
 /* ── KPI Strip ───────────────────────────── */
 
 .dashboard-kpi-strip {

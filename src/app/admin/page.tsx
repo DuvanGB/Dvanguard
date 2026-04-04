@@ -12,16 +12,20 @@ import {
   getTopTemplatesByPublication
 } from "@/lib/data/admin/metrics";
 import { getAdminTrafficMetrics } from "@/lib/data/admin/traffic-metrics";
+import { TimeRangeSelector } from "@/components/time-range-selector";
 
-export default async function AdminHomePage() {
+export default async function AdminHomePage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
+  const { range: rangeParam } = await searchParams;
+  const range = rangeParam || "7d";
+
   const [totals, metrics, traffic, failedJobs, recentSites, mostRegeneratedSites, topTemplates] = await Promise.all([
     getAdminTotals(),
-    getAdminMetrics("7d"),
-    getAdminTrafficMetrics("7d"),
+    getAdminMetrics(range),
+    getAdminTrafficMetrics(range),
     getRecentFailedJobs(8),
     getRecentlyPublishedSites(8),
-    getSitesWithMostRegenerations(8, "7d"),
-    getTopTemplatesByPublication(6, "7d")
+    getSitesWithMostRegenerations(8, range),
+    getTopTemplatesByPublication(6, range)
   ]);
 
   return (
@@ -40,12 +44,12 @@ export default async function AdminHomePage() {
       <section className="admin-bento-grid">
         <div className="admin-bento-card">
           <span className="material-symbols-outlined">add_to_photos</span>
-          <p>Sitios creados · 7d</p>
+          <p>Sitios creados</p>
           <strong>{metrics.sitesCreated}</strong>
         </div>
         <div className="admin-bento-card">
           <span className="material-symbols-outlined">cloud_done</span>
-          <p>Publicados · 7d</p>
+          <p>Publicados</p>
           <strong>{metrics.sitesPublished}</strong>
         </div>
         <div className="admin-bento-card admin-bento-featured">
@@ -62,7 +66,7 @@ export default async function AdminHomePage() {
         </div>
         <div className="admin-bento-card admin-bento-wide">
           <div>
-            <p>Jobs IA totales · 7d</p>
+            <p>Jobs IA totales</p>
             <strong>{metrics.aiJobsTotal}</strong>
           </div>
           <div className="admin-bento-chart-placeholder">
@@ -74,7 +78,7 @@ export default async function AdminHomePage() {
       {/* ── Hero Panel ──────────────────────────────── */}
       <section className="admin-hero-panel">
         <div className="stack stack-sm">
-          <small className="admin-eyebrow">Vista 7 días</small>
+          <TimeRangeSelector current={range} />
           <h2>Dashboard Ejecutivo</h2>
           <p>Métricas de rendimiento, conversión y calidad IA.</p>
         </div>
@@ -130,7 +134,7 @@ export default async function AdminHomePage() {
           <h2 className="admin-section-title">Tráfico & Conversión</h2>
         </div>
         <div className="admin-metric-grid">
-          <MetricCard label="Visitas" value={metrics.trafficVisits} hint="7 días" icon="trending_up" tone="positive" />
+          <MetricCard label="Visitas" value={metrics.trafficVisits} icon="trending_up" tone="positive" />
           <MetricCard label="Clic WhatsApp" value={metrics.trafficWhatsappClicks} icon="touch_app" tone="positive" />
           <MetricCard label="Clic CTA" value={metrics.trafficCtaClicks} icon="ads_click" />
           <MetricCard label="Límite publish" value={metrics.limitHitPublishCount} hint="tope alcanzado" icon="do_not_disturb_on" tone="warning" />

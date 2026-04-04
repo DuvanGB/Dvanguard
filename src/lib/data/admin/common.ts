@@ -36,6 +36,12 @@ export function parseRange(range: string | null | undefined) {
   if (range === "30d") {
     return { label: "30d", from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) };
   }
+  if (range === "1y") {
+    return { label: "1y", from: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) };
+  }
+  if (range === "all") {
+    return { label: "all", from: new Date(0) };
+  }
 
   return { label: "7d", from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) };
 }

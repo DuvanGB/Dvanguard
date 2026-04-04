@@ -33,7 +33,7 @@ export type SiteAnalyticsSnapshot = {
 };
 
 export type OwnerAnalyticsResult = {
-  range: "7d" | "30d" | "24h";
+  range: "7d" | "30d" | "24h" | "1y" | "all";
   from: string;
   sites: SiteAnalyticsSnapshot[];
   summary: {

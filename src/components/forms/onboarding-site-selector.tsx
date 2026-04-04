@@ -72,13 +72,6 @@ export function OnboardingSiteSelector({ sites }: Props) {
           );
         })}
       </div>
-
-      <div style={{ textAlign: "center" }}>
-        <Link className="btn-ghost" href="/dashboard">
-          <span className="material-symbols-outlined" style={{ fontSize: "1rem" }}>arrow_back</span>
-          Volver al dashboard
-        </Link>
-      </div>
     </section>
   );
 }
