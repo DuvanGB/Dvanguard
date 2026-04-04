@@ -287,55 +287,79 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
 
   return (
     <div className="stack">
-      <section className="card stack">
-        <div className="stack stack-sm">
-          <h1>Billing</h1>
-          <p className="muted">Wompi es ahora la base de pagos del producto: tarjeta para renovación y PSE/Nequi/banco para comprar tiempo Pro.</p>
+      {/* ── Plan Status Strip ─────────────────────────── */}
+      <div className="billing-status-strip">
+        <div className="billing-status-card">
+          <div className="billing-status-icon">
+            <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>star</span>
+          </div>
+          <div className="stack stack-xs">
+            <small className="billing-status-label">Plan actual</small>
+            <strong>{summary.plan.toUpperCase()}</strong>
+          </div>
         </div>
 
-        <div className="catalog-grid">
-          <article className="card stack">
-            <small className="muted">Plan actual</small>
-            <strong style={{ fontSize: "1.5rem" }}>{summary.plan.toUpperCase()}</strong>
-            <p className="muted">{statusLabel(summary)}</p>
-            {summary.currentPeriodEnd ? <small>Hasta: {formatDate(summary.currentPeriodEnd)}</small> : null}
-          </article>
+        <div className="billing-status-card">
+          <div className="billing-status-icon">
+            <span className="material-symbols-outlined">sync</span>
+          </div>
+          <div className="stack stack-xs">
+            <small className="billing-status-label">{statusLabel(summary)}</small>
+            <strong>{summary.rail === "card_subscription" ? "Tarjeta recurrente" : summary.rail === "manual_term_purchase" ? "Tiempo manual" : "Sin rail"}</strong>
+          </div>
+        </div>
 
-          <article className="card stack">
-            <small className="muted">Rail activo</small>
-            <strong style={{ fontSize: "1.3rem" }}>{summary.rail === "card_subscription" ? "Tarjeta recurrente" : summary.rail === "manual_term_purchase" ? "Tiempo manual" : "Sin rail"}</strong>
-            <p className="muted">{paymentMethodLabel(summary)}</p>
-          </article>
-
-          <article className="card stack">
-            <small className="muted">Método guardado</small>
-            <strong style={{ fontSize: "1.3rem" }}>
-              {summary.paymentMethod?.last4 ? `${summary.paymentMethod.brand ?? "tarjeta"} •••• ${summary.paymentMethod.last4}` : "Sin tarjeta guardada"}
+        <div className="billing-status-card">
+          <div className="billing-status-icon">
+            <span className="material-symbols-outlined">credit_card</span>
+          </div>
+          <div className="stack stack-xs">
+            <small className="billing-status-label">Método guardado</small>
+            <strong>
+              {summary.paymentMethod?.last4
+                ? `${summary.paymentMethod.brand ?? "Tarjeta"} •••• ${summary.paymentMethod.last4}`
+                : "Sin tarjeta"}
             </strong>
-            <p className="muted">
-              {summary.paymentMethod?.expMonth && summary.paymentMethod?.expYear
-                ? `Expira ${String(summary.paymentMethod.expMonth).padStart(2, "0")}/${summary.paymentMethod.expYear}`
-                : "Si compras con tarjeta, la usamos también para renovaciones."}
-            </p>
-          </article>
+            {summary.paymentMethod?.expMonth && summary.paymentMethod?.expYear ? (
+              <small className="muted">Expira {String(summary.paymentMethod.expMonth).padStart(2, "0")}/{summary.paymentMethod.expYear}</small>
+            ) : null}
+          </div>
         </div>
 
-        {message ? <small className="muted">{message}</small> : null}
-        {notices.length ? (
-          <div className="stack stack-sm">
-            {notices.map((notice) => (
-              <small key={notice} className="muted">
-                {notice}
-              </small>
-            ))}
+        {summary.currentPeriodEnd ? (
+          <div className="billing-status-card">
+            <div className="billing-status-icon">
+              <span className="material-symbols-outlined">event</span>
+            </div>
+            <div className="stack stack-xs">
+              <small className="billing-status-label">Vencimiento</small>
+              <strong>{formatDate(summary.currentPeriodEnd)}</strong>
+            </div>
           </div>
         ) : null}
-      </section>
+      </div>
 
-      <section className="card stack">
-        <div className="stack stack-xs">
-          <h2>{copy["billing.legal.title"]}</h2>
-          <p className="muted">{copy["billing.legal.description"]}</p>
+      {/* ── Alerts ────────────────────────────────────── */}
+      {message ? <div className="billing-alert"><span className="material-symbols-outlined">info</span>{message}</div> : null}
+      {notices.length ? (
+        <div className="stack stack-sm">
+          {notices.map((notice) => (
+            <div key={notice} className="billing-alert">
+              <span className="material-symbols-outlined">notifications</span>
+              {notice}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {/* ── Legal Section ─────────────────────────────── */}
+      <section className="billing-section glass-panel">
+        <div className="billing-section-head">
+          <span className="material-symbols-outlined billing-section-icon">gavel</span>
+          <div className="stack stack-xs">
+            <h2>{copy["billing.legal.title"]}</h2>
+            <p className="muted">{copy["billing.legal.description"]}</p>
+          </div>
         </div>
 
         <div className="billing-legal-checks">
@@ -352,155 +376,208 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
             </span>
           </label>
         </div>
-        <div className="stack stack-sm">
+
+        <div className="billing-wompi-links">
           {summary.wompiAcceptance.termsPermalink ? (
             <a href={summary.wompiAcceptance.termsPermalink} target="_blank" rel="noreferrer">
-              Ver contrato comercial de Wompi
+              <span className="material-symbols-outlined" style={{ fontSize: "0.9rem" }}>open_in_new</span>
+              Contrato comercial Wompi
             </a>
           ) : null}
           {summary.wompiAcceptance.personalDataPermalink ? (
             <a href={summary.wompiAcceptance.personalDataPermalink} target="_blank" rel="noreferrer">
-              Ver autorización de tratamiento de datos de Wompi
+              <span className="material-symbols-outlined" style={{ fontSize: "0.9rem" }}>open_in_new</span>
+              Tratamiento de datos Wompi
             </a>
           ) : null}
         </div>
+
         <small className="muted">
           {summary.legal.accepted ? `Aceptado el ${formatDate(summary.legal.acceptedAt)}` : "Todavía no has registrado la aceptación legal."}
         </small>
       </section>
 
-      <section className="card stack">
-        <div className="stack stack-xs">
-          <h2>{copy["billing.card.title"]}</h2>
-          <p className="muted">{copy["billing.card.description"]}</p>
-        </div>
+      {/* ── Asymmetric Grid: Card + Manual ────────────── */}
+      <div className="billing-grid">
+        {/* ── Recurring Card Payment ─────────────────── */}
+        <section className="billing-section billing-section-main glass-panel">
+          <div className="billing-section-head">
+            <span className="material-symbols-outlined billing-section-icon">credit_card</span>
+            <div className="stack stack-xs">
+              <h2>{copy["billing.card.title"]}</h2>
+              <p className="muted">{copy["billing.card.description"]}</p>
+            </div>
+          </div>
 
-        <div className="catalog-grid">
-          <label>
-            Nombre del titular
-            <input value={cardForm.cardholderName} onChange={(event) => setCardForm((prev) => ({ ...prev, cardholderName: event.target.value }))} />
-          </label>
-          <label>
-            Teléfono
-            <input value={cardForm.phoneNumber} onChange={(event) => setCardForm((prev) => ({ ...prev, phoneNumber: event.target.value }))} placeholder="+573001234567" />
-          </label>
-          <label>
-            Número de tarjeta
-            <input value={cardForm.cardNumber} onChange={(event) => setCardForm((prev) => ({ ...prev, cardNumber: event.target.value }))} placeholder="4242 4242 4242 4242" />
-          </label>
-          <label>
-            CVC
-            <input value={cardForm.cvc} onChange={(event) => setCardForm((prev) => ({ ...prev, cvc: event.target.value }))} placeholder="123" />
-          </label>
-          <label>
-            Mes exp.
-            <input value={cardForm.expMonth} onChange={(event) => setCardForm((prev) => ({ ...prev, expMonth: event.target.value }))} placeholder="12" />
-          </label>
-          <label>
-            Año exp.
-            <input value={cardForm.expYear} onChange={(event) => setCardForm((prev) => ({ ...prev, expYear: event.target.value }))} placeholder="29" />
-          </label>
-        </div>
+          <div className="billing-form-grid">
+            <label className="billing-field billing-field-wide">
+              <small>Nombre del titular</small>
+              <input value={cardForm.cardholderName} onChange={(event) => setCardForm((prev) => ({ ...prev, cardholderName: event.target.value }))} placeholder="Como aparece en la tarjeta" />
+            </label>
+            <label className="billing-field">
+              <small>Teléfono</small>
+              <input value={cardForm.phoneNumber} onChange={(event) => setCardForm((prev) => ({ ...prev, phoneNumber: event.target.value }))} placeholder="+573001234567" />
+            </label>
+            <label className="billing-field">
+              <small>Número de tarjeta</small>
+              <input value={cardForm.cardNumber} onChange={(event) => setCardForm((prev) => ({ ...prev, cardNumber: event.target.value }))} placeholder="4242 4242 4242 4242" />
+            </label>
+            <label className="billing-field">
+              <small>Mes exp.</small>
+              <input value={cardForm.expMonth} onChange={(event) => setCardForm((prev) => ({ ...prev, expMonth: event.target.value }))} placeholder="12" />
+            </label>
+            <label className="billing-field">
+              <small>Año exp.</small>
+              <input value={cardForm.expYear} onChange={(event) => setCardForm((prev) => ({ ...prev, expYear: event.target.value }))} placeholder="29" />
+            </label>
+            <label className="billing-field">
+              <small>CVC</small>
+              <input type="password" value={cardForm.cvc} onChange={(event) => setCardForm((prev) => ({ ...prev, cvc: event.target.value }))} placeholder="•••" />
+            </label>
+          </div>
 
-        <div className="flex-wrap">
-          <button type="button" className="btn-primary" disabled={!cardReady || isPending} onClick={() => void handleCardAction("month")}>
-            Pagar mensual con tarjeta
-          </button>
-          <button type="button" className="btn-secondary" disabled={!cardReady || isPending} onClick={() => void handleCardAction("year")}>
-            Pagar anual con tarjeta
-          </button>
-          {summary.rail === "card_subscription" && summary.renewsAutomatically ? (
-            <button type="button" className="btn-secondary btn-danger" onClick={() => void cancelAutoRenew()}>
-              Cancelar renovación
+          <div className="billing-actions">
+            <button type="button" className="btn-primary" disabled={!cardReady || isPending} onClick={() => void handleCardAction("month")}>
+              <span className="material-symbols-outlined" style={{ fontSize: "1.1rem" }}>encrypted</span>
+              Pagar mensual
             </button>
-          ) : null}
-          {summary.rail === "card_subscription" && summary.interval !== "month" ? (
-            <button type="button" className="btn-secondary" onClick={() => void changeInterval("month")}>
-              Próximo cobro mensual
+            <button type="button" className="btn-secondary" disabled={!cardReady || isPending} onClick={() => void handleCardAction("year")}>
+              Pagar anual
             </button>
+          </div>
+
+          {summary.rail === "card_subscription" ? (
+            <div className="billing-card-manage">
+              {summary.renewsAutomatically ? (
+                <button type="button" className="btn-secondary btn-sm btn-danger" onClick={() => void cancelAutoRenew()}>
+                  Cancelar renovación
+                </button>
+              ) : null}
+              {summary.interval !== "month" ? (
+                <button type="button" className="btn-secondary btn-sm" onClick={() => void changeInterval("month")}>
+                  Cambiar a mensual
+                </button>
+              ) : null}
+              {summary.interval !== "year" ? (
+                <button type="button" className="btn-secondary btn-sm" onClick={() => void changeInterval("year")}>
+                  Cambiar a anual
+                </button>
+              ) : null}
+            </div>
           ) : null}
-          {summary.rail === "card_subscription" && summary.interval !== "year" ? (
-            <button type="button" className="btn-secondary" onClick={() => void changeInterval("year")}>
-              Próximo cobro anual
+
+          <div className="billing-security-badge">
+            <span className="material-symbols-outlined" style={{ fontSize: "0.85rem" }}>lock</span>
+            Encriptación de grado bancario · Procesado por Wompi
+          </div>
+        </section>
+
+        {/* ── One-Time Payments Side ─────────────────── */}
+        <section className="billing-section billing-section-side stack">
+          <div className="billing-section-head">
+            <span className="material-symbols-outlined billing-section-icon">shopping_bag</span>
+            <div className="stack stack-xs">
+              <h2>{copy["billing.manual.title"]}</h2>
+              <p className="muted">{copy["billing.manual.description"]}</p>
+            </div>
+          </div>
+
+          <div className="billing-manual-fields">
+            <label className="billing-field">
+              <small>Nombre / razón social</small>
+              <input value={manualForm.customerName} onChange={(event) => setManualForm((prev) => ({ ...prev, customerName: event.target.value }))} />
+            </label>
+            <label className="billing-field">
+              <small>Teléfono</small>
+              <input value={manualForm.phoneNumber} onChange={(event) => setManualForm((prev) => ({ ...prev, phoneNumber: event.target.value }))} />
+            </label>
+            <label className="billing-field">
+              <small>Tipo doc.</small>
+              <input value={manualForm.legalIdType} onChange={(event) => setManualForm((prev) => ({ ...prev, legalIdType: event.target.value }))} placeholder="CC" />
+            </label>
+            <label className="billing-field">
+              <small>Documento</small>
+              <input value={manualForm.legalId} onChange={(event) => setManualForm((prev) => ({ ...prev, legalId: event.target.value }))} />
+            </label>
+            <label className="billing-field">
+              <small>Tipo usuario PSE</small>
+              <select value={manualForm.userType} onChange={(event) => setManualForm((prev) => ({ ...prev, userType: event.target.value as "0" | "1" }))}>
+                <option value="0">Persona</option>
+                <option value="1">Empresa</option>
+              </select>
+            </label>
+            <label className="billing-field">
+              <small>Código banco PSE</small>
+              <input value={manualForm.financialInstitutionCode} onChange={(event) => setManualForm((prev) => ({ ...prev, financialInstitutionCode: event.target.value }))} placeholder="Código del banco" />
+            </label>
+          </div>
+
+          <div className="billing-manual-methods">
+            <button type="button" className="billing-method-btn" onClick={() => void handleManualCheckout("pse")}>
+              <span className="material-symbols-outlined">account_balance</span>
+              <div>
+                <strong>PSE</strong>
+                <small>Banca en línea</small>
+              </div>
+              <span className="material-symbols-outlined billing-method-arrow">chevron_right</span>
             </button>
-          ) : null}
-        </div>
-      </section>
+            <button type="button" className="billing-method-btn" onClick={() => void handleManualCheckout("nequi")}>
+              <span className="material-symbols-outlined">phone_android</span>
+              <div>
+                <strong>Nequi</strong>
+                <small>Pago móvil</small>
+              </div>
+              <span className="material-symbols-outlined billing-method-arrow">chevron_right</span>
+            </button>
+            <button type="button" className="billing-method-btn" onClick={() => void handleManualCheckout("bank_transfer")}>
+              <span className="material-symbols-outlined">swap_horiz</span>
+              <div>
+                <strong>Transferencia</strong>
+                <small>Bancaria directa</small>
+              </div>
+              <span className="material-symbols-outlined billing-method-arrow">chevron_right</span>
+            </button>
+          </div>
 
-      <section className="card stack">
-        <div className="stack stack-xs">
-          <h2>{copy["billing.manual.title"]}</h2>
-          <p className="muted">{copy["billing.manual.description"]}</p>
-        </div>
+          <div className="billing-info-box">
+            <span className="material-symbols-outlined">info</span>
+            <p>La compra única no permite renovación automática. Deberás renovar antes del vencimiento.</p>
+          </div>
+        </section>
+      </div>
 
-        <div className="catalog-grid">
-          <label>
-            Nombre / razón social
-            <input value={manualForm.customerName} onChange={(event) => setManualForm((prev) => ({ ...prev, customerName: event.target.value }))} />
-          </label>
-          <label>
-            Teléfono
-            <input value={manualForm.phoneNumber} onChange={(event) => setManualForm((prev) => ({ ...prev, phoneNumber: event.target.value }))} />
-          </label>
-          <label>
-            Tipo de documento
-            <input value={manualForm.legalIdType} onChange={(event) => setManualForm((prev) => ({ ...prev, legalIdType: event.target.value }))} placeholder="CC" />
-          </label>
-          <label>
-            Documento
-            <input value={manualForm.legalId} onChange={(event) => setManualForm((prev) => ({ ...prev, legalId: event.target.value }))} />
-          </label>
-          <label>
-            Usuario PSE
-            <select value={manualForm.userType} onChange={(event) => setManualForm((prev) => ({ ...prev, userType: event.target.value as "0" | "1" }))}>
-              <option value="0">Persona</option>
-              <option value="1">Empresa</option>
-            </select>
-          </label>
-          <label>
-            Código banco PSE
-            <input
-              value={manualForm.financialInstitutionCode}
-              onChange={(event) => setManualForm((prev) => ({ ...prev, financialInstitutionCode: event.target.value }))}
-              placeholder="Busca el código en tu banco / Wompi"
-            />
-          </label>
-        </div>
-
-        <div className="flex-wrap">
-          <button type="button" className="btn-secondary" onClick={() => void handleManualCheckout("pse")}>
-            Pagar con PSE
-          </button>
-          <button type="button" className="btn-secondary" onClick={() => void handleManualCheckout("nequi")}>
-            Pagar con Nequi
-          </button>
-          <button type="button" className="btn-secondary" onClick={() => void handleManualCheckout("bank_transfer")}>
-            Pagar por banco
-          </button>
-        </div>
-      </section>
-
+      {/* ── Switch to Card (if manual active) ─────────── */}
       {summary.rail === "manual_term_purchase" && summary.currentPeriodEnd ? (
-        <section className="card stack">
-          <h2>{copy["billing.switch.title"]}</h2>
-          <p className="muted">
-            {copy["billing.switch.description"]} Tienes tiempo Pro manual activo hasta el {formatDate(summary.currentPeriodEnd)}.
-          </p>
+        <section className="billing-section glass-panel">
+          <div className="billing-section-head">
+            <span className="material-symbols-outlined billing-section-icon">swap_horiz</span>
+            <div className="stack stack-xs">
+              <h2>{copy["billing.switch.title"]}</h2>
+              <p className="muted">
+                {copy["billing.switch.description"]} Tienes tiempo Pro manual activo hasta el {formatDate(summary.currentPeriodEnd)}.
+              </p>
+            </div>
+          </div>
           <button type="button" className="btn-secondary" disabled={!cardReady} onClick={() => void handleCardAction("month", true)}>
+            <span className="material-symbols-outlined" style={{ fontSize: "1rem" }}>credit_card</span>
             Registrar tarjeta para renovar al vencimiento
           </button>
         </section>
       ) : null}
 
-      <section className="card stack">
-        <div className="stack stack-xs">
-          <h2>{copy["billing.transactions.title"]}</h2>
-          <p className="muted">{copy["billing.transactions.description"]}</p>
+      {/* ── Transaction History ───────────────────────── */}
+      <section className="billing-section glass-panel">
+        <div className="billing-section-head">
+          <span className="material-symbols-outlined billing-section-icon">receipt_long</span>
+          <div className="stack stack-xs">
+            <h2>{copy["billing.transactions.title"]}</h2>
+            <p className="muted">{copy["billing.transactions.description"]}</p>
+          </div>
         </div>
 
         {transactions.length ? (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
+          <div className="billing-table-wrap">
+            <table className="billing-table">
               <thead>
                 <tr>
                   <th>Fecha</th>
@@ -513,13 +590,26 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
               <tbody>
                 {transactions.map((transaction) => (
                   <tr key={transaction.id}>
-                    <td>{formatDate(transaction.created_at)}</td>
-                    <td>{transaction.method}</td>
-                    <td>{transaction.status}</td>
-                    <td>{formatMoney(transaction.amount_in_cents, transaction.currency)}</td>
+                    <td>
+                      <span>{formatDate(transaction.created_at)}</span>
+                    </td>
+                    <td>
+                      <div className="billing-table-method">
+                        <span className="material-symbols-outlined" style={{ fontSize: "0.9rem" }}>
+                          {transaction.method === "card" ? "credit_card" : transaction.method === "pse" ? "account_balance" : "payments"}
+                        </span>
+                        {transaction.method}
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`billing-table-status ${transaction.status === "APPROVED" ? "is-ok" : transaction.status === "ERROR" || transaction.status === "DECLINED" ? "is-error" : ""}`}>
+                        {transaction.status}
+                      </span>
+                    </td>
+                    <td><strong>{formatMoney(transaction.amount_in_cents, transaction.currency)}</strong></td>
                     <td>
                       {transaction.checkout_url ? (
-                        <a href={transaction.checkout_url} target="_blank" rel="noreferrer">
+                        <a href={transaction.checkout_url} target="_blank" rel="noreferrer" className="billing-table-action">
                           Ver pago
                         </a>
                       ) : (
