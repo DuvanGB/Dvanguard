@@ -124,38 +124,167 @@ export default async function HomePage() {
           </div>
 
           <aside className="marketing-hero-panel">
-            <div className="marketing-hero-panel-dots">
-              <span><i /><i /><i /></span>
-              <small>{t("home.preview_label")}</small>
-            </div>
-            <div style={{ position: "relative" }}>
-              <div
-                className="marketing-hero-img"
-                style={{
-                  background: "linear-gradient(135deg, var(--surface-low) 0%, var(--surface-high) 100%)",
-                  display: "flex",
-                  alignItems: "flex-end",
-                  justifyContent: "center",
-                  fontSize: "0.85rem",
-                  color: "var(--on-surface-variant)",
-                  padding: "2rem",
-                }}
-              >
-                <div className="marketing-hero-overlay">
-                  <h3>Vanguard Real Estate</h3>
-                  <div className="accent-bar" />
+            {/* ── Desktop browser mockup (background) ── */}
+            <div className="hero-desktop-frame">
+              <div className="hero-desktop-toolbar">
+                <span className="hero-desktop-dots"><i /><i /><i /></span>
+                <span className="hero-desktop-url">
+                  <span className="material-symbols-outlined">lock</span>
+                  vanguardbrews.dvanguard.com
+                </span>
+                <span />
+              </div>
+              <div className="hero-desktop-viewport">
+                <div className="hero-scanline hero-scanline-desktop" />
+                {/* Desktop site — wide layout */}
+                <div className="hero-desk-site">
+                  {/* Nav */}
+                  <div className="hero-desk-nav">
+                    <span className="hero-desk-logo">Vanguard Brews</span>
+                    <div className="hero-desk-nav-links">
+                      <span>Inicio</span><span>Menú</span><span>Reservas</span><span>Contacto</span>
+                    </div>
+                  </div>
+                  {/* Hero banner */}
+                  <div className="hero-desk-banner">
+                    <div className="hero-desk-banner-content">
+                      <h4>Café de Especialidad</h4>
+                      <p>Experiencias únicas en cada taza, cultivadas con pasión.</p>
+                      <div className="hero-desk-banner-btns">
+                        <span className="hero-desk-btn-primary">Ver Menú</span>
+                        <span className="hero-desk-btn-secondary">Reservar Mesa</span>
+                      </div>
+                    </div>
+                    <div className="hero-desk-banner-visual">
+                      <div className="hero-desk-circle" />
+                      <div className="hero-desk-circle hero-desk-circle-2" />
+                    </div>
+                  </div>
+                  {/* Feature cards row */}
+                  <div className="hero-desk-features">
+                    <div className="hero-desk-feature-card">
+                      <span className="material-symbols-outlined">local_cafe</span>
+                      <span>Café Premium</span>
+                    </div>
+                    <div className="hero-desk-feature-card">
+                      <span className="material-symbols-outlined">restaurant</span>
+                      <span>Brunch</span>
+                    </div>
+                    <div className="hero-desk-feature-card">
+                      <span className="material-symbols-outlined">wifi</span>
+                      <span>Coworking</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Desktop floating indicators */}
+                <div className="hero-desk-analytics">
+                  <div className="hero-desk-analytics-header">
+                    <span className="material-symbols-outlined">trending_up</span>
+                    <span>+42% visitas</span>
+                  </div>
+                  <div className="hero-desk-bar-row">
+                    <div className="hero-desk-bar" style={{ width: "85%" }} />
+                    <div className="hero-desk-bar hero-desk-bar-2" style={{ width: "62%" }} />
+                    <div className="hero-desk-bar hero-desk-bar-3" style={{ width: "45%" }} />
+                  </div>
                 </div>
               </div>
-              <div className="marketing-wa-bubble">
-                <div className="marketing-wa-bubble-icon">
-                  <span className="material-symbols-outlined">chat</span>
+            </div>
+
+            {/* ── Phone mockup (foreground, overlaps desktop) ── */}
+            <div className="hero-phone-frame">
+              <div className="hero-phone-toolbar">
+                <span className="hero-phone-dots"><i /><i /><i /></span>
+                <span className="hero-phone-live">
+                  <i className="hero-live-dot" /> Live
+                </span>
+              </div>
+
+              <div className="hero-phone-viewport">
+                <div className="hero-scanline" />
+
+                <div className="hero-site-content">
+                  <div className="hero-site-banner">
+                    <div className="hero-site-banner-overlay">
+                      <h3>Vanguard Brews</h3>
+                    </div>
+                  </div>
+
+                  <div className="hero-site-body">
+                    <div className="hero-site-accent-bar" />
+                    <p className="hero-site-label">MENÚ DEL DÍA</p>
+                    <div className="hero-site-menu-item">
+                      <span>Cold Brew Signature</span>
+                      <span className="hero-site-price">$4.50</span>
+                    </div>
+                    <div className="hero-site-menu-item">
+                      <span>Avocado Toast Art</span>
+                      <span className="hero-site-price">$12.00</span>
+                    </div>
+                    <div className="hero-site-cta-row">
+                      <div className="hero-site-cta-btn">
+                        <span className="material-symbols-outlined">location_on</span>
+                        <small>Visitarnos</small>
+                      </div>
+                      <div className="hero-site-cta-btn">
+                        <span className="material-symbols-outlined">auto_stories</span>
+                        <small>Reservar</small>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <p>{t("home.wa_new_message")}</p>
-                  <p>&quot;{t("home.wa_sample").replace(/^"|"$/g, "")}&quot;</p>
+
+                <div className="hero-notifications">
+                  <div className="hero-notif-card hero-notif-lead">
+                    <div className="hero-notif-icon hero-notif-icon-primary">
+                      <span className="material-symbols-outlined">notifications_active</span>
+                    </div>
+                    <div>
+                      <p className="hero-notif-title">{t("home.wa_new_message")}</p>
+                      <p className="hero-notif-desc">Juan S. acaba de suscribirse</p>
+                    </div>
+                  </div>
+                  <div className="hero-notif-card hero-notif-wa">
+                    <div className="hero-notif-icon hero-notif-icon-wa">
+                      <span className="material-symbols-outlined">chat</span>
+                    </div>
+                    <div>
+                      <p className="hero-notif-title">Nueva Orden</p>
+                      <p className="hero-notif-desc">&quot;{t("home.wa_sample").replace(/^"|"$/g, "")}&quot;</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
+
+            {/* ── Floating editing tools ── */}
+            <div className="hero-tool-palette">
+              <i className="hero-swatch" style={{ background: "var(--primary)" }} />
+              <i className="hero-swatch" style={{ background: "var(--secondary)", opacity: 0.5 }} />
+              <i className="hero-swatch" style={{ background: "var(--accent)", opacity: 0.5 }} />
+              <span className="material-symbols-outlined">palette</span>
+            </div>
+
+            <div className="hero-tool-drag">
+              <span className="material-symbols-outlined">drag_indicator</span>
+              <span>Sección 02</span>
+            </div>
+
+            <div className="hero-tool-cursor">
+              <span className="hero-cursor-label">Editar Texto</span>
+              <span className="hero-cursor-blink" />
+            </div>
+
+            {/* ── Caption ── */}
+            <div className="hero-panel-caption">
+              <p className="hero-panel-caption-label">{t("home.preview_label")}</p>
+              <h3>Crea. Edita. Crece.</h3>
+            </div>
+
+            {/* Decorative blurs */}
+            <div className="hero-blur hero-blur-1" />
+            <div className="hero-blur hero-blur-2" />
           </aside>
         </section>
 
