@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireAdminApiUser } from "@/lib/admin-auth";
 import { recordPlatformEvent } from "@/lib/platform-events";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -9,6 +10,11 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
   const auth = await requireAdminApiUser();
   if (!auth.user) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  const rate = enforceRateLimit({ key: `admin:site-delete:${auth.user.id}`, limit: 10, windowMs: 60_000 });
+  if (!rate.allowed) {
+    return NextResponse.json({ error: "Too Many Requests" }, { status: 429 });
   }
 
   const admin = getSupabaseAdminClient();

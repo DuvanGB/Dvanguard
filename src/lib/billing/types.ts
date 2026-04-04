@@ -28,8 +28,6 @@ export type UsageSnapshot = {
   grace_until: string | null;
 };
 
-export type ProRequestStatus = "pending" | "approved" | "rejected";
-
 export type BillingLegalAcceptanceStatus = {
   accepted: boolean;
   acceptedAt: string | null;

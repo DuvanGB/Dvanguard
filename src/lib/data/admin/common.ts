@@ -1,3 +1,21 @@
+export type AdminCardTone = "neutral" | "positive" | "warning" | "danger" | "accent";
+
+export function formatPercent(value: number | null | undefined) {
+  return value === null || value === undefined ? "-" : `${value}%`;
+}
+
+export function formatLatency(p50: number | null, p95: number | null) {
+  const left = p50 === null ? "-" : `${p50}ms`;
+  const right = p95 === null ? "-" : `${p95}ms`;
+  return `${left} / ${right}`;
+}
+
+export function formatNumber(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(value);
+}
+
 export function parsePagination(input: { page?: string | null; pageSize?: string | null }) {
   const rawPage = Number(input.page ?? "1");
   const rawPageSize = Number(input.pageSize ?? "20");

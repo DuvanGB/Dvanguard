@@ -1,6 +1,43 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { parseRange, percentile } from "@/lib/data/admin/common";
 
+export type AdminTotals = {
+  totalUsers: number;
+  totalSites: number;
+  publishedSites: number;
+  totalAiJobs: number;
+  failedAiJobs: number;
+  proUsers: number;
+  totalVisits: number;
+  totalWhatsappClicks: number;
+};
+
+export async function getAdminTotals(): Promise<AdminTotals> {
+  const admin = getSupabaseAdminClient();
+
+  const [users, sites, publishedSites, aiJobs, failedJobs, proUsers, visits, waClicks] = await Promise.all([
+    admin.from("profiles").select("id", { count: "exact", head: true }),
+    admin.from("sites").select("id", { count: "exact", head: true }),
+    admin.from("sites").select("id", { count: "exact", head: true }).eq("status", "published"),
+    admin.from("ai_jobs").select("id", { count: "exact", head: true }),
+    admin.from("ai_jobs").select("id", { count: "exact", head: true }).eq("status", "failed"),
+    admin.from("user_plans").select("user_id", { count: "exact", head: true }).eq("plan_code", "pro"),
+    admin.from("site_analytics_events").select("id", { count: "exact", head: true }).eq("event_type", "visit"),
+    admin.from("site_analytics_events").select("id", { count: "exact", head: true }).eq("event_type", "whatsapp_click")
+  ]);
+
+  return {
+    totalUsers: users.count ?? 0,
+    totalSites: sites.count ?? 0,
+    publishedSites: publishedSites.count ?? 0,
+    totalAiJobs: aiJobs.count ?? 0,
+    failedAiJobs: failedJobs.count ?? 0,
+    proUsers: proUsers.count ?? 0,
+    totalVisits: visits.count ?? 0,
+    totalWhatsappClicks: waClicks.count ?? 0
+  };
+}
+
 export type AdminMetrics = {
   range: string;
   sitesCreated: number;
@@ -13,9 +50,7 @@ export type AdminMetrics = {
   publishIn24hRate: number | null;
   limitHitAiCount: number;
   limitHitPublishCount: number;
-  proRequestsPending: number;
-  proRequestsApproved: number;
-  proRequestsRejected: number;
+
   firstResultAcceptanceRate: number | null;
   voiceUsageRate: number | null;
   onboardingRefineFallbackRate: number | null;
@@ -41,7 +76,6 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
     { data: jobs },
     { data: signups },
     { data: platformEvents },
-    { data: proRequests },
     analyticsQuery
   ] = await Promise.all([
       admin.from("sites").select("id", { count: "exact" }).gte("created_at", fromIso),
@@ -63,7 +97,6 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
           "template.selected",
           "template.recommended"
         ]),
-      admin.from("pro_requests").select("status, created_at").gte("created_at", fromIso),
       admin.from("site_analytics_events").select("event_type").gte("occurred_at", fromIso)
     ]);
 
@@ -130,10 +163,6 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
 
   const limitHitAiCount = (platformEvents ?? []).filter((event) => event.event_type === "plan.limit_hit.ai").length;
   const limitHitPublishCount = (platformEvents ?? []).filter((event) => event.event_type === "plan.limit_hit.publish").length;
-  const proRequestsPending = (proRequests ?? []).filter((row) => row.status === "pending").length;
-  const proRequestsApproved = (proRequests ?? []).filter((row) => row.status === "approved").length;
-  const proRequestsRejected = (proRequests ?? []).filter((row) => row.status === "rejected").length;
-
   const firstAttemptEvents = (platformEvents ?? []).filter((event) => event.event_type === "site.generation.first_attempt_done");
   const acceptedEvents = (platformEvents ?? []).filter((event) => event.event_type === "site.first_result.accepted");
   const acceptedV2Events = (platformEvents ?? []).filter((event) => event.event_type === "site.v3.first_result.accepted");
@@ -234,9 +263,6 @@ export async function getAdminMetrics(rangeParam?: string | null): Promise<Admin
     publishIn24hRate,
     limitHitAiCount,
     limitHitPublishCount,
-    proRequestsPending,
-    proRequestsApproved,
-    proRequestsRejected,
     firstResultAcceptanceRate,
     v2FirstResultAcceptanceRate,
     voiceUsageRate,

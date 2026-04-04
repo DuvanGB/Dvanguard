@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireAdminApiUser } from "@/lib/admin-auth";
 import { listPlatformCopyEntries, upsertPlatformCopyEntry } from "@/lib/platform-config";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 const bodySchema = z.object({
@@ -28,6 +29,11 @@ export async function POST(request: NextRequest) {
   const auth = await requireAdminApiUser();
   if (!auth.user) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  const rate = enforceRateLimit({ key: `admin:copy:${auth.user.id}`, limit: 30, windowMs: 60_000 });
+  if (!rate.allowed) {
+    return NextResponse.json({ error: "Too Many Requests" }, { status: 429 });
   }
 
   const body = await request.json().catch(() => ({}));

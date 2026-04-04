@@ -10,7 +10,7 @@ const navLinks = [
   { href: "/pricing", label: "Planes", icon: "payments" },
 ];
 
-export function PlatformNav({ isAuthenticated = false, isStatic = false }: { isAuthenticated?: boolean; isStatic?: boolean }) {
+export function PlatformNav({ isAuthenticated = false, isStatic = false, hideLinks = false }: { isAuthenticated?: boolean; isStatic?: boolean; hideLinks?: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -23,6 +23,7 @@ export function PlatformNav({ isAuthenticated = false, isStatic = false }: { isA
               <span className="material-symbols-outlined platform-logo-icon">navigation</span>
               DVanguard
             </Link>
+            {!hideLinks && (
             <div className="platform-nav-links">
               {navLinks.map((l) => (
                 <Link
@@ -34,10 +35,11 @@ export function PlatformNav({ isAuthenticated = false, isStatic = false }: { isA
                 </Link>
               ))}
             </div>
+            )}
           </div>
           <div className="platform-topbar-right">
             <ThemeToggle />
-            {isAuthenticated ? (
+            {!hideLinks && (isAuthenticated ? (
               <Link href="/dashboard" className="btn-primary platform-nav-cta">
                 Dashboard
               </Link>
@@ -45,12 +47,13 @@ export function PlatformNav({ isAuthenticated = false, isStatic = false }: { isA
               <Link href="/signin" className="btn-primary platform-nav-cta">
                 Comenzar
               </Link>
-            )}
+            ))}
           </div>
         </nav>
       </header>
 
       {/* Mobile bottom nav */}
+      {!hideLinks && (
       <nav className="platform-bottom-nav">
         {navLinks.map((l) => (
           <Link
@@ -70,6 +73,7 @@ export function PlatformNav({ isAuthenticated = false, isStatic = false }: { isA
           <span>Cuenta</span>
         </Link>
       </nav>
+      )}
     </>
   );
 }

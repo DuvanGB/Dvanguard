@@ -110,7 +110,12 @@ export default async function AdminSitesPage({
                 </div>
 
                 <div className="admin-site-card-actions">
-                  <SiteModerationActions siteId={item.id} status={item.status} />
+                  <SiteModerationActions
+                    siteId={item.id}
+                    status={item.status}
+                    subdomain={item.subdomain}
+                    primaryDomain={item.primary_domain}
+                  />
                 </div>
               </article>
             ))}

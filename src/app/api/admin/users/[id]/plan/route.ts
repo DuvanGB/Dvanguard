@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireAdminApiUser } from "@/lib/admin-auth";
 import { assignUserPlan } from "@/lib/billing/requests";
 import { recordPlatformEvent } from "@/lib/platform-events";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 const bodySchema = z.object({
@@ -16,6 +17,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   if (!auth.user) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  const rate = enforceRateLimit({ key: `admin:user-plan:${auth.user.id}`, limit: 20, windowMs: 60_000 });
+  if (!rate.allowed) {
+    return NextResponse.json({ error: "Too Many Requests" }, { status: 429 });
   }
 
   const body = await request.json().catch(() => ({}));
