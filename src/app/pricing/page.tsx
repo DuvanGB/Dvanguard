@@ -35,41 +35,46 @@ export default async function PricingPage() {
   return (
     <>
     <PlatformNav isAuthenticated={!!user} />
-    <main className="container stack" style={{ paddingTop: "5.5rem" }}>
-      <header className="stack">
-        <h1>{copy["pricing.hero.title"]}</h1>
-        <p>{copy["pricing.hero.description"]}</p>
-      </header>
+    <main className="pricing-shell page-with-topbar">
+      <div className="container stack stack-lg">
+        <header className="pricing-hero stack stack-sm">
+          <h1>{copy["pricing.hero.title"]}</h1>
+          <p>{copy["pricing.hero.description"]}</p>
+        </header>
 
-      <section className="catalog-grid">
-        {plans.map((plan) => {
-          const isPro = plan.code === "pro";
-          const priceLabel = isPro
-            ? `${formatMoney(plan.monthlyPriceCents)} / mes${plan.yearlyPriceCents ? ` · ${formatMoney(plan.yearlyPriceCents)} / año` : ""}`
-            : "Sin costo";
+        <section className="pricing-grid">
+          {plans.map((plan) => {
+            const isPro = plan.code === "pro";
+            const priceLabel = isPro
+              ? `${formatMoney(plan.monthlyPriceCents)} / mes${plan.yearlyPriceCents ? ` · ${formatMoney(plan.yearlyPriceCents)} / año` : ""}`
+              : "Sin costo";
 
-          return (
-            <article key={plan.code} className="card stack" style={isPro ? { border: "2px solid var(--brand)" } : undefined}>
-              <h2>{plan.name}</h2>
-              <p>{plan.description}</p>
-              <strong>{priceLabel}</strong>
-              <ul>
-                {plan.bullets.map((bullet) => (
-                  <li key={bullet}>{bullet}</li>
-                ))}
-              </ul>
-              <Link className={isPro ? "btn-primary" : "btn-secondary"} href={isPro ? billingHref : "/signin"}>
-                {plan.ctaLabel ?? (isPro ? "Suscribirme" : "Comenzar gratis")}
-              </Link>
-            </article>
-          );
-        })}
-      </section>
+            return (
+              <article key={plan.code} className={`pricing-card stack${isPro ? " is-featured" : ""}`}>
+                <h2>{plan.name}</h2>
+                <p>{plan.description}</p>
+                <strong className="pricing-price">{priceLabel}</strong>
+                <ul>
+                  {plan.bullets.map((bullet) => (
+                    <li key={bullet}>
+                      <span className="material-symbols-outlined">check_circle</span>
+                      {bullet}
+                    </li>
+                  ))}
+                </ul>
+                <Link className={isPro ? "btn-primary" : "btn-secondary"} href={isPro ? billingHref : "/signin"}>
+                  {plan.ctaLabel ?? (isPro ? "Suscribirme" : "Comenzar gratis")}
+                </Link>
+              </article>
+            );
+          })}
+        </section>
 
-      <section className="card stack">
-        <h2>{copy["pricing.faq.title"]}</h2>
-        <p>{copy["pricing.faq.description"]}</p>
-      </section>
+        <section className="pricing-faq stack">
+          <h2>{copy["pricing.faq.title"]}</h2>
+          <p>{copy["pricing.faq.description"]}</p>
+        </section>
+      </div>
     </main>
     <PlatformFooter />
     </>

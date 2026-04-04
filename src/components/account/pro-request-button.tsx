@@ -31,7 +31,7 @@ export function ProRequestButton() {
   }
 
   return (
-    <div className="stack" style={{ gap: "0.5rem" }}>
+    <div className="stack stack-md">
       <button type="button" className="btn-primary" onClick={handleRequest} disabled={loading}>
         {loading ? "Enviando..." : "Solicitar Pro"}
       </button>

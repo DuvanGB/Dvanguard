@@ -19,7 +19,7 @@ export default async function TermsPage() {
       <div className="dashboard-container stack">
         <section className="card stack">
           <small className="dashboard-chip">Legal</small>
-          <div className="stack" style={{ gap: "0.35rem" }}>
+          <div className="stack stack-sm">
             <h1>{version.title}</h1>
             <p className="muted">
               Versión {version.version_label}

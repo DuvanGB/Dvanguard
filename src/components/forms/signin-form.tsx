@@ -61,7 +61,7 @@ export function SignInForm() {
         </div>
 
         <div className="auth-providers">
-          <button type="button" className="auth-oauth-btn" onClick={() => handleOAuth("google")}>
+          <button type="button" className="btn-secondary btn-full" onClick={() => handleOAuth("google")}>
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
               <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -70,7 +70,7 @@ export function SignInForm() {
             </svg>
             Continuar con Google
           </button>
-          <button type="button" className="auth-oauth-btn" onClick={() => handleOAuth("apple")}>
+          <button type="button" className="btn-secondary btn-full" onClick={() => handleOAuth("apple")}>
             <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
               <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C3.79 16.17 4.36 9.02 8.93 8.75c1.26.06 2.14.7 2.88.75.79-.16 2.01-.89 3.4-.76 1.57.14 2.76.82 3.5 2.1-3.18 1.9-2.43 6.1.62 7.28-.5 1.3-1.15 2.58-2.28 4.16zM12.03 8.67c-.15-2.23 1.66-4.07 3.74-4.25.28 2.53-2.31 4.4-3.74 4.25z" />
             </svg>

@@ -14,7 +14,7 @@ export default async function AdminSettingsPage() {
   ]);
 
   return (
-    <div className="stack" style={{ gap: "1rem" }}>
+    <div className="stack">
       <section className="card stack">
         <h2>Ajustes de plataforma</h2>
         <p className="muted">

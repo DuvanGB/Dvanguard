@@ -32,7 +32,7 @@ export function ReviewProRequestButton({ requestId, decision }: { requestId: str
   }
 
   return (
-    <div className="stack" style={{ gap: "0.35rem" }}>
+    <div className="stack stack-sm">
       <button className="btn-secondary" type="button" onClick={handleReview} disabled={loading}>
         {loading ? "Procesando..." : decision === "approved" ? "Aprobar" : "Rechazar"}
       </button>

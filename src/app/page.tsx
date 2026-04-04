@@ -27,7 +27,7 @@ export default async function HomePage() {
       }
     } catch {
       return (
-        <main className="container stack" style={{ paddingTop: "3rem" }}>
+        <main className="container stack page-with-topbar-sm">
           <h1>Error de configuración</h1>
           <p>Revisa el dominio conectado, `SUPABASE_SERVICE_ROLE_KEY` y el estado de publicación del sitio.</p>
         </main>
@@ -43,14 +43,14 @@ export default async function HomePage() {
       }
 
       return (
-        <main className="container stack" style={{ paddingTop: "3rem" }}>
+        <main className="container stack page-with-topbar-sm">
           <h1>Sitio no encontrado</h1>
           <p>No existe un sitio publicado para el subdominio `{subdomain}`.</p>
         </main>
       );
     } catch {
       return (
-        <main className="container stack" style={{ paddingTop: "3rem" }}>
+        <main className="container stack page-with-topbar-sm">
           <h1>Error de configuración</h1>
           <p>Revisa `SUPABASE_SERVICE_ROLE_KEY` y el estado de publicación del sitio.</p>
         </main>
@@ -193,9 +193,9 @@ export default async function HomePage() {
               <p>{t("home.bento.analytics.desc")}</p>
             </div>
             <div className="marketing-bento-analytics">
-              <div className="bar-track"><div className="bar-fill" style={{ width: "80%", background: "#9cf0ff" }} /></div>
-              <div className="bar-track"><div className="bar-fill" style={{ width: "65%", background: "#00daf3" }} /></div>
-              <div className="bar-track"><div className="bar-fill" style={{ width: "50%", background: "#00e3fd" }} /></div>
+              <div className="bar-track"><div className="bar-fill" style={{ width: "80%", background: "var(--brand-soft)" }} /></div>
+              <div className="bar-track"><div className="bar-fill" style={{ width: "65%", background: "var(--accent)" }} /></div>
+              <div className="bar-track"><div className="bar-fill" style={{ width: "50%", background: "var(--secondary-container)" }} /></div>
             </div>
           </div>
         </section>

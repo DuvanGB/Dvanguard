@@ -286,9 +286,9 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
   }
 
   return (
-    <div className="stack" style={{ gap: "1rem" }}>
+    <div className="stack">
       <section className="card stack">
-        <div className="stack" style={{ gap: "0.35rem" }}>
+        <div className="stack stack-sm">
           <h1>Billing</h1>
           <p className="muted">Wompi es ahora la base de pagos del producto: tarjeta para renovación y PSE/Nequi/banco para comprar tiempo Pro.</p>
         </div>
@@ -322,7 +322,7 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
 
         {message ? <small className="muted">{message}</small> : null}
         {notices.length ? (
-          <div className="stack" style={{ gap: "0.35rem" }}>
+          <div className="stack stack-sm">
             {notices.map((notice) => (
               <small key={notice} className="muted">
                 {notice}
@@ -333,7 +333,7 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
       </section>
 
       <section className="card stack">
-        <div className="stack" style={{ gap: "0.25rem" }}>
+        <div className="stack stack-xs">
           <h2>{copy["billing.legal.title"]}</h2>
           <p className="muted">{copy["billing.legal.description"]}</p>
         </div>
@@ -350,7 +350,7 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
             Acepto la <Link href="/privacy">Política de Privacidad</Link> (versión {summary.legal.privacyVersion}).
           </span>
         </label>
-        <div className="stack" style={{ gap: "0.35rem" }}>
+        <div className="stack stack-sm">
           {summary.wompiAcceptance.termsPermalink ? (
             <a href={summary.wompiAcceptance.termsPermalink} target="_blank" rel="noreferrer">
               Ver contrato comercial de Wompi
@@ -368,7 +368,7 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
       </section>
 
       <section className="card stack">
-        <div className="stack" style={{ gap: "0.25rem" }}>
+        <div className="stack stack-xs">
           <h2>{copy["billing.card.title"]}</h2>
           <p className="muted">{copy["billing.card.description"]}</p>
         </div>
@@ -400,7 +400,7 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
           </label>
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="flex-wrap">
           <button type="button" className="btn-primary" disabled={!cardReady || isPending} onClick={() => void handleCardAction("month")}>
             Pagar mensual con tarjeta
           </button>
@@ -408,7 +408,7 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
             Pagar anual con tarjeta
           </button>
           {summary.rail === "card_subscription" && summary.renewsAutomatically ? (
-            <button type="button" className="btn-secondary btn-danger-soft" onClick={() => void cancelAutoRenew()}>
+            <button type="button" className="btn-secondary btn-danger" onClick={() => void cancelAutoRenew()}>
               Cancelar renovación
             </button>
           ) : null}
@@ -426,7 +426,7 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
       </section>
 
       <section className="card stack">
-        <div className="stack" style={{ gap: "0.25rem" }}>
+        <div className="stack stack-xs">
           <h2>{copy["billing.manual.title"]}</h2>
           <p className="muted">{copy["billing.manual.description"]}</p>
         </div>
@@ -465,7 +465,7 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
           </label>
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="flex-wrap">
           <button type="button" className="btn-secondary" onClick={() => void handleManualCheckout("pse")}>
             Pagar con PSE
           </button>
@@ -491,7 +491,7 @@ export function BillingPageClient({ summary, transactions, notices, wompiPublicK
       ) : null}
 
       <section className="card stack">
-        <div className="stack" style={{ gap: "0.25rem" }}>
+        <div className="stack stack-xs">
           <h2>{copy["billing.transactions.title"]}</h2>
           <p className="muted">{copy["billing.transactions.description"]}</p>
         </div>

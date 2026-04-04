@@ -554,7 +554,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
   ];
 
   return (
-    <div className="stack" style={{ gap: "0" }}>
+    <div className="stack" style={{ gap: 0 }}>
       {/* ── Step Nav Pills ──────────────────────── */}
       <nav className="onboarding-step-nav">
         {stepLabels.map((s, i) => {
@@ -640,7 +640,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
               <button
                 key={prompt}
                 type="button"
-                className="onboarding-prompt-chip"
+                className="chip"
                 onClick={() => setRawInput((prev) => (prev ? `${prev}. ${prompt}` : prompt))}
               >
                 {prompt}
@@ -650,7 +650,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
 
           {/* CTA Row */}
           <div className="onboarding-cta-row">
-            <button type="button" className="onboarding-back-btn" onClick={() => router.back()}>
+            <button type="button" className="btn-ghost" onClick={() => router.back()}>
               <span className="material-symbols-outlined" style={{ fontSize: "1rem" }}>arrow_back</span>
               Volver
             </button>
@@ -943,7 +943,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
 
           {/* CTA Row */}
           <div className="onboarding-cta-row">
-            <button type="button" className="onboarding-back-btn" onClick={() => (generationMode === "regenerate" ? router.back() : setStep(1))}>
+            <button type="button" className="btn-ghost" onClick={() => (generationMode === "regenerate" ? router.back() : setStep(1))}>
               <span className="material-symbols-outlined" style={{ fontSize: "1rem" }}>arrow_back</span>
               Volver
             </button>
@@ -981,7 +981,7 @@ export function OnboardingWizard({ siteId, siteName, maxInputChars, voiceLocale,
           </p>
 
           {/* Progress */}
-          <div className="stack" style={{ gap: "0.75rem" }}>
+          <div className="stack stack-md">
             <div className="onboarding-progress-bar">
               <div className="onboarding-progress-bar-fill" style={{ width: `${Math.max(6, generationProgress)}%` }} />
             </div>

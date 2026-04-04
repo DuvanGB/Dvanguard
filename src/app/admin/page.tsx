@@ -52,9 +52,9 @@ export default async function AdminHomePage() {
   ]);
 
   return (
-    <div className="stack" style={{ gap: "1rem" }}>
+    <div className="stack">
       <section className="admin-hero-panel">
-        <div className="stack" style={{ gap: "0.35rem" }}>
+        <div className="stack stack-sm">
           <small className="admin-eyebrow">Vista 7 días</small>
           <h2>Dashboard Ejecutivo</h2>
           <p>Monitorea salud de plataforma, conversión y rendimiento de sitios publicados.</p>

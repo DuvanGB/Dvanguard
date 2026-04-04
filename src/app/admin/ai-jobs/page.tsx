@@ -40,7 +40,7 @@ export default async function AdminAiJobsPage({
     <section className="admin-page-stack">
       <article className="admin-panel stack">
       <div className="admin-panel-head">
-        <div className="stack" style={{ gap: "0.3rem" }}>
+        <div className="stack stack-sm">
           <h2>Jobs IA</h2>
           <p>Audita colas, fallos, latencia y reintentos del pipeline de generación.</p>
         </div>
@@ -80,7 +80,7 @@ export default async function AdminAiJobsPage({
           Hasta (ISO)
           <input name="to" defaultValue={params.to ?? ""} placeholder="2026-03-01T23:59:59.999Z" />
         </label>
-        <div style={{ display: "flex", alignItems: "end" }}>
+        <div className="flex-row" style={{ alignItems: "end" }}>
           <button className="btn-secondary" type="submit">
             Filtrar
           </button>
@@ -129,7 +129,7 @@ export default async function AdminAiJobsPage({
       )}
 
       <div className="admin-pagination-row">
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="flex-wrap">
           <Link
             className="btn-secondary"
             href={`/admin/ai-jobs?${buildQuery(params, Math.max(1, page - 1))}`}

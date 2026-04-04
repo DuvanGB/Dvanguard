@@ -21,7 +21,7 @@ export default async function TrashPage() {
     <main className="dashboard-shell">
       <div className="dashboard-container stack">
         <section className="dashboard-hero">
-          <div className="stack" style={{ gap: "0.35rem" }}>
+          <div className="stack stack-sm">
             <small className="dashboard-chip">Papelera</small>
             <h1>Sitios eliminados</h1>
             <p>Durante 7 días puedes restaurar un sitio o eliminarlo permanentemente si ya no lo necesitas.</p>
@@ -44,26 +44,41 @@ export default async function TrashPage() {
             <div className="dashboard-sites-grid">
               {trashedSites.map((site) => (
                 <article key={site.site_id} className="dashboard-site-card dashboard-site-card-trash">
-                  <header className="dashboard-site-card-head">
-                    <div className="stack" style={{ gap: "0.2rem" }}>
-                      <strong>{site.name}</strong>
-                      <small>{site.subdomain}</small>
+                  <div className="trash-card-header">
+                    <span className="material-symbols-outlined trash-card-header-icon">delete_sweep</span>
+                    <div className="trash-card-countdown">
+                      <span className="material-symbols-outlined" style={{ fontSize: "1rem" }}>schedule</span>
+                      {site.days_remaining} días restantes
                     </div>
-                    <div className="dashboard-site-badges">
-                      <span className="dashboard-badge">{site.site_type}</span>
-                      <span className="dashboard-badge dashboard-badge-trash">en papelera</span>
-                    </div>
-                  </header>
-
-                  <div className="dashboard-site-metrics">
-                    <span>Eliminado: {new Date(site.deleted_at).toLocaleDateString()}</span>
-                    <span>Purga automática: {new Date(site.purge_at).toLocaleDateString()}</span>
-                    <span>Quedan: {site.days_remaining} días</span>
                   </div>
 
-                  <div className="dashboard-site-actions">
-                    <RestoreSiteButton siteId={site.site_id} />
-                    <PurgeSiteButton siteId={site.site_id} siteName={site.name} />
+                  <div className="dashboard-site-card-body">
+                    <div className="dashboard-site-card-head">
+                      <div className="stack stack-xs">
+                        <strong>{site.name}</strong>
+                        <small>{site.subdomain}</small>
+                      </div>
+                      <div className="dashboard-site-badges">
+                        <span className="dashboard-badge">{site.site_type}</span>
+                        <span className="dashboard-badge dashboard-badge-trash">en papelera</span>
+                      </div>
+                    </div>
+
+                    <div className="trash-card-dates">
+                      <div className="trash-card-date">
+                        <small>Eliminado</small>
+                        <span>{new Date(site.deleted_at).toLocaleDateString()}</span>
+                      </div>
+                      <div className="trash-card-date">
+                        <small>Purga automática</small>
+                        <span>{new Date(site.purge_at).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+
+                    <div className="trash-card-actions">
+                      <RestoreSiteButton siteId={site.site_id} />
+                      <PurgeSiteButton siteId={site.site_id} siteName={site.name} />
+                    </div>
                   </div>
                 </article>
               ))}

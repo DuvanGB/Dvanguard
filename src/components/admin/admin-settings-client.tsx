@@ -200,8 +200,8 @@ export function AdminSettingsClient({
   }
 
   return (
-    <div className="stack" style={{ gap: "1rem" }}>
-      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+    <div className="stack">
+      <div className="flex-wrap">
         {[
           ["legal", "Legal"],
           ["billing", "Billing"],
@@ -282,7 +282,7 @@ export function AdminSettingsClient({
       ) : null}
 
       {activeTab === "pricing" ? (
-        <section className="stack" style={{ gap: "1rem" }}>
+        <section className="stack">
           {plans.map((plan) => (
             <article key={plan.code} className="card stack">
               <h3>{plan.code.toUpperCase()}</h3>
@@ -351,14 +351,14 @@ export function AdminSettingsClient({
       ) : null}
 
       {activeTab === "legal" ? (
-        <section className="stack" style={{ gap: "1rem" }}>
+        <section className="stack">
           {legalDocuments.map((document) => {
             const versions = legalVersions.filter((version) => version.document_id === document.id);
             const latest = versions[0] ?? null;
 
             return (
               <article key={document.id} className="card stack">
-                <div className="stack" style={{ gap: "0.35rem" }}>
+                <div className="stack stack-sm">
                   <h3>{document.title}</h3>
                   <p className="muted">{document.description}</p>
                 </div>

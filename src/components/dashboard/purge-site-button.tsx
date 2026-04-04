@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
 type Props = {
@@ -41,11 +42,11 @@ export function PurgeSiteButton({ siteId, siteName }: Props) {
 
   return (
     <>
-      <button type="button" className="btn-secondary btn-danger-soft" onClick={() => setOpen(true)}>
+      <button type="button" className="btn-secondary btn-danger" onClick={() => setOpen(true)}>
         Eliminar permanentemente
       </button>
 
-      {open ? (
+      {open ? createPortal(
         <div className="danger-modal-overlay" role="dialog" aria-modal="true" aria-label={`Eliminar definitivamente ${siteName}`}>
           <div className="danger-modal-card">
             <div className="stack">
@@ -55,7 +56,7 @@ export function PurgeSiteButton({ siteId, siteName }: Props) {
               </p>
             </div>
 
-            <label className="stack" style={{ gap: "0.35rem" }}>
+            <label className="stack stack-sm">
               <span>Nombre del sitio</span>
               <input
                 value={confirmationName}
@@ -85,12 +86,13 @@ export function PurgeSiteButton({ siteId, siteName }: Props) {
               >
                 Cancelar
               </button>
-              <button type="button" className="btn-danger-solid" onClick={() => void purge()} disabled={!canDelete || isPending}>
+              <button type="button" className="btn-primary btn-danger" onClick={() => void purge()} disabled={!canDelete || isPending}>
                 {isPending ? "Eliminando..." : "Eliminar definitivo"}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </>
   );

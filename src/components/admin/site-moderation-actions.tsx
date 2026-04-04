@@ -38,8 +38,8 @@ export function SiteModerationActions({ siteId, status }: Props) {
   }
 
   return (
-    <div className="stack" style={{ gap: "0.35rem" }}>
-      <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+    <div className="stack stack-sm">
+      <div className="flex-wrap flex-row-sm">
         <AdminSitePublicationToggle siteId={siteId} enabled={status !== "archived"} />
         <button type="button" className="btn-secondary btn-danger-soft" onClick={runDelete} disabled={Boolean(loadingAction)}>
           {loadingAction === "delete" ? "Eliminando..." : "Eliminar"}

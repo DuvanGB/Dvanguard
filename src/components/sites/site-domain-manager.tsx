@@ -107,13 +107,13 @@ export function SiteDomainManager({ siteId, initialDomains, compact = false }: P
   }
 
   return (
-    <div className="stack" style={{ gap: compact ? "0.5rem" : "0.75rem" }}>
-      <div className="stack" style={{ gap: "0.45rem" }}>
+    <div className={`stack ${compact ? "stack-md" : "stack-md"}`}>
+      <div className="stack stack-sm">
         <strong>Dominio propio</strong>
         <small className="muted">
           {activeDomain ? "Dominio propio conectado y activo." : "Puedes conectar tu dominio cuando quieras desde aquí."}
         </small>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="flex-wrap">
           <input
             value={hostname}
             onChange={(event) => setHostname(event.target.value)}
@@ -127,7 +127,7 @@ export function SiteDomainManager({ siteId, initialDomains, compact = false }: P
       </div>
 
       {domains.length ? (
-        <div className="stack" style={{ gap: "0.5rem" }}>
+        <div className="stack stack-md">
           {domains.map((domain) => {
             const verificationEnvelope = domain.verification_json as {
               domain?: { verification?: Array<Record<string, unknown>> };
@@ -136,15 +136,15 @@ export function SiteDomainManager({ siteId, initialDomains, compact = false }: P
 
             return (
               <article key={domain.id} className="dashboard-site-card" style={{ padding: compact ? "0.85rem" : "1rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
-                  <div className="stack" style={{ gap: "0.2rem" }}>
+                <div className="flex-between" style={{ flexWrap: "wrap", gap: "0.75rem" }}>
+                  <div className="stack stack-xs">
                     <strong>{domain.hostname}</strong>
                     <small className="muted">
                       Estado: {domain.status}
                       {domain.is_primary ? " · principal" : ""}
                     </small>
                   </div>
-                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <div className="flex-wrap">
                     {domain.status !== "active" ? (
                       <button type="button" className="btn-secondary" onClick={() => void verifyDomain(domain.id)} disabled={loading}>
                         Verificar
@@ -162,7 +162,7 @@ export function SiteDomainManager({ siteId, initialDomains, compact = false }: P
                 </div>
 
                 {verification.length ? (
-                  <div className="stack" style={{ gap: "0.25rem", marginTop: "0.75rem" }}>
+                  <div className="stack stack-xs" style={{ marginTop: "0.75rem" }}>
                     <small className="muted">Configuración DNS sugerida</small>
                     {verification.map((item, index) => (
                       <code key={`${domain.id}-${index}`} style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>

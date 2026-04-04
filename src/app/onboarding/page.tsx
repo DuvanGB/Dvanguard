@@ -69,8 +69,8 @@ export default async function OnboardingPage({
     if (siteList.length > 1) {
       return (
         <>
-        <PlatformNav isAuthenticated />
-        <main className="onboarding-shell" style={{ paddingTop: "5.5rem", paddingBottom: "3rem" }}>
+        <PlatformNav isAuthenticated isStatic />
+        <main className="onboarding-shell" style={{ paddingBottom: "3rem" }}>
           <OnboardingSiteSelector sites={siteList} />
         </main>
         <PlatformFooter />
@@ -80,8 +80,8 @@ export default async function OnboardingPage({
 
     return (
       <>
-      <PlatformNav isAuthenticated />
-      <main className="onboarding-shell" style={{ paddingTop: "5.5rem", paddingBottom: "3rem" }}>
+      <PlatformNav isAuthenticated isStatic />
+      <main className="onboarding-shell" style={{ paddingBottom: "3rem" }}>
         <h1>Onboarding IA</h1>
         <p>No tienes sitios creados todavía. Crea uno para iniciar este flujo.</p>
         <Link className="btn-secondary" href="/dashboard">
@@ -104,8 +104,8 @@ export default async function OnboardingPage({
   if (!site) {
     return (
       <>
-      <PlatformNav isAuthenticated />
-      <main className="onboarding-shell" style={{ paddingTop: "5.5rem", paddingBottom: "3rem" }}>
+      <PlatformNav isAuthenticated isStatic />
+      <main className="onboarding-shell" style={{ paddingBottom: "3rem" }}>
         <h1>Onboarding IA</h1>
         <p>No se encontró el sitio solicitado.</p>
       </main>
@@ -145,8 +145,8 @@ export default async function OnboardingPage({
 
   return (
     <>
-    <PlatformNav isAuthenticated />
-    <main className="onboarding-shell" style={{ paddingTop: "5.5rem", paddingBottom: "3rem" }}>
+    <PlatformNav isAuthenticated isStatic />
+    <main className="onboarding-shell" style={{ paddingBottom: "3rem" }}>
       <OnboardingWizard
         siteId={site.id}
         siteName={site.name}

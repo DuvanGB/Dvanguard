@@ -31,7 +31,7 @@ export function RetryJobButton({ jobId, disabled }: { jobId: string; disabled?: 
   }
 
   return (
-    <div className="stack" style={{ gap: "0.25rem" }}>
+    <div className="stack stack-xs">
       <button type="button" className="btn-secondary" onClick={handleRetry} disabled={disabled || loading}>
         {loading ? "Reintentando..." : "Reintentar"}
       </button>

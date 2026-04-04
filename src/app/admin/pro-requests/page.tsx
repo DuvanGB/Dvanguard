@@ -32,7 +32,7 @@ export default async function AdminProRequestsPage({
     <section className="admin-page-stack">
       <article className="admin-panel stack">
       <div className="admin-panel-head">
-        <div className="stack" style={{ gap: "0.3rem" }}>
+        <div className="stack stack-sm">
           <h2>Solicitudes Pro</h2>
           <p>Revisa solicitudes manuales de upgrade y su estado operativo.</p>
         </div>
@@ -55,7 +55,7 @@ export default async function AdminProRequestsPage({
             <option value="rejected">rejected</option>
           </select>
         </label>
-        <div style={{ display: "flex", alignItems: "end" }}>
+        <div className="flex-row" style={{ alignItems: "end" }}>
           <button className="btn-secondary" type="submit">
             Filtrar
           </button>
@@ -87,7 +87,7 @@ export default async function AdminProRequestsPage({
                 <td>{item.reviewed_at ? new Date(item.reviewed_at).toLocaleString() : "-"}</td>
                 <td>
                   {item.status === "pending" ? (
-                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <div className="flex-row">
                       <ReviewProRequestButton requestId={item.id} decision="approved" />
                       <ReviewProRequestButton requestId={item.id} decision="rejected" />
                     </div>
@@ -105,7 +105,7 @@ export default async function AdminProRequestsPage({
       )}
 
       <div className="admin-pagination-row">
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="flex-wrap">
           <Link
             className="btn-secondary"
             href={`/admin/pro-requests?${buildQuery(params, Math.max(1, page - 1))}`}

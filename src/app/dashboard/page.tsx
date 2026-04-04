@@ -95,8 +95,8 @@ export default async function DashboardPage() {
         </section>
 
         {/* ── KPI Strip ────────────────────────────── */}
-        <section className="stack" style={{ gap: "0.75rem" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+        <section className="stack stack-md">
+          <div className="flex-between">
             <h2 style={{ margin: 0, fontSize: "1.15rem", color: "var(--text)" }}>{t("dash.kpi.section")}</h2>
             <small style={{ fontSize: "0.7rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--secondary)" }}>{t("dash.kpi.period")}</small>
           </div>
@@ -210,7 +210,7 @@ export default async function DashboardPage() {
             </div>
             <h3>{t("dash.ia_promo.title")}</h3>
             <p>{t("dash.ia_promo.desc")}</p>
-            <Link href="/onboarding" className="btn-accent">
+            <Link href="/onboarding" className="btn-primary">
               {t("dash.ia_promo.cta")} <span className="material-symbols-outlined" style={{ fontSize: "0.95rem" }}>arrow_forward</span>
             </Link>
           </div>
@@ -257,7 +257,7 @@ export default async function DashboardPage() {
                     <div className="dashboard-site-card-body">
                       {/* Name + subdomain + toggle */}
                       <div className="dashboard-site-card-head">
-                        <div className="stack" style={{ gap: "0.15rem" }}>
+                        <div className="stack stack-xs">
                           <strong>{site.name}</strong>
                           <small>{site.subdomain}</small>
                         </div>

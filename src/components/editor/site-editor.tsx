@@ -1268,7 +1268,7 @@ function addSection(type: SiteSectionV3["type"]) {
               {versionsOpen ? (
                 <div className="editor-version-popover">
                   <div className="editor-version-layout">
-                    <div className="stack editor-version-list-column" style={{ gap: "0.35rem" }}>
+                    <div className="stack stack-sm editor-version-list-column">
                       <strong>Historial de versiones</strong>
                       <small className="muted">Hover o toca una versión para ver preview. Tócala de nuevo para cargarla.</small>
                       {versionsLoading ? <small className="muted">Cargando versiones...</small> : null}

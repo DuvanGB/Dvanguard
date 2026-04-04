@@ -32,7 +32,7 @@ export default async function AdminUsersPage({
     <section className="admin-page-stack">
       <article className="admin-panel stack">
       <div className="admin-panel-head">
-        <div className="stack" style={{ gap: "0.3rem" }}>
+        <div className="stack stack-sm">
           <h2>Usuarios</h2>
           <p>Soporte de cuentas, planes, billing y actividad reciente.</p>
         </div>
@@ -50,7 +50,7 @@ export default async function AdminUsersPage({
           Buscar por email
           <input name="search" defaultValue={params.search ?? ""} />
         </label>
-        <div style={{ display: "flex", alignItems: "end" }}>
+        <div className="flex-row" style={{ alignItems: "end" }}>
           <button className="btn-secondary" type="submit">
             Filtrar
           </button>
@@ -104,7 +104,7 @@ export default async function AdminUsersPage({
       )}
 
       <div className="admin-pagination-row">
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="flex-wrap">
           <Link
             className="btn-secondary"
             href={`/admin/users?${buildQuery(params, Math.max(1, page - 1))}`}

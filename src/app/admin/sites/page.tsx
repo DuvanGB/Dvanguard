@@ -36,7 +36,7 @@ export default async function AdminSitesPage({
     <section className="admin-page-stack">
       <article className="admin-panel stack">
         <div className="admin-panel-head">
-          <div className="stack" style={{ gap: "0.3rem" }}>
+          <div className="stack stack-sm">
             <h2>Moderación de sitios</h2>
             <p>Supervisa estado, owner, dominios y rendimiento reciente sin salir del módulo admin.</p>
           </div>
@@ -71,7 +71,7 @@ export default async function AdminSitesPage({
             Owner email
             <input name="owner" defaultValue={params.owner ?? ""} />
           </label>
-          <div style={{ display: "flex", alignItems: "end" }}>
+          <div className="flex-row" style={{ alignItems: "end" }}>
             <button className="btn-secondary" type="submit">
               Filtrar
             </button>
@@ -85,7 +85,7 @@ export default async function AdminSitesPage({
             {result.items.map((item) => (
               <article key={item.id} className="admin-site-card stack">
                 <div className="admin-site-card-head">
-                  <div className="stack" style={{ gap: "0.25rem" }}>
+                  <div className="stack stack-xs">
                     <strong>{item.name}</strong>
                     <small className="muted">
                       {item.subdomain}
@@ -117,7 +117,7 @@ export default async function AdminSitesPage({
           </div>
 
           <div className="admin-pagination-row">
-            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <div className="flex-wrap">
               <Link
                 className="btn-secondary"
                 href={`/admin/sites?${buildQuery(params, Math.max(1, page - 1))}`}

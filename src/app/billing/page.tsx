@@ -60,7 +60,7 @@ export default async function BillingPage({
     <main className="dashboard-shell">
       <div className="dashboard-container stack">
         <section className="dashboard-hero">
-          <div className="stack" style={{ gap: "0.35rem" }}>
+          <div className="stack stack-sm">
             <small className="dashboard-chip">{copy["billing.hero.eyebrow"]}</small>
             <h1>{copy["billing.hero.title"]}</h1>
             <p>{copy["billing.hero.description"]}</p>

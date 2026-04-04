@@ -33,7 +33,7 @@ export function ChangePlanSelect({ userId, currentPlan }: { userId: string; curr
   }
 
   return (
-    <div className="stack" style={{ gap: "0.35rem" }}>
+    <div className="stack stack-sm">
       <select value={plan} onChange={(event) => setPlan(event.target.value)}>
         <option value="free">free</option>
         <option value="pro">pro</option>

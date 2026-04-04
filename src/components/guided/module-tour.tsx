@@ -92,7 +92,7 @@ export function ModuleTour({ module, title, description, steps, buttonLabel = "V
     <>
       <button
         type="button"
-        className={compact ? "tour-trigger-inline" : "tour-trigger"}
+        className={compact ? "btn-secondary btn-pill btn-sm" : "btn-secondary btn-pill"}
         onClick={() => {
           setActiveStep(0);
           setOpen(true);

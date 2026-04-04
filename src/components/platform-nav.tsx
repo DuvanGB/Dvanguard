@@ -10,13 +10,13 @@ const navLinks = [
   { href: "/pricing", label: "Planes", icon: "payments" },
 ];
 
-export function PlatformNav({ isAuthenticated = false }: { isAuthenticated?: boolean }) {
+export function PlatformNav({ isAuthenticated = false, isStatic = false }: { isAuthenticated?: boolean; isStatic?: boolean }) {
   const pathname = usePathname();
 
   return (
     <>
       {/* Desktop / Tablet top bar */}
-      <header className="platform-topbar glass-panel">
+      <header className={`platform-topbar glass-panel${isStatic ? " platform-topbar-static" : ""}`}>
         <nav className="platform-topbar-inner">
           <div className="platform-topbar-left">
             <Link href="/" className="platform-logo">
